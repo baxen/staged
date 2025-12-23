@@ -5,9 +5,10 @@
     diff: FileDiff | null;
     onStageFile?: () => void;
     onDiscardFile?: () => void;
+    stageButtonLabel?: string;
   }
 
-  let { diff, onStageFile, onDiscardFile }: Props = $props();
+  let { diff, onStageFile, onDiscardFile, stageButtonLabel = 'Stage' }: Props = $props();
 
   let leftPane: HTMLDivElement | null = $state(null);
   let rightPane: HTMLDivElement | null = $state(null);
@@ -57,7 +58,7 @@
       <span class="file-path">{diff.path}</span>
       <div class="diff-actions">
         {#if onStageFile}
-          <button class="action-btn" onclick={onStageFile} title="Stage file">Stage</button>
+          <button class="action-btn" onclick={onStageFile} title="{stageButtonLabel} file">{stageButtonLabel}</button>
         {/if}
         {#if onDiscardFile}
           <button class="action-btn danger" onclick={onDiscardFile} title="Discard changes">Discard</button>
@@ -78,7 +79,7 @@
       </span>
       <div class="diff-actions">
         {#if onStageFile}
-          <button class="action-btn" onclick={onStageFile} title="Stage file">Stage</button>
+          <button class="action-btn" onclick={onStageFile} title="{stageButtonLabel} file">{stageButtonLabel}</button>
         {/if}
         {#if onDiscardFile}
           <button class="action-btn danger" onclick={onDiscardFile} title="Discard changes">Discard</button>

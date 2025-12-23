@@ -2,7 +2,7 @@
   import Sidebar, { type FileCategory } from './lib/Sidebar.svelte'
   import DiffViewer from './lib/DiffViewer.svelte'
   import CommitPanel from './lib/CommitPanel.svelte'
-  import { getFileDiff, getUntrackedFileDiff } from './lib/services/git'
+  import { getFileDiff, getUntrackedFileDiff, stageFile, unstageFile, discardFile } from './lib/services/git'
   import type { FileDiff } from './lib/types'
 
   let selectedFile: string | null = $state(null);
@@ -10,10 +10,15 @@
   let currentDiff: FileDiff | null = $state(null);
   let diffLoading = $state(false);
   let diffError: string | null = $state(null);
+  let sidebarRef: Sidebar | null = $state(null);
 
   async function handleFileSelect(path: string, category: FileCategory) {
     selectedFile = path;
     selectedCategory = category;
+    await loadDiff(path, category);
+  }
+
+  async function loadDiff(path: string, category: FileCategory) {
     diffLoading = true;
     diffError = null;
     currentDiff = null;
@@ -31,12 +36,61 @@
       diffLoading = false;
     }
   }
+
+  async function handleStageFile() {
+    if (!selectedFile || !selectedCategory) return;
+
+    try {
+      if (selectedCategory === 'staged') {
+        // Already staged - unstage it
+        await unstageFile(selectedFile);
+      } else {
+        // Stage the file
+        await stageFile(selectedFile);
+      }
+      // Refresh sidebar and clear diff (file moved to different category)
+      await sidebarRef?.loadStatus();
+      currentDiff = null;
+      selectedFile = null;
+      selectedCategory = null;
+    } catch (e) {
+      console.error('Failed to stage/unstage file:', e);
+      diffError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function handleDiscardFile() {
+    if (!selectedFile || !selectedCategory) return;
+
+    // Confirm before discarding
+    const confirmed = window.confirm(`Discard all changes to ${selectedFile}? This cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      await discardFile(selectedFile);
+      // Refresh sidebar and clear diff
+      await sidebarRef?.loadStatus();
+      currentDiff = null;
+      selectedFile = null;
+      selectedCategory = null;
+    } catch (e) {
+      console.error('Failed to discard file:', e);
+      diffError = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // Determine button labels based on current state
+  function getStageButtonLabel(): string {
+    if (selectedCategory === 'staged') return 'Unstage';
+    return 'Stage';
+  }
 </script>
 
 <main>
   <div class="app-container">
     <aside class="sidebar">
       <Sidebar 
+        bind:this={sidebarRef}
         onFileSelect={handleFileSelect}
         selectedFile={selectedFile}
       />
@@ -50,7 +104,12 @@
           <p class="error-message">{diffError}</p>
         </div>
       {:else}
-        <DiffViewer diff={currentDiff} />
+        <DiffViewer 
+          diff={currentDiff} 
+          onStageFile={handleStageFile}
+          onDiscardFile={selectedCategory !== 'staged' ? handleDiscardFile : undefined}
+          stageButtonLabel={getStageButtonLabel()}
+        />
       {/if}
     </section>
   </div>

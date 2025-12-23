@@ -30,3 +30,38 @@ export async function getUntrackedFileDiff(
     filePath,
   });
 }
+
+// Staging operations
+
+export async function stageFile(filePath: string, repoPath?: string): Promise<void> {
+  return invoke('stage_file', {
+    repoPath: repoPath ?? null,
+    filePath,
+  });
+}
+
+export async function unstageFile(filePath: string, repoPath?: string): Promise<void> {
+  return invoke('unstage_file', {
+    repoPath: repoPath ?? null,
+    filePath,
+  });
+}
+
+export async function discardFile(filePath: string, repoPath?: string): Promise<void> {
+  return invoke('discard_file', {
+    repoPath: repoPath ?? null,
+    filePath,
+  });
+}
+
+export async function stageAll(repoPath?: string): Promise<void> {
+  return invoke('stage_all', {
+    repoPath: repoPath ?? null,
+  });
+}
+
+export async function unstageAll(repoPath?: string): Promise<void> {
+  return invoke('unstage_all', {
+    repoPath: repoPath ?? null,
+  });
+}
