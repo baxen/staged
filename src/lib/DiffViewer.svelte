@@ -16,10 +16,14 @@
 
   function getLineClass(type: string): string {
     switch (type) {
-      case 'added': return 'line-added';
-      case 'removed': return 'line-removed';
-      case 'empty': return 'line-empty';
-      default: return 'line-context';
+      case 'added':
+        return 'line-added';
+      case 'removed':
+        return 'line-removed';
+      case 'empty':
+        return 'line-empty';
+      default:
+        return 'line-context';
     }
   }
 
@@ -58,10 +62,14 @@
       <span class="file-path">{diff.path}</span>
       <div class="diff-actions">
         {#if onStageFile}
-          <button class="action-btn" onclick={onStageFile} title="{stageButtonLabel} file">{stageButtonLabel}</button>
+          <button class="action-btn" onclick={onStageFile} title="{stageButtonLabel} file"
+            >{stageButtonLabel}</button
+          >
         {/if}
         {#if onDiscardFile}
-          <button class="action-btn danger" onclick={onDiscardFile} title="Discard changes">Discard</button>
+          <button class="action-btn danger" onclick={onDiscardFile} title="Discard changes"
+            >Discard</button
+          >
         {/if}
       </div>
     </div>
@@ -79,10 +87,14 @@
       </span>
       <div class="diff-actions">
         {#if onStageFile}
-          <button class="action-btn" onclick={onStageFile} title="{stageButtonLabel} file">{stageButtonLabel}</button>
+          <button class="action-btn" onclick={onStageFile} title="{stageButtonLabel} file"
+            >{stageButtonLabel}</button
+          >
         {/if}
         {#if onDiscardFile}
-          <button class="action-btn danger" onclick={onDiscardFile} title="Discard changes">Discard</button>
+          <button class="action-btn danger" onclick={onDiscardFile} title="Discard changes"
+            >Discard</button
+          >
         {/if}
       </div>
     </div>
@@ -129,7 +141,8 @@
     overflow: hidden;
   }
 
-  .empty-state, .binary-notice {
+  .empty-state,
+  .binary-notice {
     display: flex;
     align-items: center;
     justify-content: center;

@@ -52,14 +52,10 @@
     </div>
 
     <div class="commit-actions">
-      <button 
-        class="btn btn-primary" 
-        onclick={handleCommit}
-        disabled={!commitMessage.trim()}
-      >
+      <button class="btn btn-primary" onclick={handleCommit} disabled={!commitMessage.trim()}>
         Commit
       </button>
-      <button 
+      <button
         class="btn btn-secondary"
         onclick={handleCommitAndPush}
         disabled={!commitMessage.trim()}

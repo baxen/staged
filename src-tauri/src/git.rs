@@ -97,20 +97,18 @@ fn status_to_string(status: Status, staged: bool) -> &'static str {
         } else {
             "unknown"
         }
+    } else if status.contains(Status::WT_NEW) {
+        "untracked"
+    } else if status.contains(Status::WT_MODIFIED) {
+        "modified"
+    } else if status.contains(Status::WT_DELETED) {
+        "deleted"
+    } else if status.contains(Status::WT_RENAMED) {
+        "renamed"
+    } else if status.contains(Status::WT_TYPECHANGE) {
+        "typechange"
     } else {
-        if status.contains(Status::WT_NEW) {
-            "untracked"
-        } else if status.contains(Status::WT_MODIFIED) {
-            "modified"
-        } else if status.contains(Status::WT_DELETED) {
-            "deleted"
-        } else if status.contains(Status::WT_RENAMED) {
-            "renamed"
-        } else if status.contains(Status::WT_TYPECHANGE) {
-            "typechange"
-        } else {
-            "unknown"
-        }
+        "unknown"
     }
 }
 
@@ -158,10 +156,7 @@ pub fn get_status(repo_path: Option<&str>) -> Result<GitStatus, GitError> {
 
         // Check for unstaged changes (working tree)
         if status.intersects(
-            Status::WT_MODIFIED
-                | Status::WT_DELETED
-                | Status::WT_RENAMED
-                | Status::WT_TYPECHANGE,
+            Status::WT_MODIFIED | Status::WT_DELETED | Status::WT_RENAMED | Status::WT_TYPECHANGE,
         ) {
             unstaged.push(FileStatus {
                 path: path.clone(),
@@ -202,10 +197,7 @@ pub fn get_file_diff(
 
     let diff = if staged {
         // Staged: compare HEAD to index
-        let head_tree = repo
-            .head()
-            .ok()
-            .and_then(|h| h.peel_to_tree().ok());
+        let head_tree = repo.head().ok().and_then(|h| h.peel_to_tree().ok());
 
         repo.diff_tree_to_index(head_tree.as_ref(), None, Some(&mut diff_opts))?
     } else {
@@ -217,7 +209,10 @@ pub fn get_file_diff(
 }
 
 /// Get diff for an untracked file (show entire file as added)
-pub fn get_untracked_file_diff(repo_path: Option<&str>, file_path: &str) -> Result<FileDiff, GitError> {
+pub fn get_untracked_file_diff(
+    repo_path: Option<&str>,
+    file_path: &str,
+) -> Result<FileDiff, GitError> {
     let repo = find_repo(repo_path)?;
     let workdir = repo.workdir().ok_or_else(|| GitError {
         message: "Repository has no working directory".to_string(),
@@ -528,7 +523,7 @@ pub fn discard_file(repo_path: Option<&str>, file_path: &str) -> Result<(), GitE
             std::fs::write(&full_path, content).map_err(|e| GitError {
                 message: format!("Failed to write file: {}", e),
             })?;
-            
+
             // Also need to update the file's mode/permissions if needed
             #[cfg(unix)]
             {
@@ -537,11 +532,14 @@ pub fn discard_file(repo_path: Option<&str>, file_path: &str) -> Result<(), GitE
                 if mode & 0o111 != 0 {
                     // File should be executable
                     let mut perms = std::fs::metadata(&full_path)
-                        .map_err(|e| GitError { message: format!("Failed to get metadata: {}", e) })?
+                        .map_err(|e| GitError {
+                            message: format!("Failed to get metadata: {}", e),
+                        })?
                         .permissions();
                     perms.set_mode(0o755);
-                    std::fs::set_permissions(&full_path, perms)
-                        .map_err(|e| GitError { message: format!("Failed to set permissions: {}", e) })?;
+                    std::fs::set_permissions(&full_path, perms).map_err(|e| GitError {
+                        message: format!("Failed to set permissions: {}", e),
+                    })?;
                 }
             }
         }

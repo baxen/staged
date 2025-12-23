@@ -12,17 +12,35 @@ build:
 frontend:
     npm run dev
 
-# Check Rust code
-check:
-    cd src-tauri && cargo check
+# ============================================================================
+# Code Quality
+# ============================================================================
 
-# Format Rust code
+# Format all code (Rust + TypeScript/Svelte)
 fmt:
     cd src-tauri && cargo fmt
+    npx prettier --write "src/**/*.{ts,svelte,css,html}"
 
-# Run Svelte type checking
+# Check formatting without modifying files
+fmt-check:
+    cd src-tauri && cargo fmt --check
+    npx prettier --check "src/**/*.{ts,svelte,css,html}"
+
+# Lint Rust code
+lint:
+    cd src-tauri && cargo clippy -- -D warnings
+
+# Type check everything
 typecheck:
     npm run check
+    cd src-tauri && cargo check
+
+# Run all checks (format, lint, typecheck) - use before submitting work
+check-all: fmt-check lint typecheck
+
+# ============================================================================
+# Setup & Maintenance
+# ============================================================================
 
 # Install dependencies
 install:

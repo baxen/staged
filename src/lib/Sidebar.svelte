@@ -48,23 +48,35 @@
 
   function getStatusIcon(status: string): string {
     switch (status) {
-      case 'modified': return 'M';
-      case 'added': return 'A';
-      case 'deleted': return 'D';
-      case 'renamed': return 'R';
-      case 'untracked': return '?';
-      default: return '•';
+      case 'modified':
+        return 'M';
+      case 'added':
+        return 'A';
+      case 'deleted':
+        return 'D';
+      case 'renamed':
+        return 'R';
+      case 'untracked':
+        return '?';
+      default:
+        return '•';
     }
   }
 
   function getStatusColor(status: string): string {
     switch (status) {
-      case 'modified': return '#e2c08d';
-      case 'added': return '#89d185';
-      case 'deleted': return '#f14c4c';
-      case 'renamed': return '#4fc1ff';
-      case 'untracked': return '#888';
-      default: return '#d4d4d4';
+      case 'modified':
+        return '#e2c08d';
+      case 'added':
+        return '#89d185';
+      case 'deleted':
+        return '#f14c4c';
+      case 'renamed':
+        return '#4fc1ff';
+      case 'untracked':
+        return '#888';
+      default:
+        return '#d4d4d4';
     }
   }
 
@@ -104,12 +116,14 @@
           </div>
           <ul class="file-list">
             {#each gitStatus.staged as file}
-              <li 
-                class="file-item" 
+              <li
+                class="file-item"
                 class:selected={selectedFile === file.path}
                 onclick={() => selectFile(file.path, 'staged')}
               >
-                <span class="status-icon" style="color: {getStatusColor(file.status)}">{getStatusIcon(file.status)}</span>
+                <span class="status-icon" style="color: {getStatusColor(file.status)}"
+                  >{getStatusIcon(file.status)}</span
+                >
                 <span class="file-path">
                   <span class="file-dir">{getFileDir(file.path)}</span>
                   <span class="file-name">{getFileName(file.path)}</span>
@@ -128,12 +142,14 @@
           </div>
           <ul class="file-list">
             {#each gitStatus.unstaged as file}
-              <li 
+              <li
                 class="file-item"
                 class:selected={selectedFile === file.path}
                 onclick={() => selectFile(file.path, 'unstaged')}
               >
-                <span class="status-icon" style="color: {getStatusColor(file.status)}">{getStatusIcon(file.status)}</span>
+                <span class="status-icon" style="color: {getStatusColor(file.status)}"
+                  >{getStatusIcon(file.status)}</span
+                >
                 <span class="file-path">
                   <span class="file-dir">{getFileDir(file.path)}</span>
                   <span class="file-name">{getFileName(file.path)}</span>
@@ -152,12 +168,14 @@
           </div>
           <ul class="file-list">
             {#each gitStatus.untracked as file}
-              <li 
+              <li
                 class="file-item"
                 class:selected={selectedFile === file.path}
                 onclick={() => selectFile(file.path, 'untracked')}
               >
-                <span class="status-icon" style="color: {getStatusColor(file.status)}">{getStatusIcon(file.status)}</span>
+                <span class="status-icon" style="color: {getStatusColor(file.status)}"
+                  >{getStatusIcon(file.status)}</span
+                >
                 <span class="file-path">
                   <span class="file-dir">{getFileDir(file.path)}</span>
                   <span class="file-name">{getFileName(file.path)}</span>
@@ -218,7 +236,9 @@
     color: #cccccc;
   }
 
-  .loading, .error, .empty-state {
+  .loading,
+  .error,
+  .empty-state {
     padding: 20px 16px;
     text-align: center;
     color: #888;

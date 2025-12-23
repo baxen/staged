@@ -21,10 +21,7 @@ export async function getFileDiff(
   });
 }
 
-export async function getUntrackedFileDiff(
-  filePath: string,
-  repoPath?: string
-): Promise<FileDiff> {
+export async function getUntrackedFileDiff(filePath: string, repoPath?: string): Promise<FileDiff> {
   return invoke<FileDiff>('get_untracked_file_diff', {
     repoPath: repoPath ?? null,
     filePath,

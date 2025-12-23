@@ -1,10 +1,16 @@
 <script lang="ts">
-  import Sidebar, { type FileCategory } from './lib/Sidebar.svelte'
-  import DiffViewer from './lib/DiffViewer.svelte'
-  import CommitPanel from './lib/CommitPanel.svelte'
-  import { getFileDiff, getUntrackedFileDiff, stageFile, unstageFile, discardFile } from './lib/services/git'
-  import { ask } from '@tauri-apps/plugin-dialog'
-  import type { FileDiff } from './lib/types'
+  import Sidebar, { type FileCategory } from './lib/Sidebar.svelte';
+  import DiffViewer from './lib/DiffViewer.svelte';
+  import CommitPanel from './lib/CommitPanel.svelte';
+  import {
+    getFileDiff,
+    getUntrackedFileDiff,
+    stageFile,
+    unstageFile,
+    discardFile,
+  } from './lib/services/git';
+  import { ask } from '@tauri-apps/plugin-dialog';
+  import type { FileDiff } from './lib/types';
 
   let selectedFile: string | null = $state(null);
   let selectedCategory: FileCategory | null = $state(null);
@@ -52,10 +58,10 @@
         // Stage the file
         await stageFile(filePath);
       }
-      
+
       // Refresh sidebar
       await sidebarRef?.loadStatus();
-      
+
       // Follow the file to its new category and reload the diff
       const newCategory: FileCategory = wasStaged ? 'unstaged' : 'staged';
       selectedFile = filePath;
@@ -71,15 +77,12 @@
     if (!selectedFile || !selectedCategory) return;
 
     // Use Tauri's native dialog for confirmation
-    const confirmed = await ask(
-      `Discard all changes to ${selectedFile}? This cannot be undone.`,
-      { 
-        title: 'Discard Changes',
-        kind: 'warning',
-        okLabel: 'Discard',
-        cancelLabel: 'Cancel'
-      }
-    );
+    const confirmed = await ask(`Discard all changes to ${selectedFile}? This cannot be undone.`, {
+      title: 'Discard Changes',
+      kind: 'warning',
+      okLabel: 'Discard',
+      cancelLabel: 'Cancel',
+    });
     if (!confirmed) return;
 
     try {
@@ -105,11 +108,7 @@
 <main>
   <div class="app-container">
     <aside class="sidebar">
-      <Sidebar 
-        bind:this={sidebarRef}
-        onFileSelect={handleFileSelect}
-        selectedFile={selectedFile}
-      />
+      <Sidebar bind:this={sidebarRef} onFileSelect={handleFileSelect} {selectedFile} />
     </aside>
     <section class="main-content">
       {#if diffLoading}
@@ -120,8 +119,8 @@
           <p class="error-message">{diffError}</p>
         </div>
       {:else}
-        <DiffViewer 
-          diff={currentDiff} 
+        <DiffViewer
+          diff={currentDiff}
           onStageFile={handleStageFile}
           onDiscardFile={selectedCategory !== 'staged' ? handleDiscardFile : undefined}
           stageButtonLabel={getStageButtonLabel()}
@@ -173,7 +172,8 @@
     flex-direction: column;
   }
 
-  .loading-state, .error-state {
+  .loading-state,
+  .error-state {
     display: flex;
     flex-direction: column;
     align-items: center;
