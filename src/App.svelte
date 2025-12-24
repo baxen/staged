@@ -60,8 +60,9 @@
         await stageFile(filePath);
       }
 
-      // Refresh sidebar
+      // Refresh sidebar and commit panel
       await sidebarRef?.loadStatus();
+      commitPanelRef?.refresh();
 
       // Follow the file to its new category and reload the diff
       const newCategory: FileCategory = wasStaged ? 'unstaged' : 'staged';
