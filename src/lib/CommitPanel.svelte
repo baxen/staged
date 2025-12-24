@@ -151,7 +151,7 @@
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: #888;
+    color: var(--text-muted);
   }
 
   .branch-icon {
@@ -159,13 +159,13 @@
   }
 
   .branch-name {
-    color: #4fc1ff;
+    color: var(--text-link);
     font-weight: 500;
   }
 
   .staged-count {
     margin-left: auto;
-    color: #89d185;
+    color: var(--status-added);
     font-size: 11px;
   }
 
@@ -180,19 +180,19 @@
     flex: 1;
     padding: 8px 12px;
     font-size: 13px;
-    background-color: #3c3c3c;
-    border: 1px solid #4d4d4d;
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-primary);
     border-radius: 4px;
-    color: #d4d4d4;
+    color: var(--text-primary);
     outline: none;
   }
 
   .commit-input:focus {
-    border-color: #0e639c;
+    border-color: var(--ui-accent);
   }
 
   .commit-input::placeholder {
-    color: #888;
+    color: var(--text-muted);
   }
 
   .commit-input:disabled {
@@ -209,7 +209,7 @@
     align-items: center;
     gap: 6px;
     font-size: 12px;
-    color: #888;
+    color: var(--text-muted);
     cursor: pointer;
   }
 
@@ -238,16 +238,16 @@
   }
 
   .btn-primary {
-    background-color: #0e639c;
+    background-color: var(--ui-accent);
     color: white;
   }
 
   .btn-primary:hover:not(:disabled) {
-    background-color: #1177bb;
+    background-color: var(--ui-accent-hover);
   }
 
   .error-message {
-    color: #f14c4c;
+    color: var(--status-deleted);
     font-size: 12px;
     padding: 4px 0;
   }

@@ -149,8 +149,8 @@
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-    background-color: #1e1e1e;
-    color: #d4d4d4;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
   }
 
   main {
@@ -169,8 +169,8 @@
   .sidebar {
     width: 280px;
     min-width: 200px;
-    background-color: #252526;
-    border-right: 1px solid #3c3c3c;
+    background-color: var(--bg-secondary);
+    border-right: 1px solid var(--border-primary);
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -190,25 +190,25 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: #888;
+    color: var(--text-muted);
     font-size: 14px;
   }
 
   .error-state {
-    color: #f14c4c;
+    color: var(--status-deleted);
   }
 
   .error-message {
     font-family: monospace;
     font-size: 12px;
-    color: #888;
+    color: var(--text-muted);
     margin-top: 8px;
   }
 
   .commit-panel {
     height: 120px;
     min-height: 80px;
-    background-color: #252526;
-    border-top: 1px solid #3c3c3c;
+    background-color: var(--bg-secondary);
+    border-top: 1px solid var(--border-primary);
   }
 </style>

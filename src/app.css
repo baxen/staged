@@ -1,15 +1,73 @@
+/**
+ * Global styles for Staged
+ *
+ * Uses CSS custom properties defined by the theme system.
+ * See src/lib/theme.ts for the theme definition.
+ */
+
 * {
   box-sizing: border-box;
 }
 
 :root {
+  /* Theme colors - these are set by ThemeProvider or can be overridden */
+  --bg-primary: #1e1e1e;
+  --bg-secondary: #252526;
+  --bg-tertiary: #2d2d2d;
+  --bg-input: #3c3c3c;
+
+  --border-primary: #3c3c3c;
+  --border-subtle: #2d2d2d;
+
+  --text-primary: #d4d4d4;
+  --text-secondary: #cccccc;
+  --text-muted: #888888;
+  --text-link: #4fc1ff;
+
+  --status-modified: #e2c08d;
+  --status-added: #89d185;
+  --status-deleted: #f14c4c;
+  --status-renamed: #4fc1ff;
+  --status-untracked: #888888;
+
+  --diff-added-bg: #2ea04326;
+  --diff-added-text: #7ee787;
+  --diff-removed-bg: #f8514926;
+  --diff-removed-text: #f85149;
+  --diff-context-bg: #1e1e1e;
+  --diff-empty-bg: #2d2d2d;
+  --diff-line-number: #6e7681;
+  --diff-header-bg: #2d2d2d;
+
+  --ui-accent: #0e639c;
+  --ui-accent-hover: #1177bb;
+  --ui-danger: #5a1d1d;
+  --ui-danger-hover: #742a2a;
+  --ui-success: #2ea043;
+  --ui-selection: #094771;
+
+  --syntax-keyword: #569cd6;
+  --syntax-string: #ce9178;
+  --syntax-number: #b5cea8;
+  --syntax-comment: #6a9955;
+  --syntax-function: #dcdcaa;
+  --syntax-variable: #9cdcfe;
+  --syntax-type: #4ec9b0;
+  --syntax-operator: #d4d4d4;
+  --syntax-punctuation: #d4d4d4;
+
+  --scrollbar-track: #1e1e1e;
+  --scrollbar-thumb: #424242;
+  --scrollbar-thumb-hover: #4f4f4f;
+
+  /* Typography */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
   font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
 
-  color: #d4d4d4;
-  background-color: #1e1e1e;
+  color: var(--text-primary);
+  background-color: var(--bg-primary);
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -30,14 +88,14 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #1e1e1e;
+  background: var(--scrollbar-track);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #424242;
+  background: var(--scrollbar-thumb);
   border-radius: 5px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4f4f4f;
+  background: var(--scrollbar-thumb-hover);
 }

@@ -66,17 +66,17 @@
   function getStatusColor(status: string): string {
     switch (status) {
       case 'modified':
-        return '#e2c08d';
+        return 'var(--status-modified)';
       case 'added':
-        return '#89d185';
+        return 'var(--status-added)';
       case 'deleted':
-        return '#f14c4c';
+        return 'var(--status-deleted)';
       case 'renamed':
-        return '#4fc1ff';
+        return 'var(--status-renamed)';
       case 'untracked':
-        return '#888';
+        return 'var(--status-untracked)';
       default:
-        return '#d4d4d4';
+        return 'var(--text-primary)';
     }
   }
 
@@ -209,7 +209,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 12px 16px;
-    border-bottom: 1px solid #3c3c3c;
+    border-bottom: 1px solid var(--border-primary);
   }
 
   .header h2 {
@@ -218,13 +218,13 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    color: #cccccc;
+    color: var(--text-secondary);
   }
 
   .refresh-btn {
     background: none;
     border: none;
-    color: #888;
+    color: var(--text-muted);
     font-size: 16px;
     cursor: pointer;
     padding: 4px 8px;
@@ -232,8 +232,8 @@
   }
 
   .refresh-btn:hover {
-    background-color: #3c3c3c;
-    color: #cccccc;
+    background-color: var(--bg-input);
+    color: var(--text-secondary);
   }
 
   .loading,
@@ -241,20 +241,20 @@
   .empty-state {
     padding: 20px 16px;
     text-align: center;
-    color: #888;
+    color: var(--text-muted);
   }
 
   .error {
-    color: #f14c4c;
+    color: var(--status-deleted);
   }
 
   .error button {
     margin-top: 8px;
     padding: 4px 12px;
-    background-color: #3c3c3c;
+    background-color: var(--bg-input);
     border: none;
     border-radius: 4px;
-    color: #d4d4d4;
+    color: var(--text-primary);
     cursor: pointer;
   }
 
@@ -286,26 +286,26 @@
   }
 
   .section-header:hover {
-    background-color: #2a2d2e;
+    background-color: var(--bg-tertiary);
   }
 
   .section-title {
     font-size: 11px;
     font-weight: 600;
     text-transform: uppercase;
-    color: #888;
+    color: var(--text-muted);
   }
 
   .badge {
-    background-color: #4d4d4d;
-    color: #cccccc;
+    background-color: var(--bg-input);
+    color: var(--text-secondary);
     font-size: 11px;
     padding: 2px 6px;
     border-radius: 10px;
   }
 
   .staged-badge {
-    background-color: #2ea043;
+    background-color: var(--ui-success);
     color: white;
   }
 
@@ -324,11 +324,11 @@
   }
 
   .file-item:hover {
-    background-color: #2a2d2e;
+    background-color: var(--bg-tertiary);
   }
 
   .file-item.selected {
-    background-color: #094771;
+    background-color: var(--ui-selection);
   }
 
   .status-icon {
@@ -346,10 +346,10 @@
   }
 
   .file-dir {
-    color: #888;
+    color: var(--text-muted);
   }
 
   .file-name {
-    color: #d4d4d4;
+    color: var(--text-primary);
   }
 </style>
