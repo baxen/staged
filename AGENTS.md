@@ -12,6 +12,7 @@ Frontend calls Rust via Tauri's `invoke()`. All git operations happen in Rust us
 
 - **Stateless**: Git is the state. All Rust functions are pure - they discover the repo fresh each call.
 - **Rebuildable features**: Design features as self-contained modules with clear boundaries and minimal tendrils into the rest of the codebase. If a feature needs to be completely rewritten, it should be possible to delete and rebuild it without surgery across multiple files. See `refresh.rs` as an example.
+- **Horizontal space is precious**: Side-by-side diff viewing means every pixel of width matters. Features should minimize horizontal footprint - prefer overlays over dedicated columns, hide chrome when possible, avoid adding new horizontal elements.
 
 ### Theming
 
