@@ -12,7 +12,7 @@ export interface GitStatus {
 }
 
 export interface DiffLine {
-  line_type: 'context' | 'added' | 'removed' | 'empty';
+  line_type: 'context' | 'added' | 'removed';
   old_lineno: number | null;
   new_lineno: number | null;
   content: string;
@@ -27,14 +27,24 @@ export interface DiffHunk {
   lines: DiffLine[];
 }
 
+// A row in the side-by-side view - either a line of code or a collapse indicator
+export type DiffRow =
+  | ({ type: 'Line' } & DiffLine)
+  | {
+      type: 'Collapse';
+      count: number;
+      start_line: number;
+      other_pane_index: number;
+    };
+
 export interface FileDiff {
   path: string;
   old_path: string | null;
   status: string;
   hunks: DiffHunk[];
   is_binary: boolean;
-  old_content: DiffLine[];
-  new_content: DiffLine[];
+  old_content: DiffRow[];
+  new_content: DiffRow[];
 }
 
 export interface CommitResult {

@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { FileDiff } from './types';
+  import type { FileDiff, DiffRow } from './types';
   import {
     initHighlighter,
     highlightLine,
@@ -9,6 +9,8 @@
     getTheme,
     type Token,
   } from './services/highlighter';
+  import { createScrollSync, isLine, isCollapse } from './services/diffScroll';
+  import CollapseIndicator from './components/CollapseIndicator.svelte';
 
   interface Props {
     diff: FileDiff | null;
@@ -18,10 +20,12 @@
 
   let leftPane: HTMLDivElement | null = $state(null);
   let rightPane: HTMLDivElement | null = $state(null);
-  let isSyncing = false;
   let highlighterReady = $state(false);
   let languageReady = $state(false);
   let themeBg = $state('#1e1e1e');
+
+  // Scroll sync controller
+  const scrollSync = createScrollSync();
 
   // Detect language from file path
   let language = $derived(diff ? detectLanguage(diff.path) : null);
@@ -52,28 +56,20 @@
     return highlightLine(content, language);
   }
 
-  function formatLineNumber(num: number | null): string {
-    return num !== null ? String(num) : '';
-  }
-
-  function syncScroll(source: HTMLDivElement, target: HTMLDivElement | null) {
-    if (isSyncing || !target) return;
-    isSyncing = true;
-    target.scrollTop = source.scrollTop;
-    target.scrollLeft = source.scrollLeft;
-    requestAnimationFrame(() => {
-      isSyncing = false;
-    });
+  function formatLineNumber(num: number | null | undefined): string {
+    return num != null ? String(num) : '';
   }
 
   function handleLeftScroll(e: Event) {
+    if (!diff) return;
     const target = e.target as HTMLDivElement;
-    syncScroll(target, rightPane);
+    scrollSync.sync(target, rightPane, 'left', diff.old_content, diff.new_content);
   }
 
   function handleRightScroll(e: Event) {
+    if (!diff) return;
     const target = e.target as HTMLDivElement;
-    syncScroll(target, leftPane);
+    scrollSync.sync(target, leftPane, 'right', diff.old_content, diff.new_content);
   }
 </script>
 
@@ -101,7 +97,7 @@
     </div>
 
     <div class="diff-content">
-      <!-- Left pane: Original (only removed lines get overlay) -->
+      <!-- Left pane: Original -->
       <div class="diff-pane left-pane">
         <div class="pane-header">Original</div>
         <div
@@ -110,21 +106,21 @@
           onscroll={handleLeftScroll}
           style="background-color: {themeBg}"
         >
-          {#each diff.old_content as line}
-            <div
-              class="line"
-              class:line-removed={line.line_type === 'removed'}
-              class:line-empty={line.line_type === 'empty'}
-            >
-              <span class="line-number" class:gutter-removed={line.line_type === 'removed'}>
-                {formatLineNumber(line.old_lineno)}
-              </span>
-              <span class="line-content" class:content-removed={line.line_type === 'removed'}>
-                {#each getTokens(line.content) as token}
-                  <span style="color: {token.color}">{token.content}</span>
-                {/each}
-              </span>
-            </div>
+          {#each diff.old_content as row}
+            {#if isLine(row)}
+              <div class="line" class:line-removed={row.line_type === 'removed'}>
+                <span class="line-number" class:gutter-removed={row.line_type === 'removed'}>
+                  {formatLineNumber(row.old_lineno)}
+                </span>
+                <span class="line-content" class:content-removed={row.line_type === 'removed'}>
+                  {#each getTokens(row.content) as token}
+                    <span style="color: {token.color}">{token.content}</span>
+                  {/each}
+                </span>
+              </div>
+            {:else if isCollapse(row)}
+              <CollapseIndicator count={row.count} startLine={row.start_line} />
+            {/if}
           {/each}
           {#if diff.old_content.length === 0}
             <div class="empty-file-notice">New file</div>
@@ -132,7 +128,7 @@
         </div>
       </div>
 
-      <!-- Right pane: Modified (only added lines get overlay) -->
+      <!-- Right pane: Modified -->
       <div class="diff-pane right-pane">
         <div class="pane-header">Modified</div>
         <div
@@ -141,21 +137,21 @@
           onscroll={handleRightScroll}
           style="background-color: {themeBg}"
         >
-          {#each diff.new_content as line}
-            <div
-              class="line"
-              class:line-added={line.line_type === 'added'}
-              class:line-empty={line.line_type === 'empty'}
-            >
-              <span class="line-number" class:gutter-added={line.line_type === 'added'}>
-                {formatLineNumber(line.new_lineno)}
-              </span>
-              <span class="line-content" class:content-added={line.line_type === 'added'}>
-                {#each getTokens(line.content) as token}
-                  <span style="color: {token.color}">{token.content}</span>
-                {/each}
-              </span>
-            </div>
+          {#each diff.new_content as row}
+            {#if isLine(row)}
+              <div class="line" class:line-added={row.line_type === 'added'}>
+                <span class="line-number" class:gutter-added={row.line_type === 'added'}>
+                  {formatLineNumber(row.new_lineno)}
+                </span>
+                <span class="line-content" class:content-added={row.line_type === 'added'}>
+                  {#each getTokens(row.content) as token}
+                    <span style="color: {token.color}">{token.content}</span>
+                  {/each}
+                </span>
+              </div>
+            {:else if isCollapse(row)}
+              <CollapseIndicator count={row.count} startLine={row.start_line} />
+            {/if}
           {/each}
           {#if diff.new_content.length === 0}
             <div class="empty-file-notice">File deleted</div>
@@ -289,6 +285,4 @@
   .content-removed {
     background-color: var(--diff-removed-overlay);
   }
-
-  /* Empty lines (padding for alignment) - no special styling, inherits theme bg */
 </style>
