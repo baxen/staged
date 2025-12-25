@@ -29,6 +29,7 @@ export interface HighlighterTheme {
 // Singleton highlighter instance
 let highlighter: Highlighter | null = null;
 let currentTheme: HighlighterTheme | null = null;
+let initPromise: Promise<void> | null = null;
 
 // Track which languages we've attempted to load (to avoid repeated failures)
 const loadedLanguages = new Set<string>();
@@ -60,6 +61,7 @@ const SUPPORTED_LANGUAGES: BundledLanguage[] = [
   'c',
   'cpp',
   'zig',
+  'nim',
 
   // JVM/.NET
   'java',
@@ -67,6 +69,12 @@ const SUPPORTED_LANGUAGES: BundledLanguage[] = [
   'scala',
   'groovy',
   'csharp',
+  'fsharp',
+
+  // Mobile
+  'dart',
+  'swift',
+  'objective-c',
 
   // Scripting
   'python',
@@ -90,6 +98,9 @@ const SUPPORTED_LANGUAGES: BundledLanguage[] = [
   'svelte',
   'vue',
   'astro',
+  'scss',
+  'sass',
+  'less',
 
   // Shell
   'bash',
@@ -101,6 +112,11 @@ const SUPPORTED_LANGUAGES: BundledLanguage[] = [
   'toml',
   'xml',
 
+  // Build systems
+  'make',
+  'cmake',
+  'nix',
+
   // DevOps/config
   'dockerfile',
   'nginx',
@@ -108,10 +124,14 @@ const SUPPORTED_LANGUAGES: BundledLanguage[] = [
   'terraform',
   'prisma',
 
+  // Blockchain
+  'solidity',
+
   // Other
   'sql',
   'diff',
-  'swift',
+  'wasm',
+  'latex',
 ];
 
 // Map file extensions to Shiki language IDs
@@ -156,8 +176,9 @@ const EXTENSION_MAP: Record<string, BundledLanguage> = {
   htm: 'html',
   xhtml: 'html',
   css: 'css',
-  scss: 'css',
-  less: 'css',
+  scss: 'scss',
+  sass: 'sass',
+  less: 'less',
   svelte: 'svelte',
   vue: 'vue',
   astro: 'astro',
@@ -209,9 +230,15 @@ const EXTENSION_MAP: Record<string, BundledLanguage> = {
 
   // .NET
   cs: 'csharp',
+  fs: 'fsharp',
+  fsx: 'fsharp',
+  fsi: 'fsharp',
 
-  // Apple
+  // Apple/Mobile
   swift: 'swift',
+  m: 'objective-c',
+  mm: 'objective-c',
+  dart: 'dart',
 
   // Ruby
   rb: 'ruby',
@@ -243,6 +270,15 @@ const EXTENSION_MAP: Record<string, BundledLanguage> = {
   R: 'r',
   jl: 'julia',
 
+  // Systems (additional)
+  nim: 'nim',
+
+  // Build systems
+  makefile: 'make',
+  mk: 'make',
+  cmake: 'cmake',
+  nix: 'nix',
+
   // DevOps
   dockerfile: 'dockerfile',
   tf: 'terraform',
@@ -251,30 +287,55 @@ const EXTENSION_MAP: Record<string, BundledLanguage> = {
   graphql: 'graphql',
   gql: 'graphql',
   nginx: 'nginx',
-  conf: 'nginx',
+
+  // Blockchain
+  sol: 'solidity',
+
+  // Other
+  wasm: 'wasm',
+  wat: 'wasm',
+  tex: 'latex',
+  ltx: 'latex',
 };
 
 /**
  * Initialize the highlighter with a theme.
  * Only loads core languages at startup for fast init.
  * Other languages are lazy-loaded on demand.
+ *
+ * This is idempotent - multiple calls return the same instance.
  */
 export async function initHighlighter(themeName: string = 'github-dark'): Promise<void> {
-  highlighter = await createHighlighter({
-    themes: [themeName],
-    langs: CORE_LANGUAGES,
-  });
+  // Return existing instance if already initialized
+  if (highlighter) {
+    return;
+  }
 
-  // Mark core languages as loaded
-  CORE_LANGUAGES.forEach((lang) => loadedLanguages.add(lang));
+  // If initialization is in progress, wait for it
+  if (initPromise) {
+    return initPromise;
+  }
 
-  // Extract theme colors
-  const theme = highlighter.getTheme(themeName);
-  currentTheme = {
-    name: themeName,
-    bg: theme.bg || '#1e1e1e',
-    fg: theme.fg || '#d4d4d4',
-  };
+  // Start initialization
+  initPromise = (async () => {
+    highlighter = await createHighlighter({
+      themes: [themeName],
+      langs: CORE_LANGUAGES,
+    });
+
+    // Mark core languages as loaded
+    CORE_LANGUAGES.forEach((lang) => loadedLanguages.add(lang));
+
+    // Extract theme colors
+    const theme = highlighter.getTheme(themeName);
+    currentTheme = {
+      name: themeName,
+      bg: theme.bg || '#1e1e1e',
+      fg: theme.fg || '#d4d4d4',
+    };
+  })();
+
+  return initPromise;
 }
 
 /**
@@ -293,6 +354,8 @@ export function detectLanguage(filePath: string): BundledLanguage | null {
   // Handle special filenames
   const filename = filePath.split('/').pop()?.toLowerCase() || '';
   if (filename === 'dockerfile') return 'dockerfile';
+  if (filename === 'makefile' || filename === 'gnumakefile') return 'make';
+  if (filename === 'cmakelists.txt') return 'cmake';
 
   const ext = filePath.split('.').pop()?.toLowerCase() || '';
   return EXTENSION_MAP[ext] || null;

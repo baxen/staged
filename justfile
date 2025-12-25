@@ -1,8 +1,8 @@
 # Staged - Git Diff Viewer
 
-# Run the app in development mode
-dev:
-    npm run tauri:dev
+# Run the app in development mode (optionally point to another repo)
+dev repo="":
+    {{ if repo != "" { "STAGED_REPO=" + repo + " " } else { "" } }}npm run tauri:dev
 
 # Build the app for production
 build:
