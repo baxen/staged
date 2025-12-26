@@ -44,10 +44,12 @@ export function drawConnectors(
     if (!range.changed) continue;
 
     // Calculate pixel positions relative to viewport
-    const beforeTop = range.before.start * cfg.lineHeight - beforeScroll;
-    const beforeBottom = range.before.end * cfg.lineHeight - beforeScroll;
-    const afterTop = range.after.start * cfg.lineHeight - afterScroll;
-    const afterBottom = range.after.end * cfg.lineHeight - afterScroll;
+    // Top borders are at start * lineHeight, bottom borders at end * lineHeight - 1
+    // Add 0.5px offset for crisp 1px stroke rendering
+    const beforeTop = range.before.start * cfg.lineHeight - beforeScroll + 0.5;
+    const beforeBottom = range.before.end * cfg.lineHeight - 1 - beforeScroll + 0.5;
+    const afterTop = range.after.start * cfg.lineHeight - afterScroll + 0.5;
+    const afterBottom = range.after.end * cfg.lineHeight - 1 - afterScroll + 0.5;
 
     // Skip if completely out of view
     if (beforeBottom < 0 && afterBottom < 0) continue;
