@@ -36,7 +36,7 @@
   // Detect if this is a deleted file (no after content)
   let isDeletedFile = $derived(diff !== null && diff.after.lines.length === 0);
 
-  // Hide range markers (gutter connectors, bounding lines, content highlights)
+  // Hide range markers (spine connectors, bounding lines, content highlights)
   // for new/deleted files since the entire file is one big change
   let showRangeMarkers = $derived(!isNewFile && !isDeletedFile);
 
@@ -205,14 +205,14 @@
         </div>
       {/if}
 
-      <!-- Gutter between panes (always visible for consistency) -->
-      <div class="connector-gutter">
-        <div class="connector-header"></div>
+      <!-- Spine between panes (always visible for consistency) -->
+      <div class="spine">
+        <div class="spine-header"></div>
         <!-- Range connectors only drawn when showRangeMarkers is true -->
         {#if showRangeMarkers}
-          <svg class="connector-svg" bind:this={connectorSvg}></svg>
+          <svg class="spine-connector" bind:this={connectorSvg}></svg>
         {:else}
-          <div class="connector-placeholder"></div>
+          <div class="spine-placeholder"></div>
         {/if}
       </div>
 
@@ -377,7 +377,7 @@
     font-size: 14px;
   }
 
-  .connector-gutter {
+  .spine {
     width: 24px;
     flex-shrink: 0;
     display: flex;
@@ -385,14 +385,14 @@
     background-color: var(--bg-secondary);
   }
 
-  .connector-header {
+  .spine-header {
     height: 29px;
     background-color: var(--diff-header-bg);
     border-bottom: 1px solid var(--border-primary);
   }
 
-  .connector-svg,
-  .connector-placeholder {
+  .spine-connector,
+  .spine-placeholder {
     flex: 1;
     width: 100%;
     overflow: visible;

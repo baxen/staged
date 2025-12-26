@@ -129,7 +129,7 @@ export const darkTheme: Theme = {
 
   diff: {
     // Overlay tints - transparent colors layered on syntax theme background
-    // Both use gray - the gutter colors provide the add/remove distinction
+    // Both use gray - subtle tint to indicate changed regions
     addedOverlay: 'rgba(110, 118, 129, 0.10)',
     removedOverlay: 'rgba(110, 118, 129, 0.10)',
 

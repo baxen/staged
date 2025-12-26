@@ -1,8 +1,8 @@
 /**
- * Range Connectors
+ * Spine Connectors
  *
  * Draws bezier curve connectors between corresponding changed ranges
- * in the center gutter. These visualize how regions in the "before"
+ * in the center spine. These visualize how regions in the "before"
  * pane map to the "after" pane.
  */
 
