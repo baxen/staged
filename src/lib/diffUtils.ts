@@ -21,6 +21,11 @@ export function getDisplayPath(diff: FileDiff): string {
 /**
  * Check if a line is at the start or end of a changed range.
  * Used to draw horizontal separator lines in CSS.
+ *
+ * For empty spans (e.g., the "before" side of a pure insert), we draw a single
+ * line to avoid the double-thick appearance from adjacent top/bottom borders.
+ * - If there's a preceding line, draw on its bottom edge
+ * - If at file start (no preceding line), draw on the following line's top edge
  */
 export function getLineBoundary(
   ranges: Range[],
@@ -31,6 +36,16 @@ export function getLineBoundary(
     if (!range.changed) continue;
 
     const span = side === 'before' ? range.before : range.after;
+
+    // Empty span: draw a single line at the insertion point.
+    // Use range-start on the line AT span.start (its top edge aligns with
+    // where the connector attaches at span.start * lineHeight).
+    if (span.start === span.end) {
+      if (lineIndex === span.start) {
+        return { isStart: true, isEnd: false };
+      }
+      continue;
+    }
 
     if (lineIndex === span.start) {
       return { isStart: true, isEnd: lineIndex === span.end - 1 };
