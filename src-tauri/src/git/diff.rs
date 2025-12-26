@@ -206,6 +206,11 @@ fn get_after_content(
     }
 }
 
+/// Check if bytes appear to be binary content (contains null bytes)
+fn is_binary_content(bytes: &[u8]) -> bool {
+    bytes.contains(&0)
+}
+
 /// Get diff for an untracked file (show entire file as added)
 pub fn get_untracked_file_diff(
     repo_path: Option<&str>,
@@ -217,9 +222,51 @@ pub fn get_untracked_file_diff(
     })?;
 
     let full_path = workdir.join(file_path);
-    let content = std::fs::read_to_string(&full_path).map_err(|e| GitError {
+
+    // Read as bytes first to detect binary files
+    let bytes = std::fs::read(&full_path).map_err(|e| GitError {
         message: format!("Failed to read file: {}", e),
     })?;
+
+    // Check if binary (contains null bytes or fails UTF-8 conversion)
+    if is_binary_content(&bytes) {
+        return Ok(FileDiff {
+            status: "untracked".to_string(),
+            is_binary: true,
+            hunks: vec![],
+            before: DiffSide {
+                path: None,
+                lines: vec![],
+            },
+            after: DiffSide {
+                path: Some(file_path.to_string()),
+                lines: vec![],
+            },
+            ranges: vec![],
+        });
+    }
+
+    // Try to convert to UTF-8
+    let content = match String::from_utf8(bytes) {
+        Ok(s) => s,
+        Err(_) => {
+            // Not valid UTF-8, treat as binary
+            return Ok(FileDiff {
+                status: "untracked".to_string(),
+                is_binary: true,
+                hunks: vec![],
+                before: DiffSide {
+                    path: None,
+                    lines: vec![],
+                },
+                after: DiffSide {
+                    path: Some(file_path.to_string()),
+                    lines: vec![],
+                },
+                ranges: vec![],
+            });
+        }
+    };
 
     let after_lines: Vec<DiffLine> = content
         .lines()

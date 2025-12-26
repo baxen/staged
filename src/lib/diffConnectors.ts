@@ -19,7 +19,7 @@ const DEFAULT_CONFIG: ConnectorConfig = {
   lineHeight: 20,
   width: 24,
   fillColor: 'rgba(110, 118, 129, 0.12)',
-  strokeColor: 'rgba(110, 118, 129, 0.5)',
+  strokeColor: 'rgba(110, 118, 129, 0.7)',
 };
 
 /**
@@ -36,8 +36,9 @@ export function drawConnectors(
   const svgHeight = svg.clientHeight;
   const cpOffset = cfg.width * 0.5; // bezier control point offset
 
-  // Clear existing
+  // Clear existing and set crisp rendering
   svg.innerHTML = '';
+  svg.setAttribute('shape-rendering', 'geometricPrecision');
 
   for (const range of ranges) {
     if (!range.changed) continue;
@@ -84,6 +85,7 @@ export function drawConnectors(
     path.setAttribute('fill', cfg.fillColor);
     path.setAttribute('stroke', cfg.strokeColor);
     path.setAttribute('stroke-width', '1');
+    path.setAttribute('vector-effect', 'non-scaling-stroke');
     svg.appendChild(path);
   }
 }
