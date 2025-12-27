@@ -79,7 +79,6 @@
   let selectedFile: string | null = $state(null);
   let selectedCategory: FileCategory | null = $state(null);
   let currentDiff: FileDiff | null = $state(null);
-  let diffLoading = $state(false);
   let diffError: string | null = $state(null);
   let sidebarRef: Sidebar | null = $state(null);
   let commitPanelRef: CommitPanel | null = $state(null);
@@ -205,9 +204,7 @@
     }
 
     loadingPath = path;
-    diffLoading = true;
     diffError = null;
-    currentDiff = null;
 
     try {
       let diff: FileDiff;
@@ -222,13 +219,15 @@
         currentDiff = diff;
       }
     } catch (e) {
-      diffError = e instanceof Error ? e.message : String(e);
+      if (loadingPath === path) {
+        diffError = e instanceof Error ? e.message : String(e);
+        currentDiff = null; // Only clear on error
+      }
       console.error('Failed to load diff:', e);
     } finally {
       if (loadingPath === path) {
         loadingPath = null;
       }
-      diffLoading = false;
     }
   }
 
@@ -264,9 +263,7 @@
 <main>
   <div class="app-container">
     <section class="main-content">
-      {#if diffLoading}
-        <div class="loading-state">Loading diff...</div>
-      {:else if diffError}
+      {#if diffError}
         <div class="error-state">
           <p>Error loading diff:</p>
           <p class="error-message">{diffError}</p>
@@ -330,19 +327,14 @@
     flex-direction: column;
   }
 
-  .loading-state,
   .error-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     height: 100%;
-    color: var(--text-muted);
-    font-size: var(--size-lg);
-  }
-
-  .error-state {
     color: var(--status-deleted);
+    font-size: var(--size-lg);
   }
 
   .error-message {
