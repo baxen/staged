@@ -1,9 +1,11 @@
 pub mod git;
 mod refresh;
+pub mod review;
 mod watcher;
 
 use git::{CommitResult, DiscardRange, FileDiff, GitStatus};
 use refresh::RefreshController;
+use review::{Comment, DiffId, Edit, NewComment, NewEdit, Review, ReviewStore};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
@@ -103,6 +105,75 @@ fn discard_lines(
 }
 
 // =============================================================================
+// Review Commands
+// =============================================================================
+
+#[tauri::command]
+fn get_review(base: String, head: String) -> Result<Review, String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    store.get_or_create(&id).map_err(|e| e.message)
+}
+
+#[tauri::command]
+fn add_comment(base: String, head: String, comment: NewComment) -> Result<Comment, String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    let comment = Comment::new(comment.file_path, comment.range_index, comment.text);
+    store.add_comment(&id, &comment).map_err(|e| e.message)?;
+    Ok(comment)
+}
+
+#[tauri::command]
+fn delete_comment(base: String, head: String, comment_id: String) -> Result<(), String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    let uuid =
+        uuid::Uuid::parse_str(&comment_id).map_err(|e| format!("Invalid comment ID: {}", e))?;
+    store.delete_comment(&id, uuid).map_err(|e| e.message)
+}
+
+#[tauri::command]
+fn mark_reviewed(base: String, head: String, file_path: String) -> Result<(), String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    store.mark_reviewed(&id, &file_path).map_err(|e| e.message)
+}
+
+#[tauri::command]
+fn unmark_reviewed(base: String, head: String, file_path: String) -> Result<(), String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    store
+        .unmark_reviewed(&id, &file_path)
+        .map_err(|e| e.message)
+}
+
+#[tauri::command]
+fn record_edit(base: String, head: String, edit: NewEdit) -> Result<Edit, String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    let edit = Edit::new(edit.file_path, edit.diff);
+    store.add_edit(&id, &edit).map_err(|e| e.message)?;
+    Ok(edit)
+}
+
+#[tauri::command]
+fn export_review_markdown(base: String, head: String) -> Result<String, String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    let review = store.get_or_create(&id).map_err(|e| e.message)?;
+    Ok(review::export_markdown(&review))
+}
+
+#[tauri::command]
+fn clear_review(base: String, head: String) -> Result<(), String> {
+    let store = review::get_store().map_err(|e| e.message)?;
+    let id = DiffId::new(base, head);
+    store.delete(&id).map_err(|e| e.message)
+}
+
+// =============================================================================
 // Watcher Commands
 // =============================================================================
 
@@ -169,6 +240,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // Git commands
             get_git_status,
             open_repository,
             get_file_diff,
@@ -182,6 +254,16 @@ pub fn run() {
             get_last_commit_message,
             create_commit,
             amend_commit,
+            // Review commands
+            get_review,
+            add_comment,
+            delete_comment,
+            mark_reviewed,
+            unmark_reviewed,
+            record_edit,
+            export_review_markdown,
+            clear_review,
+            // Watcher commands
             start_watching,
             stop_watching,
             force_refresh

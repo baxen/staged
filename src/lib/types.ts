@@ -71,3 +71,45 @@ export interface CommitResult {
   oid: string;
   message: string;
 }
+
+// Review types
+
+export interface DiffId {
+  base: string; // SHA
+  head: string; // SHA or "@" for working tree
+}
+
+export interface Comment {
+  id: string;
+  file_path: string;
+  range_index: number;
+  text: string;
+  created_at: string;
+}
+
+export interface Edit {
+  id: string;
+  file_path: string;
+  diff: string;
+  created_at: string;
+}
+
+export interface Review {
+  id: DiffId;
+  reviewed: string[]; // file paths
+  comments: Comment[];
+  edits: Edit[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NewComment {
+  file_path: string;
+  range_index: number;
+  text: string;
+}
+
+export interface NewEdit {
+  file_path: string;
+  diff: string;
+}

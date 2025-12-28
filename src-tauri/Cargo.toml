@@ -34,3 +34,12 @@ ignore = "0.4"
 # Syntax highlighting
 syntect = "5.2"
 tauri-plugin-dialog = "2.4.2"
+
+# Review storage
+rusqlite = { version = "0.38", features = ["bundled"] }
+uuid = { version = "1.0", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+dirs = "5.0"
+
+[dev-dependencies]
+tempfile = "3.0"
