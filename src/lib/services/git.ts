@@ -9,25 +9,6 @@ export async function openRepository(path: string): Promise<GitStatus> {
   return invoke<GitStatus>('open_repository', { path });
 }
 
-export async function getFileDiff(
-  filePath: string,
-  staged: boolean,
-  repoPath?: string
-): Promise<FileDiff> {
-  return invoke<FileDiff>('get_file_diff', {
-    repoPath: repoPath ?? null,
-    filePath,
-    staged,
-  });
-}
-
-export async function getUntrackedFileDiff(filePath: string, repoPath?: string): Promise<FileDiff> {
-  return invoke<FileDiff>('get_untracked_file_diff', {
-    repoPath: repoPath ?? null,
-    filePath,
-  });
-}
-
 /**
  * Get diff for a file between two refs.
  * This is the primary diff function for the review model.

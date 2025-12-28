@@ -3,13 +3,12 @@
   
   Renders a two-pane diff view with synchronized scrolling, syntax highlighting,
   and visual connectors between corresponding changed regions. Supports panel
-  minimization for new/deleted files and hunk-level discard operations.
+  minimization for new/deleted files and range-level discard operations.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { X } from 'lucide-svelte';
   import type { FileDiff } from './types';
-  import type { FileCategory } from './Sidebar.svelte';
   import {
     initHighlighter,
     highlightLines,
@@ -27,12 +26,13 @@
   interface Props {
     diff: FileDiff | null;
     filePath?: string | null;
-    category?: FileCategory | null;
+    /** Head ref for the diff - "@" means working tree, enabling discard */
+    diffHead?: string;
     sizeBase?: number;
-    onHunkAction?: () => void;
+    onRangeDiscard?: () => void;
   }
 
-  let { diff, filePath = null, category = null, sizeBase, onHunkAction }: Props = $props();
+  let { diff, filePath = null, diffHead = '@', sizeBase, onRangeDiscard }: Props = $props();
 
   let beforePane: HTMLDivElement | null = $state(null);
   let afterPane: HTMLDivElement | null = $state(null);
@@ -50,9 +50,12 @@
   let beforeMinimized = $state(false);
   let afterMinimized = $state(false);
 
-  // Hunk hover state
-  let hoveredHunkIndex: number | null = $state(null);
-  let hunkToolbarStyle: { top: number; left: number } | null = $state(null);
+  // Range hover state (for showing discard toolbar on changed ranges)
+  let hoveredRangeIndex: number | null = $state(null);
+  let rangeToolbarStyle: { top: number; left: number } | null = $state(null);
+
+  // Discard is only available when viewing the working tree
+  let canDiscard = $derived(diffHead === '@');
 
   // Detect if this is a new file (no before content)
   let isNewFile = $derived(diff !== null && diff.before.lines.length === 0);
@@ -63,29 +66,28 @@
   // for new/deleted files since the entire file is one big change
   let showRangeMarkers = $derived(!isNewFile && !isDeletedFile);
 
-  // Build a map of changed ranges (hunks) with their indices
-  // Only ranges with changed: true are hunks
+  // Build a list of changed ranges with their indices (for hover/discard)
   let changedRanges = $derived(
     diff?.ranges.map((range, index) => ({ range, index })).filter(({ range }) => range.changed) ??
       []
   );
 
-  // Map line index to hunk index for quick lookup
-  let beforeLineToHunk = $derived(() => {
+  // Map line index to changed range index for quick lookup during hover
+  let beforeLineToRange = $derived(() => {
     const map = new Map<number, number>();
-    changedRanges.forEach(({ range }, hunkIdx) => {
+    changedRanges.forEach(({ range }, rangeIdx) => {
       for (let i = range.before.start; i < range.before.end; i++) {
-        map.set(i, hunkIdx);
+        map.set(i, rangeIdx);
       }
     });
     return map;
   });
 
-  let afterLineToHunk = $derived(() => {
+  let afterLineToRange = $derived(() => {
     const map = new Map<number, number>();
-    changedRanges.forEach(({ range }, hunkIdx) => {
+    changedRanges.forEach(({ range }, rangeIdx) => {
       for (let i = range.after.start; i < range.after.end; i++) {
-        map.set(i, hunkIdx);
+        map.set(i, rangeIdx);
       }
     });
     return map;
@@ -97,8 +99,8 @@
       beforeMinimized = isNewFile;
       afterMinimized = isDeletedFile;
       // Clear hover state when diff changes
-      hoveredHunkIndex = null;
-      hunkToolbarStyle = null;
+      hoveredRangeIndex = null;
+      rangeToolbarStyle = null;
     }
   });
 
@@ -230,88 +232,91 @@
   });
 
   // ==========================================================================
-  // Hunk hover handling
+  // Range hover handling
   // ==========================================================================
 
   function updateToolbarPosition() {
-    if (hoveredHunkIndex === null || !afterPane || !diffViewerEl) {
-      hunkToolbarStyle = null;
+    if (hoveredRangeIndex === null || !afterPane || !diffViewerEl) {
+      rangeToolbarStyle = null;
       return;
     }
 
-    const hunkData = changedRanges[hoveredHunkIndex];
-    if (!hunkData) {
-      hunkToolbarStyle = null;
+    const rangeData = changedRanges[hoveredRangeIndex];
+    if (!rangeData) {
+      rangeToolbarStyle = null;
       return;
     }
 
-    // Find the first line of this hunk in the after pane
-    const lineIndex = hunkData.range.after.start;
+    // Find the first line of this range in the after pane
+    const lineIndex = rangeData.range.after.start;
     const lineEl = afterPane.querySelectorAll('.line')[lineIndex] as HTMLElement | null;
 
     if (!lineEl) {
-      hunkToolbarStyle = null;
+      rangeToolbarStyle = null;
       return;
     }
 
     const lineRect = lineEl.getBoundingClientRect();
     const viewerRect = diffViewerEl.getBoundingClientRect();
 
-    // Position toolbar above the hunk, aligned to left of the line
-    hunkToolbarStyle = {
+    // Position toolbar above the range, aligned to left of the line
+    rangeToolbarStyle = {
       top: lineRect.top - viewerRect.top,
       left: lineRect.left - viewerRect.left,
     };
   }
 
   function handleLineMouseEnter(pane: 'before' | 'after', lineIndex: number) {
-    const map = pane === 'before' ? beforeLineToHunk() : afterLineToHunk();
-    const hunkIdx = map.get(lineIndex);
+    if (!canDiscard) return; // Don't show hover if discard not available
 
-    if (hunkIdx !== undefined) {
-      hoveredHunkIndex = hunkIdx;
+    const map = pane === 'before' ? beforeLineToRange() : afterLineToRange();
+    const rangeIdx = map.get(lineIndex);
+
+    if (rangeIdx !== undefined) {
+      hoveredRangeIndex = rangeIdx;
       requestAnimationFrame(updateToolbarPosition);
     }
   }
 
   function handleLineMouseLeave(event: MouseEvent) {
-    // Don't clear if moving to another line in the same hunk or to the toolbar
+    // Don't clear if moving to another line in the same range or to the toolbar
     const relatedTarget = event.relatedTarget as HTMLElement | null;
-    if (relatedTarget?.closest('.hunk-toolbar') || relatedTarget?.closest('.line')) {
+    if (relatedTarget?.closest('.range-toolbar') || relatedTarget?.closest('.line')) {
       return;
     }
-    hoveredHunkIndex = null;
-    hunkToolbarStyle = null;
+    hoveredRangeIndex = null;
+    rangeToolbarStyle = null;
   }
 
   function handleToolbarMouseLeave(event: MouseEvent) {
     const relatedTarget = event.relatedTarget as HTMLElement | null;
     if (relatedTarget?.closest('.line')) {
-      // Moving back to a line - check if it's in the same hunk
       return;
     }
-    hoveredHunkIndex = null;
-    hunkToolbarStyle = null;
+    hoveredRangeIndex = null;
+    rangeToolbarStyle = null;
   }
 
   // ==========================================================================
-  // Hunk actions
+  // Range actions
   // ==========================================================================
 
   async function handleDiscardRange() {
-    if (hoveredHunkIndex === null || !filePath || !category) return;
+    if (hoveredRangeIndex === null || !filePath || !canDiscard) return;
 
-    const hunkData = changedRanges[hoveredHunkIndex];
-    if (!hunkData?.range.source_lines) {
+    const rangeData = changedRanges[hoveredRangeIndex];
+    if (!rangeData?.range.source_lines) {
       console.error('No source_lines data for range');
       return;
     }
 
     try {
-      await discardLines(filePath, hunkData.range.source_lines, category === 'staged');
-      hoveredHunkIndex = null;
-      hunkToolbarStyle = null;
-      onHunkAction?.();
+      // When diffHead is "@", we're viewing working tree changes.
+      // Discard reverts working tree to match the base (staged: false).
+      await discardLines(filePath, rangeData.range.source_lines, false);
+      hoveredRangeIndex = null;
+      rangeToolbarStyle = null;
+      onRangeDiscard?.();
     } catch (e) {
       console.error('Failed to discard range:', e);
     }
@@ -376,15 +381,15 @@
               {@const boundary = showRangeMarkers
                 ? getLineBoundary(diff.ranges, 'before', i)
                 : { isStart: false, isEnd: false }}
-              {@const isInHoveredHunk =
-                hoveredHunkIndex !== null && beforeLineToHunk().get(i) === hoveredHunkIndex}
+              {@const isInHoveredRange =
+                hoveredRangeIndex !== null && beforeLineToRange().get(i) === hoveredRangeIndex}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="line"
                 class:line-removed={line.line_type === 'removed'}
                 class:range-start={boundary.isStart}
                 class:range-end={boundary.isEnd}
-                class:hunk-hovered={isInHoveredHunk}
+                class:range-hovered={isInHoveredRange}
                 onmouseenter={() => handleLineMouseEnter('before', i)}
                 onmouseleave={handleLineMouseLeave}
               >
@@ -444,15 +449,15 @@
               {@const boundary = showRangeMarkers
                 ? getLineBoundary(diff.ranges, 'after', i)
                 : { isStart: false, isEnd: false }}
-              {@const isInHoveredHunk =
-                hoveredHunkIndex !== null && afterLineToHunk().get(i) === hoveredHunkIndex}
+              {@const isInHoveredRange =
+                hoveredRangeIndex !== null && afterLineToRange().get(i) === hoveredRangeIndex}
               <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="line"
                 class:line-added={line.line_type === 'added'}
                 class:range-start={boundary.isStart}
                 class:range-end={boundary.isEnd}
-                class:hunk-hovered={isInHoveredHunk}
+                class:range-hovered={isInHoveredRange}
                 onmouseenter={() => handleLineMouseEnter('after', i)}
                 onmouseleave={handleLineMouseLeave}
               >
@@ -474,15 +479,15 @@
       {/if}
     </div>
 
-    <!-- Hunk action toolbar (floating) -->
-    {#if hoveredHunkIndex !== null && hunkToolbarStyle && filePath && category}
+    <!-- Range action toolbar (floating, only when viewing working tree) -->
+    {#if hoveredRangeIndex !== null && rangeToolbarStyle && filePath && canDiscard}
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        class="hunk-toolbar"
-        style="top: {hunkToolbarStyle.top}px; left: {hunkToolbarStyle.left}px;"
+        class="range-toolbar"
+        style="top: {rangeToolbarStyle.top}px; left: {rangeToolbarStyle.left}px;"
         onmouseleave={handleToolbarMouseLeave}
       >
-        <button class="hunk-btn discard-btn" onclick={handleDiscardRange} title="Discard changes">
+        <button class="range-btn discard-btn" onclick={handleDiscardRange} title="Discard changes">
           <X size={12} />
         </button>
       </div>
@@ -676,7 +681,7 @@
     opacity: 0.7;
   }
 
-  .line.hunk-hovered {
+  .line.range-hovered {
     background-color: var(--bg-tertiary);
   }
 
@@ -696,8 +701,8 @@
     font-style: italic;
   }
 
-  /* Hunk action toolbar */
-  .hunk-toolbar {
+  /* Range action toolbar */
+  .range-toolbar {
     position: absolute;
     display: flex;
     gap: 1px;
@@ -709,7 +714,7 @@
     border-radius: 4px 4px 0 0;
   }
 
-  .hunk-btn {
+  .range-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -724,11 +729,11 @@
       background-color 0.1s;
   }
 
-  .hunk-btn:hover {
+  .range-btn:hover {
     background-color: var(--bg-tertiary);
   }
 
-  .hunk-btn.discard-btn:hover {
+  .range-btn.discard-btn:hover {
     color: var(--status-deleted);
   }
 </style>

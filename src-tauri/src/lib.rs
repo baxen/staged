@@ -24,23 +24,6 @@ fn open_repository(path: String) -> Result<GitStatus, String> {
     git::get_status(Some(&path)).map_err(|e| e.message)
 }
 
-#[tauri::command]
-fn get_file_diff(
-    repo_path: Option<String>,
-    file_path: String,
-    staged: bool,
-) -> Result<FileDiff, String> {
-    git::get_file_diff(repo_path.as_deref(), &file_path, staged).map_err(|e| e.message)
-}
-
-#[tauri::command]
-fn get_untracked_file_diff(
-    repo_path: Option<String>,
-    file_path: String,
-) -> Result<FileDiff, String> {
-    git::get_untracked_file_diff(repo_path.as_deref(), &file_path).map_err(|e| e.message)
-}
-
 /// Get diff for a file between two refs.
 ///
 /// This is the primary diff function for the review model. Compares any two
@@ -257,8 +240,6 @@ pub fn run() {
             // Git commands
             get_git_status,
             open_repository,
-            get_file_diff,
-            get_untracked_file_diff,
             get_ref_diff,
             stage_file,
             unstage_file,

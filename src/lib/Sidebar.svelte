@@ -26,8 +26,8 @@
   import { getReview, markReviewed, unmarkReviewed } from './services/review';
   import type { GitStatus, Review } from './types';
 
-  /** File category for staging operations (not for diff selection) */
-  export type FileCategory = 'staged' | 'unstaged' | 'untracked';
+  /** File category for staging operations (internal use) */
+  type FileCategory = 'staged' | 'unstaged' | 'untracked';
 
   interface FileEntry {
     path: string;

@@ -38,9 +38,6 @@ pub struct HunkLine {
 /// Result of parsing a diff for a specific file.
 pub struct ParseResult {
     pub hunks: Vec<DiffHunk>,
-    pub is_binary: bool,
-    pub status: String,
-    pub renamed_from: Option<String>,
 }
 
 /// Parse a git2 Diff and extract hunks for a specific file.
@@ -67,10 +64,7 @@ pub fn parse_diff(diff: &Diff, target_path: &str) -> Result<ParseResult, GitErro
 /// Internal state for collecting diff data during git2 callbacks.
 struct ParseState {
     hunks: RefCell<Vec<DiffHunk>>,
-    is_binary: RefCell<bool>,
-    file_status: RefCell<String>,
     found_file: RefCell<bool>,
-    renamed_from: RefCell<Option<String>>,
 
     // Current hunk being built
     current_hunk: RefCell<Option<HunkBuilder>>,
@@ -90,10 +84,7 @@ impl ParseState {
     fn new() -> Self {
         Self {
             hunks: RefCell::new(Vec::new()),
-            is_binary: RefCell::new(false),
-            file_status: RefCell::new("modified".to_string()),
             found_file: RefCell::new(false),
-            renamed_from: RefCell::new(None),
             current_hunk: RefCell::new(None),
             in_target_file: RefCell::new(false),
         }
@@ -108,22 +99,6 @@ impl ParseState {
 
         if is_target {
             *self.found_file.borrow_mut() = true;
-            *self.is_binary.borrow_mut() =
-                delta.new_file().is_binary() || delta.old_file().is_binary();
-
-            *self.file_status.borrow_mut() = match delta.status() {
-                git2::Delta::Added => "added",
-                git2::Delta::Deleted => "deleted",
-                git2::Delta::Modified => "modified",
-                git2::Delta::Renamed => "renamed",
-                git2::Delta::Copied => "copied",
-                _ => "modified",
-            }
-            .to_string();
-
-            if delta.status() == git2::Delta::Renamed {
-                *self.renamed_from.borrow_mut() = old_file_path.map(|s| s.to_string());
-            }
         }
         true
     }
@@ -209,9 +184,6 @@ impl ParseState {
 
         Ok(ParseResult {
             hunks: self.hunks.into_inner(),
-            is_binary: self.is_binary.into_inner(),
-            status: self.file_status.into_inner(),
-            renamed_from: self.renamed_from.into_inner(),
         })
     }
 }

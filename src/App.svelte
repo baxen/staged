@@ -256,8 +256,9 @@
         <DiffViewer
           diff={currentDiff}
           filePath={selectedFile}
+          {diffHead}
           {sizeBase}
-          onHunkAction={handleStatusChange}
+          onRangeDiscard={handleStatusChange}
         />
       {/if}
     </section>
