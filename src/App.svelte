@@ -77,7 +77,8 @@
   }
 
   // Current diff being viewed - hardcoded for now, TSK-754 will make this selectable
-  const diffBase = 'main';
+  // Using HEAD as base to match git status (which shows HEAD..workdir changes)
+  const diffBase = 'HEAD';
   const diffHead = '@';
 
   let selectedFile: string | null = $state(null);

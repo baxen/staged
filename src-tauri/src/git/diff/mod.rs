@@ -174,33 +174,41 @@ pub fn get_ref_diff(
         }
     }
 
-    // Generate diff using git2
-    let mut diff_opts = DiffOptions::new();
-    diff_opts.pathspec(file_path);
-    diff_opts.context_lines(0);
-
-    let diff = if head == WORKING_TREE_REF {
-        // Diff from base tree to working directory
-        let base_tree = resolve_tree(&repo, base)?;
-        repo.diff_tree_to_workdir(Some(&base_tree), Some(&mut diff_opts))?
+    // For purely added or deleted files, synthesize hunks directly from content
+    // rather than using git2's diff (which may not include untracked files)
+    let hunks = if before_content.is_none() || after_content.is_none() {
+        // Synthesize hunks for added/deleted files
+        synthesize_hunks(&before_content, &after_content)
     } else {
-        // Diff between two trees
-        let base_tree = resolve_tree(&repo, base)?;
-        let head_tree = resolve_tree(&repo, head)?;
-        repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut diff_opts))?
-    };
+        // Use git2 for modified files (has proper rename detection, etc.)
+        let mut diff_opts = DiffOptions::new();
+        diff_opts.pathspec(file_path);
+        diff_opts.context_lines(0);
 
-    // Parse hunks
-    let parse_result = parse::parse_diff(&diff, file_path)?;
+        let diff = if head == WORKING_TREE_REF {
+            // Diff from base tree to working directory (including staged changes)
+            let base_tree = resolve_tree(&repo, base)?;
+            repo.diff_tree_to_workdir_with_index(Some(&base_tree), Some(&mut diff_opts))?
+        } else {
+            // Diff between two trees
+            let base_tree = resolve_tree(&repo, base)?;
+            let head_tree = resolve_tree(&repo, head)?;
+            repo.diff_tree_to_tree(Some(&base_tree), Some(&head_tree), Some(&mut diff_opts))?
+        };
+
+        // Parse hunks from git2 diff
+        let parse_result = parse::parse_diff(&diff, file_path)?;
+        parse_result.hunks
+    };
 
     // Build side-by-side content and ranges
     let (before_lines, after_lines, ranges) =
-        side_by_side::build(&before_content, &after_content, &parse_result.hunks);
+        side_by_side::build(&before_content, &after_content, &hunks);
 
     Ok(FileDiff {
         status: status.to_string(),
         is_binary: false,
-        hunks: parse_result.hunks,
+        hunks,
         before: DiffSide {
             path: if before_content.is_some() {
                 Some(file_path.to_string())
@@ -219,6 +227,73 @@ pub fn get_ref_diff(
         },
         ranges,
     })
+}
+
+/// Synthesize hunks for purely added or deleted files.
+///
+/// When a file is entirely new (before=None) or entirely deleted (after=None),
+/// we create a single hunk covering all lines rather than using git2's diff.
+fn synthesize_hunks(
+    before_content: &Option<String>,
+    after_content: &Option<String>,
+) -> Vec<DiffHunk> {
+    match (before_content, after_content) {
+        (None, Some(content)) => {
+            // New file - all lines are added
+            let lines: Vec<HunkLine> = content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| HunkLine {
+                    line_type: "added".to_string(),
+                    old_lineno: None,
+                    new_lineno: Some((i + 1) as u32),
+                    content: line.to_string(),
+                })
+                .collect();
+
+            let line_count = lines.len() as u32;
+            if line_count == 0 {
+                return vec![];
+            }
+
+            vec![DiffHunk {
+                old_start: 0,
+                old_lines: 0,
+                new_start: 1,
+                new_lines: line_count,
+                header: format!("@@ -0,0 +1,{} @@", line_count),
+                lines,
+            }]
+        }
+        (Some(content), None) => {
+            // Deleted file - all lines are removed
+            let lines: Vec<HunkLine> = content
+                .lines()
+                .enumerate()
+                .map(|(i, line)| HunkLine {
+                    line_type: "removed".to_string(),
+                    old_lineno: Some((i + 1) as u32),
+                    new_lineno: None,
+                    content: line.to_string(),
+                })
+                .collect();
+
+            let line_count = lines.len() as u32;
+            if line_count == 0 {
+                return vec![];
+            }
+
+            vec![DiffHunk {
+                old_start: 1,
+                old_lines: line_count,
+                new_start: 0,
+                new_lines: 0,
+                header: format!("@@ -1,{} +0,0 @@", line_count),
+                lines,
+            }]
+        }
+        _ => vec![], // Both present or both absent - shouldn't happen
+    }
 }
 
 // =============================================================================

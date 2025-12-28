@@ -57,8 +57,9 @@
   let loading = $state(true);
 
   // Current diff being reviewed - hardcoded for now, TSK-754 will make this selectable
+  // Using HEAD as base to match git status (which shows HEAD..workdir changes)
   // TODO: Make this configurable via diff selector
-  const diffBase = 'main';
+  const diffBase = 'HEAD';
   const diffHead = '@';
 
   // Context menu state
@@ -307,29 +308,25 @@
     return '';
   }
 
-  function getDiffLabel(): string {
-    // Human-friendly labels
-    if (diffHead === '@') {
-      return `${diffBase} → current`;
+  // Display name for the diff base (use branch name if available, otherwise HEAD)
+  // This shows the current branch in the UI while the actual diff uses HEAD
+  function getDiffBaseDisplay(): string {
+    if (gitStatus && gitStatus.branch) {
+      return gitStatus.branch;
     }
-    return `${diffBase} → ${diffHead}`;
+    return 'HEAD';
   }
 </script>
 
 <div class="sidebar-content">
   <div class="header">
-    <div class="diff-indicator" title="{diffBase}..{diffHead}">
-      <span class="diff-base">{diffBase}</span>
-      <span class="diff-arrow">→</span>
-      <span class="diff-head">{diffHead === '@' ? 'current' : diffHead}</span>
+    <div class="branch-row">
+      <span class="branch-icon">⎇</span>
+      <span class="branch-name" title="{diffBase}..{diffHead}">{getDiffBaseDisplay()}</span>
     </div>
     <div class="header-right">
       {#if totalCount > 0}
-        <span class="file-counts">
-          <span class="reviewed-count">{reviewedCount}</span>
-          <span class="separator">/</span>
-          <span class="total-count">{totalCount}</span>
-        </span>
+        <span class="file-counts">{reviewedCount}/{totalCount}</span>
       {/if}
       <button class="refresh-btn" onclick={loadStatus} title="Refresh">↻</button>
     </div>
@@ -527,49 +524,43 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 12px 16px;
+    padding: 10px 12px;
     border-bottom: 1px solid var(--border-primary);
+    gap: 8px;
   }
 
-  .diff-indicator {
+  .branch-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .branch-icon {
+    color: var(--text-muted);
+    font-size: var(--size-md);
+    flex-shrink: 0;
+  }
+
+  .branch-name {
+    color: var(--text-link);
     font-size: var(--size-sm);
-    font-family: monospace;
-    cursor: default;
-  }
-
-  .diff-base {
-    color: var(--text-muted);
-  }
-
-  .diff-arrow {
-    color: var(--text-muted);
-    margin: 0 4px;
-  }
-
-  .diff-head {
-    color: var(--status-added);
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .header-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
+    flex-shrink: 0;
   }
 
   .file-counts {
     font-size: var(--size-sm);
     font-family: monospace;
-  }
-
-  .reviewed-count {
-    color: var(--status-added);
-  }
-
-  .separator {
-    color: var(--text-muted);
-  }
-
-  .total-count {
     color: var(--text-muted);
   }
 
@@ -577,9 +568,9 @@
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: var(--size-xl);
+    font-size: var(--size-lg);
     cursor: pointer;
-    padding: 4px 8px;
+    padding: 2px 4px;
     border-radius: 4px;
   }
 
