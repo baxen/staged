@@ -22,7 +22,7 @@ use serde::{Deserialize, Serialize};
 
 // Re-export public types (used by Tauri commands)
 pub use commit::CommitResult;
-pub use diff::{ChangedFile, FileDiff, GitRef};
+pub use diff::{ChangedFile, GitRef, LegacyFileDiff};
 pub use provider::AdaptiveProvider;
 pub use staging::DiscardRange;
 pub use status::GitStatus;

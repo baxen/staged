@@ -8,7 +8,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { X } from 'lucide-svelte';
-  import type { FileDiff } from './types';
+  import type { LegacyFileDiff } from './types';
   import {
     initHighlighter,
     highlightLines,
@@ -24,7 +24,7 @@
   import { setupKeyboardNav } from './diffKeyboard';
 
   interface Props {
-    diff: FileDiff | null;
+    diff: LegacyFileDiff | null;
     filePath?: string | null;
     /** Head ref for the diff - "@" means working tree, enabling discard */
     diffHead?: string;

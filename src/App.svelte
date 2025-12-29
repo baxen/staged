@@ -12,7 +12,7 @@
     stopWatching,
     type Unsubscribe,
   } from './lib/services/statusEvents';
-  import type { FileDiff, GitStatus, DiffSpec } from './lib/types';
+  import type { LegacyFileDiff, GitStatus, DiffSpec } from './lib/types';
 
   // UI scaling
   const SIZE_STEP = 1;
@@ -159,7 +159,7 @@
   }
 
   let selectedFile: string | null = $state(null);
-  let currentDiff: FileDiff | null = $state(null);
+  let currentDiff: LegacyFileDiff | null = $state(null);
   let diffError: string | null = $state(null);
   let sidebarRef: Sidebar | null = $state(null);
   let commitPanelRef: CommitPanel | null = $state(null);

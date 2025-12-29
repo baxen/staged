@@ -138,8 +138,14 @@ pub fn compute_diff(repo: &Repository, before_ref: &str, after_ref: &str) -> Res
     let mut file_changes: Vec<FileChange> = Vec::new();
 
     for delta in diff.deltas() {
-        let before_path = delta.old_file().path().map(|p| p.to_string_lossy().to_string());
-        let after_path = delta.new_file().path().map(|p| p.to_string_lossy().to_string());
+        let before_path = delta
+            .old_file()
+            .path()
+            .map(|p| p.to_string_lossy().to_string());
+        let after_path = delta
+            .new_file()
+            .path()
+            .map(|p| p.to_string_lossy().to_string());
 
         file_changes.push(FileChange {
             before_path,

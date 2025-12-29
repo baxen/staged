@@ -4,7 +4,7 @@ mod refresh;
 pub mod review;
 mod watcher;
 
-use git::{ChangedFile, CommitResult, DiscardRange, FileDiff, GitRef, GitStatus};
+use git::{ChangedFile, CommitResult, DiscardRange, GitRef, GitStatus, LegacyFileDiff};
 use refresh::RefreshController;
 use review::{Comment, DiffId, Edit, NewComment, NewEdit, Review, ReviewStore};
 use std::path::PathBuf;
@@ -69,6 +69,7 @@ fn open_repository(path: String) -> Result<GitStatus, String> {
 
 /// Get diff for a file between two refs.
 ///
+/// DEPRECATED: Use get_diff instead.
 /// This is the primary diff function for the review model. Compares any two
 /// refs (branches, tags, SHAs) or "@" for the working tree.
 #[tauri::command]
@@ -77,7 +78,7 @@ fn get_ref_diff(
     base: String,
     head: String,
     file_path: String,
-) -> Result<FileDiff, String> {
+) -> Result<LegacyFileDiff, String> {
     git::get_ref_diff(repo_path.as_deref(), &base, &head, &file_path).map_err(|e| e.message)
 }
 

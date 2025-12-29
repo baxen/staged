@@ -4,12 +4,12 @@
  * Pure helper functions for diff display.
  */
 
-import type { FileDiff, Range } from './types';
+import type { LegacyFileDiff, Range } from './types';
 
 /**
  * Get display path, handling renames.
  */
-export function getDisplayPath(diff: FileDiff): string {
+export function getDisplayPath(diff: LegacyFileDiff): string {
   const { before, after } = diff;
 
   if (before.path && after.path && before.path !== after.path) {
@@ -61,7 +61,7 @@ export function getLineBoundary(
  * Detect language from diff paths (prefers after path).
  */
 export function getLanguageFromDiff<T>(
-  diff: FileDiff,
+  diff: LegacyFileDiff,
   detectLanguage: (path: string) => T | null
 ): T | null {
   if (diff.after.path) return detectLanguage(diff.after.path);

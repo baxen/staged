@@ -1,5 +1,12 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { GitStatus, FileDiff, CommitResult, ChangedFile, GitRef, NewFileDiff } from '../types';
+import type {
+  GitStatus,
+  LegacyFileDiff,
+  CommitResult,
+  ChangedFile,
+  GitRef,
+  FileDiff,
+} from '../types';
 
 // =============================================================================
 // New diff API
@@ -9,12 +16,8 @@ import type { GitStatus, FileDiff, CommitResult, ChangedFile, GitRef, NewFileDif
  * Get the full diff between two refs.
  * Returns all changed files with their content and alignments.
  */
-export async function getDiff(
-  base: string,
-  head: string,
-  repoPath?: string
-): Promise<NewFileDiff[]> {
-  return invoke<NewFileDiff[]>('get_diff', {
+export async function getDiff(base: string, head: string, repoPath?: string): Promise<FileDiff[]> {
+  return invoke<FileDiff[]>('get_diff', {
     repoPath: repoPath ?? null,
     base,
     head,
@@ -69,7 +72,7 @@ export async function openRepository(path: string): Promise<GitStatus> {
 
 /**
  * Get diff for a file between two refs.
- * This is the primary diff function for the review model.
+ * @deprecated Use getDiff instead.
  *
  * @param base - Base ref (branch name, SHA, "HEAD", etc.)
  * @param head - Head ref (same as base, or "@" for working tree)
@@ -81,8 +84,8 @@ export async function getRefDiff(
   head: string,
   filePath: string,
   repoPath?: string
-): Promise<FileDiff> {
-  return invoke<FileDiff>('get_ref_diff', {
+): Promise<LegacyFileDiff> {
+  return invoke<LegacyFileDiff>('get_ref_diff', {
     repoPath: repoPath ?? null,
     base,
     head,

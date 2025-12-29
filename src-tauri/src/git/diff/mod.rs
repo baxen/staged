@@ -76,8 +76,9 @@ pub struct DiffSide {
 }
 
 /// Complete diff for a file, ready for side-by-side display.
+/// DEPRECATED: Use `diff::FileDiff` instead.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileDiff {
+pub struct LegacyFileDiff {
     pub status: String,
     pub is_binary: bool,
     pub hunks: Vec<DiffHunk>,
@@ -111,7 +112,7 @@ pub fn get_ref_diff(
     base: &str,
     head: &str,
     file_path: &str,
-) -> Result<FileDiff, GitError> {
+) -> Result<LegacyFileDiff, GitError> {
     let repo = find_repo(repo_path)?;
 
     // Get content from both sides
@@ -139,7 +140,7 @@ pub fn get_ref_diff(
     // Check for binary content
     if let Some(ref content) = before_content {
         if is_binary_content(content.as_bytes()) {
-            return Ok(FileDiff {
+            return Ok(LegacyFileDiff {
                 status: status.to_string(),
                 is_binary: true,
                 hunks: vec![],
@@ -157,7 +158,7 @@ pub fn get_ref_diff(
     }
     if let Some(ref content) = after_content {
         if is_binary_content(content.as_bytes()) {
-            return Ok(FileDiff {
+            return Ok(LegacyFileDiff {
                 status: status.to_string(),
                 is_binary: true,
                 hunks: vec![],
@@ -205,7 +206,7 @@ pub fn get_ref_diff(
     let (before_lines, after_lines, ranges) =
         side_by_side::build(&before_content, &after_content, &hunks);
 
-    Ok(FileDiff {
+    Ok(LegacyFileDiff {
         status: status.to_string(),
         is_binary: false,
         hunks,

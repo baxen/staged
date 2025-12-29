@@ -31,7 +31,7 @@ export interface Alignment {
 }
 
 /** The diff for a single file between two states */
-export interface NewFileDiff {
+export interface FileDiff {
   /** File before the change (null if added) */
   before: DiffFile | null;
   /** File after the change (null if deleted) */
@@ -94,17 +94,18 @@ export interface Range {
 }
 
 /** Content for one side of the diff */
-export interface DiffSide {
+export interface LegacyDiffSide {
   path: string | null;
   lines: DiffLine[];
 }
 
-export interface FileDiff {
+/** @deprecated Use FileDiff instead */
+export interface LegacyFileDiff {
   status: string;
   is_binary: boolean;
   hunks: DiffHunk[];
-  before: DiffSide;
-  after: DiffSide;
+  before: LegacyDiffSide;
+  after: LegacyDiffSide;
   ranges: Range[];
 }
 
