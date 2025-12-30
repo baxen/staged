@@ -5,14 +5,12 @@
 //!
 //! ## Module Structure
 //! - `commit`: Create and amend commits
-//! - `diff`: Side-by-side diff generation (see submodules for details)
 //! - `provider`: Status fetching with git2/CLI fallback
 //! - `repo`: Repository discovery utilities
 //! - `staging`: Stage, unstage, and discard operations
 //! - `status`: Working tree and index status
 
 mod commit;
-pub mod diff;
 pub mod provider;
 mod repo;
 mod staging;
@@ -20,17 +18,14 @@ mod status;
 
 use serde::{Deserialize, Serialize};
 
-// Re-export public types (used by Tauri commands)
+// Re-export public types
 pub use commit::CommitResult;
-pub use diff::{ChangedFile, GitRef, LegacyFileDiff};
 pub use provider::AdaptiveProvider;
-pub use staging::DiscardRange;
 pub use status::GitStatus;
 
-// Re-export public functions (used by Tauri commands)
+// Re-export public functions
 pub use commit::{amend_commit, create_commit, get_last_commit_message};
-pub use diff::{get_changed_files, get_ref_diff, get_refs, resolve_ref_to_sha, WORKING_TREE_REF};
-pub use staging::{discard_file, discard_lines, stage_all, stage_file, unstage_all, unstage_file};
+pub use staging::{discard_file, stage_file, unstage_file};
 pub use status::get_status;
 
 /// Common error type for git operations

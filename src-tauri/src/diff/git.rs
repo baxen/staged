@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use git2::{Delta, DiffOptions, Repository, Tree};
+use serde::{Deserialize, Serialize};
 
 use super::types::{Alignment, File, FileContent, FileDiff, Span};
 
@@ -29,44 +30,88 @@ impl From<git2::Error> for GitError {
 
 type Result<T> = std::result::Result<T, GitError>;
 
+/// A git reference with its type for display purposes.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitRef {
+    pub name: String,
+    pub ref_type: RefType,
+}
+
+/// The type of a git reference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RefType {
+    Branch,
+    Tag,
+    Special,
+}
+
 /// Open the repository containing the given path.
 pub fn open_repo(path: &Path) -> Result<Repository> {
     Repository::discover(path).map_err(Into::into)
 }
 
-/// List all refs (branches, tags) for autocomplete.
-pub fn list_refs(repo: &Repository) -> Result<Vec<String>> {
+/// Get all refs with type information for autocomplete UI.
+///
+/// Includes special refs (@, HEAD, HEAD~1), local branches, and tags.
+pub fn get_refs(repo: &Repository) -> Result<Vec<GitRef>> {
     let mut refs = Vec::new();
+
+    // Special refs first (most commonly used)
+    refs.push(GitRef {
+        name: "@".to_string(),
+        ref_type: RefType::Special,
+    });
+    refs.push(GitRef {
+        name: "HEAD".to_string(),
+        ref_type: RefType::Special,
+    });
+    refs.push(GitRef {
+        name: "HEAD~1".to_string(),
+        ref_type: RefType::Special,
+    });
 
     // Local branches
     for branch in repo.branches(Some(git2::BranchType::Local))? {
         let (branch, _) = branch?;
         if let Some(name) = branch.name()? {
-            refs.push(name.to_string());
-        }
-    }
-
-    // Remote branches
-    for branch in repo.branches(Some(git2::BranchType::Remote))? {
-        let (branch, _) = branch?;
-        if let Some(name) = branch.name()? {
-            refs.push(name.to_string());
+            refs.push(GitRef {
+                name: name.to_string(),
+                ref_type: RefType::Branch,
+            });
         }
     }
 
     // Tags
     repo.tag_foreach(|_oid, name| {
         if let Ok(name) = std::str::from_utf8(name) {
-            // Strip "refs/tags/" prefix
             let name = name.strip_prefix("refs/tags/").unwrap_or(name);
-            refs.push(name.to_string());
+            refs.push(GitRef {
+                name: name.to_string(),
+                ref_type: RefType::Tag,
+            });
         }
         true
     })?;
 
-    refs.sort();
-    refs.dedup();
     Ok(refs)
+}
+
+/// Resolve a ref to a short SHA for display, or validate it exists.
+///
+/// Returns "working tree" for "@", otherwise returns the short (8-char) SHA.
+pub fn resolve_ref(repo: &Repository, ref_str: &str) -> Result<String> {
+    if ref_str == "@" {
+        return Ok("working tree".to_string());
+    }
+
+    let obj = repo
+        .revparse_single(ref_str)
+        .map_err(|e| GitError(format!("Cannot resolve '{}': {}", ref_str, e)))?;
+
+    // Return short SHA (first 8 characters)
+    let full_sha = obj.id().to_string();
+    Ok(full_sha[..8.min(full_sha.len())].to_string())
 }
 
 /// Get the current branch name.

@@ -3,15 +3,15 @@ pub mod git;
 mod refresh;
 mod watcher;
 
-use diff::{Comment, DiffId, Edit, NewComment, NewEdit, Review};
-use git::{ChangedFile, CommitResult, DiscardRange, GitRef, GitStatus, LegacyFileDiff};
+use diff::{Comment, DiffId, Edit, GitRef, NewComment, NewEdit, Review};
+use git::{CommitResult, GitStatus};
 use refresh::RefreshController;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
 // =============================================================================
-// Diff Commands
+// Diff Commands (new module)
 // =============================================================================
 
 /// Get the full diff between two refs.
@@ -30,79 +30,35 @@ fn get_diff(
     diff::compute_diff(&repo, &base, &head).map_err(|e| e.0)
 }
 
-/// Get list of refs (branches, tags) for autocomplete.
+/// Get list of refs (branches, tags, special) with type info for autocomplete.
 #[tauri::command]
-fn list_refs(repo_path: Option<String>) -> Result<Vec<String>, String> {
+fn get_refs(repo_path: Option<String>) -> Result<Vec<GitRef>, String> {
     let path = repo_path
         .as_deref()
         .map(std::path::Path::new)
         .unwrap_or_else(|| std::path::Path::new("."));
     let repo = diff::open_repo(path).map_err(|e| e.0)?;
-    diff::list_refs(&repo).map_err(|e| e.0)
+    diff::get_refs(&repo).map_err(|e| e.0)
 }
 
-/// Get current branch name.
+/// Resolve a ref to its short SHA for display/validation.
 #[tauri::command]
-fn get_current_branch(repo_path: Option<String>) -> Result<Option<String>, String> {
+fn resolve_ref(repo_path: Option<String>, ref_str: String) -> Result<String, String> {
     let path = repo_path
         .as_deref()
         .map(std::path::Path::new)
         .unwrap_or_else(|| std::path::Path::new("."));
     let repo = diff::open_repo(path).map_err(|e| e.0)?;
-    diff::current_branch(&repo).map_err(|e| e.0)
+    diff::resolve_ref(&repo, &ref_str).map_err(|e| e.0)
 }
 
 // =============================================================================
-// Legacy Tauri Commands (using old git module)
+// Git Commands (legacy module - still needed)
 // =============================================================================
 
 #[tauri::command]
 fn get_git_status(path: Option<String>) -> Result<GitStatus, String> {
     git::get_status(path.as_deref()).map_err(|e| e.message)
-}
-
-#[tauri::command]
-fn open_repository(path: String) -> Result<GitStatus, String> {
-    git::get_status(Some(&path)).map_err(|e| e.message)
-}
-
-/// Get diff for a file between two refs.
-///
-/// DEPRECATED: Use get_diff instead.
-/// This is the primary diff function for the review model. Compares any two
-/// refs (branches, tags, SHAs) or "@" for the working tree.
-#[tauri::command]
-fn get_ref_diff(
-    repo_path: Option<String>,
-    base: String,
-    head: String,
-    file_path: String,
-) -> Result<LegacyFileDiff, String> {
-    git::get_ref_diff(repo_path.as_deref(), &base, &head, &file_path).map_err(|e| e.message)
-}
-
-/// Get list of files changed between two refs.
-///
-/// Used to populate the sidebar when viewing a diff.
-#[tauri::command]
-fn get_changed_files(
-    repo_path: Option<String>,
-    base: String,
-    head: String,
-) -> Result<Vec<ChangedFile>, String> {
-    git::get_changed_files(repo_path.as_deref(), &base, &head).map_err(|e| e.message)
-}
-
-/// Get list of refs (branches, tags) for autocomplete.
-#[tauri::command]
-fn get_refs(repo_path: Option<String>) -> Result<Vec<GitRef>, String> {
-    git::get_refs(repo_path.as_deref()).map_err(|e| e.message)
-}
-
-/// Resolve a ref to its short SHA for display.
-#[tauri::command]
-fn resolve_ref(repo_path: Option<String>, ref_str: String) -> Result<String, String> {
-    git::resolve_ref_to_sha(repo_path.as_deref(), &ref_str).map_err(|e| e.message)
 }
 
 #[tauri::command]
@@ -121,16 +77,6 @@ fn discard_file(repo_path: Option<String>, file_path: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn stage_all(repo_path: Option<String>) -> Result<(), String> {
-    git::stage_all(repo_path.as_deref()).map_err(|e| e.message)
-}
-
-#[tauri::command]
-fn unstage_all(repo_path: Option<String>) -> Result<(), String> {
-    git::unstage_all(repo_path.as_deref()).map_err(|e| e.message)
-}
-
-#[tauri::command]
 fn get_last_commit_message(repo_path: Option<String>) -> Result<Option<String>, String> {
     git::get_last_commit_message(repo_path.as_deref()).map_err(|e| e.message)
 }
@@ -143,29 +89,6 @@ fn create_commit(repo_path: Option<String>, message: String) -> Result<CommitRes
 #[tauri::command]
 fn amend_commit(repo_path: Option<String>, message: String) -> Result<CommitResult, String> {
     git::amend_commit(repo_path.as_deref(), &message).map_err(|e| e.message)
-}
-
-/// Discard specific lines from a file.
-///
-/// Takes line ranges from the UI's source_lines data and reverts those
-/// specific changes, allowing fine-grained control over what to discard.
-#[tauri::command]
-fn discard_lines(
-    repo_path: Option<String>,
-    file_path: String,
-    old_start: Option<u32>,
-    old_end: Option<u32>,
-    new_start: Option<u32>,
-    new_end: Option<u32>,
-    staged: bool,
-) -> Result<(), String> {
-    let range = DiscardRange {
-        old_start,
-        old_end,
-        new_start,
-        new_end,
-    };
-    git::discard_lines(repo_path.as_deref(), &file_path, range, staged).map_err(|e| e.message)
 }
 
 // =============================================================================
@@ -302,23 +225,15 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Diff commands
+            // Diff commands (new module)
             get_diff,
-            list_refs,
-            get_current_branch,
-            // Legacy git commands (to be removed)
-            get_git_status,
-            open_repository,
-            get_ref_diff,
-            get_changed_files,
             get_refs,
             resolve_ref,
+            // Git commands (legacy - still needed)
+            get_git_status,
             stage_file,
             unstage_file,
             discard_file,
-            stage_all,
-            unstage_all,
-            discard_lines,
             get_last_commit_message,
             create_commit,
             amend_commit,
