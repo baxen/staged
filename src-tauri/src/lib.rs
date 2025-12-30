@@ -80,17 +80,40 @@ fn get_last_commit_message(repo_path: Option<String>) -> Result<Option<String>, 
 // Review Commands
 // =============================================================================
 
+/// Resolve a ref to a full SHA for use as a stable storage key.
+/// "@" is kept as-is (represents working tree).
+/// All other refs are resolved to their full SHA.
+fn resolve_for_storage(repo: &git2::Repository, ref_str: &str) -> Result<String, String> {
+    if ref_str == "@" {
+        return Ok("@".to_string());
+    }
+
+    let obj = repo
+        .revparse_single(ref_str)
+        .map_err(|e| format!("Cannot resolve '{}': {}", ref_str, e))?;
+
+    Ok(obj.id().to_string())
+}
+
+/// Create a DiffId with resolved SHAs for stable storage.
+fn make_diff_id(base: &str, head: &str) -> Result<DiffId, String> {
+    let repo = diff::open_repo(std::path::Path::new(".")).map_err(|e| e.0)?;
+    let resolved_base = resolve_for_storage(&repo, base)?;
+    let resolved_head = resolve_for_storage(&repo, head)?;
+    Ok(DiffId::new(resolved_base, resolved_head))
+}
+
 #[tauri::command]
 fn get_review(base: String, head: String) -> Result<Review, String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     store.get_or_create(&id).map_err(|e| e.0)
 }
 
 #[tauri::command]
 fn add_comment(base: String, head: String, comment: NewComment) -> Result<Comment, String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     let comment = Comment::new(comment.path, comment.selection, comment.content);
     store.add_comment(&id, &comment).map_err(|e| e.0)?;
     Ok(comment)
@@ -105,21 +128,21 @@ fn delete_comment(comment_id: String) -> Result<(), String> {
 #[tauri::command]
 fn mark_reviewed(base: String, head: String, path: String) -> Result<(), String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     store.mark_reviewed(&id, &path).map_err(|e| e.0)
 }
 
 #[tauri::command]
 fn unmark_reviewed(base: String, head: String, path: String) -> Result<(), String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     store.unmark_reviewed(&id, &path).map_err(|e| e.0)
 }
 
 #[tauri::command]
 fn record_edit(base: String, head: String, edit: NewEdit) -> Result<Edit, String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     let edit = Edit::new(edit.path, edit.diff);
     store.add_edit(&id, &edit).map_err(|e| e.0)?;
     Ok(edit)
@@ -128,7 +151,7 @@ fn record_edit(base: String, head: String, edit: NewEdit) -> Result<Edit, String
 #[tauri::command]
 fn export_review_markdown(base: String, head: String) -> Result<String, String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     let review = store.get_or_create(&id).map_err(|e| e.0)?;
     Ok(diff::export_markdown(&review))
 }
@@ -136,7 +159,7 @@ fn export_review_markdown(base: String, head: String) -> Result<String, String> 
 #[tauri::command]
 fn clear_review(base: String, head: String) -> Result<(), String> {
     let store = diff::get_store().map_err(|e| e.0)?;
-    let id = DiffId::new(base, head);
+    let id = make_diff_id(&base, &head)?;
     store.delete(&id).map_err(|e| e.0)
 }
 

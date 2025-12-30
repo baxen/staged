@@ -16,16 +16,12 @@
     CirclePlus,
     CircleMinus,
     CircleX,
-    Plus,
-    Minus,
-    Trash2,
     Check,
     RotateCcw,
   } from 'lucide-svelte';
-  import { stageFile, unstageFile, discardFile } from './services/git';
   import { getReview, markReviewed, unmarkReviewed } from './services/review';
   import type { FileDiff, Review } from './types';
-  import { getFilePath, isBinaryDiff } from './diffUtils';
+  import { getFilePath } from './diffUtils';
 
   interface FileEntry {
     path: string;
@@ -37,8 +33,6 @@
   interface Props {
     /** Called when user selects a file to view */
     onFileSelect?: (path: string) => void;
-    /** Called when staging/unstaging/discarding changes */
-    onStatusChange?: () => void;
     /** Currently selected file path */
     selectedFile?: string | null;
     /** Base ref for the diff (controlled by parent) */
@@ -47,28 +41,14 @@
     diffHead?: string;
   }
 
-  let {
-    onFileSelect,
-    onStatusChange,
-    selectedFile = null,
-    diffBase = 'HEAD',
-    diffHead = '@',
-  }: Props = $props();
+  let { onFileSelect, selectedFile = null, diffBase = 'HEAD', diffHead = '@' }: Props = $props();
 
   let diffs: FileDiff[] = $state([]);
   let review: Review | null = $state(null);
   let loading = $state(true);
 
-  // Context menu state - only show for working tree diffs
-  let contextMenu: { x: number; y: number; file: FileEntry } | null = $state(null);
-  let holdingDiscard = $state(false);
-  let discardProgress = $state(0);
-  let discardStartTime: number | null = null;
-  let discardAnimationFrame: number | null = null;
-  const HOLD_DURATION = 700;
-
-  // Can we modify files? Only when viewing working tree
-  let canModify = $derived(diffHead === '@');
+  // Is this viewing the working tree?
+  let isWorkingTree = $derived(diffHead === '@');
 
   /**
    * Determine file status from a FileDiff.
@@ -118,17 +98,7 @@
   let totalCount = $derived(files.length);
 
   onMount(() => {
-    // Load review state
     loadReview();
-
-    // Close context menu on click outside
-    const handleClickOutside = () => {
-      if (contextMenu) {
-        closeContextMenu();
-      }
-    };
-    window.addEventListener('click', handleClickOutside);
-    return () => window.removeEventListener('click', handleClickOutside);
   });
 
   // Reload review when diff spec changes
@@ -166,80 +136,6 @@
     }
   }
 
-  // Context menu handlers - only for working tree mode
-  function handleContextMenu(event: MouseEvent, file: FileEntry) {
-    if (!canModify) return; // No context menu for historical diffs
-    event.preventDefault();
-    event.stopPropagation();
-    contextMenu = { x: event.clientX, y: event.clientY, file };
-  }
-
-  function closeContextMenu() {
-    contextMenu = null;
-    cancelDiscardHold();
-  }
-
-  async function handleStage(file: FileEntry) {
-    try {
-      await stageFile(file.path);
-      onStatusChange?.();
-    } catch (e) {
-      console.error('Failed to stage:', e);
-    }
-    closeContextMenu();
-  }
-
-  async function handleUnstage(file: FileEntry) {
-    try {
-      await unstageFile(file.path);
-      onStatusChange?.();
-    } catch (e) {
-      console.error('Failed to unstage:', e);
-    }
-    closeContextMenu();
-  }
-
-  async function handleDiscard(file: FileEntry) {
-    try {
-      await discardFile(file.path);
-      onStatusChange?.();
-    } catch (e) {
-      console.error('Failed to discard:', e);
-    }
-    closeContextMenu();
-  }
-
-  // Hold-to-discard logic for context menu
-  function startDiscardHold() {
-    holdingDiscard = true;
-    discardProgress = 0;
-    discardStartTime = Date.now();
-    discardAnimationFrame = requestAnimationFrame(updateDiscardProgress);
-  }
-
-  function updateDiscardProgress() {
-    if (!discardStartTime || !contextMenu) return;
-
-    const elapsed = Date.now() - discardStartTime;
-    discardProgress = Math.min(elapsed / HOLD_DURATION, 1);
-
-    if (discardProgress >= 1) {
-      handleDiscard(contextMenu.file);
-    } else {
-      discardAnimationFrame = requestAnimationFrame(updateDiscardProgress);
-    }
-  }
-
-  function cancelDiscardHold() {
-    holdingDiscard = false;
-    discardProgress = 0;
-    discardStartTime = null;
-    if (discardAnimationFrame) {
-      cancelAnimationFrame(discardAnimationFrame);
-      discardAnimationFrame = null;
-    }
-  }
-
   function getFileName(path: string): string {
     return path.split('/').pop() || path;
   }
@@ -267,7 +163,7 @@
   {:else if files.length === 0}
     <div class="empty-state">
       <p>No changes</p>
-      {#if canModify}
+      {#if isWorkingTree}
         <p class="empty-hint">Working tree is clean</p>
       {:else}
         <p class="empty-hint">No differences between refs</p>
@@ -279,12 +175,10 @@
       {#if needsReview.length > 0}
         <ul class="file-section">
           {#each needsReview as file (file.path)}
-            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
             <li
               class="file-item"
               class:selected={selectedFile === file.path}
               onclick={() => selectFile(file)}
-              oncontextmenu={(e) => handleContextMenu(e, file)}
               tabindex="0"
               role="button"
             >
@@ -297,18 +191,18 @@
                 <!-- Default icon (hidden on hover) -->
                 <span class="icon-default">
                   {#if file.status === 'added'}
-                    {#if canModify}
+                    {#if isWorkingTree}
                       <CircleFadingPlus size={16} />
                     {:else}
                       <CirclePlus size={16} />
                     {/if}
                   {:else if file.status === 'deleted'}
-                    {#if canModify}
+                    {#if isWorkingTree}
                       <CircleX size={16} />
                     {:else}
                       <CircleMinus size={16} />
                     {/if}
-                  {:else if canModify}
+                  {:else if isWorkingTree}
                     <CircleFadingArrowUp size={16} />
                   {:else}
                     <CircleArrowUp size={16} />
@@ -349,12 +243,10 @@
       {#if reviewed.length > 0}
         <ul class="file-section reviewed-section">
           {#each reviewed as file (file.path)}
-            <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
             <li
               class="file-item"
               class:selected={selectedFile === file.path}
               onclick={() => selectFile(file)}
-              oncontextmenu={(e) => handleContextMenu(e, file)}
               tabindex="0"
               role="button"
             >
@@ -367,18 +259,18 @@
                 <!-- Default icon (hidden on hover) -->
                 <span class="icon-default">
                   {#if file.status === 'added'}
-                    {#if canModify}
+                    {#if isWorkingTree}
                       <CircleFadingPlus size={16} />
                     {:else}
                       <CirclePlus size={16} />
                     {/if}
                   {:else if file.status === 'deleted'}
-                    {#if canModify}
+                    {#if isWorkingTree}
                       <CircleX size={16} />
                     {:else}
                       <CircleMinus size={16} />
                     {/if}
-                  {:else if canModify}
+                  {:else if isWorkingTree}
                     <CircleFadingArrowUp size={16} />
                   {:else}
                     <CircleArrowUp size={16} />
@@ -405,36 +297,6 @@
           {/each}
         </ul>
       {/if}
-    </div>
-  {/if}
-
-  <!-- Context Menu -->
-  {#if contextMenu}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div
-      class="context-menu"
-      style="left: {contextMenu.x}px; top: {contextMenu.y}px;"
-      onclick={(e) => e.stopPropagation()}
-    >
-      <button class="context-item" onclick={() => handleStage(contextMenu!.file)}>
-        <Plus size={14} />
-        <span>Stage</span>
-      </button>
-      <button class="context-item" onclick={() => handleUnstage(contextMenu!.file)}>
-        <Minus size={14} />
-        <span>Unstage</span>
-      </button>
-      <div class="context-divider"></div>
-      <button
-        class="context-item discard-item"
-        onmousedown={startDiscardHold}
-        onmouseup={cancelDiscardHold}
-        onmouseleave={cancelDiscardHold}
-      >
-        <span class="discard-progress" style="width: {discardProgress * 100}%"></span>
-        <Trash2 size={14} />
-        <span>Discard</span>
-      </button>
     </div>
   {/if}
 </div>
@@ -613,62 +475,5 @@
 
   .comment-count {
     font-family: monospace;
-  }
-
-  /* Context Menu */
-  .context-menu {
-    position: fixed;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
-    border-radius: 6px;
-    padding: 4px 0;
-    min-width: 160px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-    z-index: 1000;
-  }
-
-  .context-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 6px 12px;
-    background: none;
-    border: none;
-    color: var(--text-primary);
-    font-size: var(--size-sm);
-    text-align: left;
-    cursor: pointer;
-    position: relative;
-    overflow: hidden;
-  }
-
-  .context-item:hover {
-    background-color: var(--bg-tertiary);
-  }
-
-  .context-divider {
-    height: 1px;
-    background: var(--border-primary);
-    margin: 4px 0;
-  }
-
-  /* Hold to discard - no red text, just red progress bar */
-  .context-item.discard-item {
-    color: var(--text-primary);
-  }
-
-  .context-item.discard-item:hover {
-    background-color: var(--bg-tertiary);
-  }
-
-  .discard-progress {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background-color: var(--status-deleted);
-    opacity: 0.5;
-    pointer-events: none;
   }
 </style>

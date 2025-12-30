@@ -3,16 +3,15 @@
   import { ChevronDown } from 'lucide-svelte';
   import Sidebar from './lib/Sidebar.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
-  import CommitPanel from './lib/CommitPanel.svelte';
   import DiffSelectorModal from './lib/DiffSelectorModal.svelte';
-  import { getDiff, resolveRef, getGitStatus } from './lib/services/git';
+  import { getDiff, resolveRef, getRepoInfo } from './lib/services/git';
   import {
-    subscribeToStatusEvents,
+    subscribeToFileChanges,
     startWatching,
     stopWatching,
     type Unsubscribe,
   } from './lib/services/statusEvents';
-  import type { FileDiff, GitStatus, DiffSpec } from './lib/types';
+  import type { FileDiff, DiffSpec } from './lib/types';
   import { getFilePath } from './lib/diffUtils';
 
   // UI scaling
@@ -176,7 +175,6 @@
   });
 
   let sidebarRef: Sidebar | null = $state(null);
-  let commitPanelRef: CommitPanel | null = $state(null);
 
   // Watcher cleanup function
   let unsubscribe: Unsubscribe | null = null;
@@ -210,13 +208,10 @@
   }
 
   /**
-   * Handle status updates from the file watcher.
+   * Handle file change notifications from the watcher.
    * Only relevant when diffHead is "@" (working tree).
    */
-  async function handleStatusUpdate(_status: GitStatus) {
-    // Refresh commit panel
-    commitPanelRef?.refresh();
-
+  async function handleFilesChanged() {
     // Only reload diffs if we're viewing the working tree
     if (diffHead !== '@') {
       return;
@@ -250,27 +245,18 @@
 
     // Get repo path for watcher
     try {
-      const status = await getGitStatus();
-      if (status?.repo_path) {
-        currentRepoPath = status.repo_path;
-        await startWatching(status.repo_path);
-        console.log('Started watching:', status.repo_path);
+      const info = await getRepoInfo();
+      if (info?.repo_path) {
+        currentRepoPath = info.repo_path;
+        await startWatching(info.repo_path);
+        console.log('Started watching:', info.repo_path);
       }
     } catch (e) {
       console.error('Failed to start watcher:', e);
     }
 
-    // Subscribe to status events from the backend
-    unsubscribe = await subscribeToStatusEvents(
-      // On status update - handle refresh logic
-      handleStatusUpdate,
-      // On slow repo detected (optional one-time notification)
-      () => {
-        console.log(
-          'Slow repository detected. Consider enabling git fsmonitor: git config core.fsmonitor true'
-        );
-      }
-    );
+    // Subscribe to file change events from the backend
+    unsubscribe = await subscribeToFileChanges(handleFilesChanged);
   });
 
   onDestroy(() => {
@@ -286,22 +272,6 @@
 
   function handleFileSelect(path: string) {
     selectedFile = path;
-  }
-
-  async function handleStatusChange() {
-    // Sidebar staged/unstaged/discarded a file - refresh commit panel
-    commitPanelRef?.refresh();
-
-    // Reload all diffs (content may have changed from discard)
-    await loadAllDiffs();
-  }
-
-  async function handleCommitComplete() {
-    // Refresh after successful commit
-    await loadAllDiffs();
-    commitPanelRef?.refresh();
-    // Clear the selection since files may have changed
-    selectedFile = null;
   }
 </script>
 
@@ -357,25 +327,19 @@
           <p class="error-message">{diffsError}</p>
         </div>
       {:else}
-        <DiffViewer diff={currentDiff} {diffHead} {sizeBase} onRangeDiscard={handleStatusChange} />
+        <DiffViewer diff={currentDiff} {diffHead} {sizeBase} />
       {/if}
     </section>
     <aside class="sidebar">
       <Sidebar
         bind:this={sidebarRef}
         onFileSelect={handleFileSelect}
-        onStatusChange={handleStatusChange}
         {selectedFile}
         {diffBase}
         {diffHead}
       />
     </aside>
   </div>
-  {#if diffHead === '@'}
-    <footer class="commit-panel">
-      <CommitPanel bind:this={commitPanelRef} onCommitComplete={handleCommitComplete} />
-    </footer>
-  {/if}
 </main>
 
 <DiffSelectorModal
@@ -547,12 +511,5 @@
     font-size: var(--size-sm);
     color: var(--text-muted);
     margin-top: 8px;
-  }
-
-  .commit-panel {
-    height: 120px;
-    min-height: 80px;
-    background-color: var(--bg-secondary);
-    border-top: 1px solid var(--border-primary);
   }
 </style>

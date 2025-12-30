@@ -39,30 +39,16 @@ export interface FileDiff {
 // Git types
 // =============================================================================
 
-export interface FileStatus {
-  path: string;
-  status: 'modified' | 'added' | 'deleted' | 'renamed' | 'typechange' | 'untracked' | 'unknown';
-}
-
-/** Git repository status (used by watcher/refresh) */
-export interface GitStatus {
-  staged: FileStatus[];
-  unstaged: FileStatus[];
-  untracked: FileStatus[];
-  branch: string | null;
+/** Basic repository info */
+export interface RepoInfo {
   repo_path: string;
+  branch: string | null;
 }
 
 /** A git reference for autocomplete */
 export interface GitRef {
   name: string;
   ref_type: 'branch' | 'tag' | 'special';
-}
-
-/** Result of a commit operation */
-export interface CommitResult {
-  oid: string;
-  message: string;
 }
 
 // =============================================================================
