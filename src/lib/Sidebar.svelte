@@ -363,6 +363,11 @@
     gap: 6px;
     cursor: pointer;
     position: relative;
+    border-radius: 6px;
+    margin: 0 4px;
+    transition:
+      background-color 0.1s,
+      box-shadow 0.1s;
   }
 
   .file-item:hover {
@@ -370,7 +375,7 @@
   }
 
   .file-item.selected {
-    background-color: var(--ui-selection);
+    background-color: var(--bg-primary);
   }
 
   /* Status icon as button */

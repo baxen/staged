@@ -62,13 +62,21 @@ export interface Theme {
     accent: string; // Primary accent
     accentHover: string; // Accent hover
     danger: string; // Destructive actions
-    selection: string; // Selected items background
+    dangerBg: string; // Danger background (for error messages)
+    selection: string; // Selected items background (theme-derived)
   };
 
   // Scrollbar
   scrollbar: {
     thumb: string;
     thumbHover: string;
+  };
+
+  // Shadows and overlays (for modals, dropdowns, etc.)
+  shadow: {
+    overlay: string; // Modal backdrop
+    elevated: string; // Floating element shadows
+    glow: string; // Selection glow effect
   };
 }
 
@@ -322,12 +330,25 @@ export function createAdaptiveTheme(
       accent: accentGreen,
       accentHover: isDark ? '#2ea043' : '#2da44e',
       danger: accentRed,
-      selection: overlay(accentBlue, 0.2),
+      dangerBg: overlay(accentRed, isDark ? 0.1 : 0.08),
+      // Selection uses foreground color for a neutral, theme-consistent highlight
+      selection: overlay(syntaxFg, isDark ? 0.08 : 0.1),
     },
 
     scrollbar: {
       thumb: borderBase,
       thumbHover: mix(primaryBg, syntaxFg, 0.25),
+    },
+
+    shadow: {
+      // Overlay for modal backdrops - darker for light themes, lighter for dark
+      overlay: isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(0, 0, 0, 0.4)',
+      // Elevated element shadows - use theme bg for colored shadow
+      elevated: isDark
+        ? `0 8px 24px ${overlay('#000000', 0.4)}`
+        : `0 8px 24px ${overlay('#000000', 0.15)}`,
+      // Selection glow - subtle glow using foreground color
+      glow: `0 0 0 1px ${overlay(syntaxFg, isDark ? 0.1 : 0.08)}`,
     },
   };
 }
@@ -367,9 +388,14 @@ export function themeToCssVars(t: Theme): string {
     --ui-accent: ${t.ui.accent};
     --ui-accent-hover: ${t.ui.accentHover};
     --ui-danger: ${t.ui.danger};
+    --ui-danger-bg: ${t.ui.dangerBg};
     --ui-selection: ${t.ui.selection};
 
     --scrollbar-thumb: ${t.scrollbar.thumb};
     --scrollbar-thumb-hover: ${t.scrollbar.thumbHover};
+
+    --shadow-overlay: ${t.shadow.overlay};
+    --shadow-elevated: ${t.shadow.elevated};
+    --shadow-glow: ${t.shadow.glow};
   `.trim();
 }

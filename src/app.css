@@ -46,10 +46,15 @@
   --ui-accent: #238636;
   --ui-accent-hover: #2ea043;
   --ui-danger: #da3633;
-  --ui-selection: rgba(88, 166, 255, 0.2);
+  --ui-danger-bg: rgba(248, 81, 73, 0.1);
+  --ui-selection: rgba(212, 212, 212, 0.08);
 
   --scrollbar-thumb: #3c3c3c;
   --scrollbar-thumb-hover: #505050;
+
+  --shadow-overlay: rgba(0, 0, 0, 0.6);
+  --shadow-elevated: 0 8px 24px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 0 1px rgba(212, 212, 212, 0.1);
 
   /* 
    * Size scale - all sizes derive from --size-base

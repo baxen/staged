@@ -260,10 +260,9 @@
       const theme = getTheme();
       if (theme) themeBg = theme.bg;
     } else {
-      // Fallback: plain text tokens
-      const defaultColor = '#d4d4d4';
-      beforeTokens = beforeLines.map((line) => [{ content: line, color: defaultColor }]);
-      afterTokens = afterLines.map((line) => [{ content: line, color: defaultColor }]);
+      // Fallback: plain text tokens using 'inherit' to use CSS variable color
+      beforeTokens = beforeLines.map((line) => [{ content: line, color: 'inherit' }]);
+      afterTokens = afterLines.map((line) => [{ content: line, color: 'inherit' }]);
     }
   });
 
@@ -281,11 +280,11 @@
 
   // Simple lookup - tokens are pre-computed
   function getBeforeTokens(index: number): Token[] {
-    return beforeTokens[index] || [{ content: '', color: '#d4d4d4' }];
+    return beforeTokens[index] || [{ content: '', color: 'inherit' }];
   }
 
   function getAfterTokens(index: number): Token[] {
-    return afterTokens[index] || [{ content: '', color: '#d4d4d4' }];
+    return afterTokens[index] || [{ content: '', color: 'inherit' }];
   }
 
   function redrawConnectors() {

@@ -511,7 +511,7 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-muted);
     border-radius: 6px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+    box-shadow: var(--shadow-elevated);
     min-width: 200px;
     z-index: 100;
     overflow: hidden;

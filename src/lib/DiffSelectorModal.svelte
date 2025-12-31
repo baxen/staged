@@ -282,7 +282,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--shadow-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -290,12 +290,12 @@
   }
 
   .modal {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-muted);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
     border-radius: 8px;
     width: 360px;
     max-width: 90vw;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--shadow-elevated);
   }
 
   .modal-header {
@@ -383,7 +383,7 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-muted);
     border-radius: 4px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-elevated);
     max-height: 200px;
     overflow-y: auto;
     z-index: 10;
@@ -403,9 +403,12 @@
     cursor: pointer;
   }
 
-  .suggestion:hover,
-  .suggestion.selected {
+  .suggestion:hover {
     background: var(--bg-hover);
+  }
+
+  .suggestion.selected {
+    background: var(--bg-chrome);
   }
 
   .ref-icon {
@@ -432,10 +435,10 @@
 
   .error {
     padding: 8px 10px;
-    background: rgba(255, 85, 85, 0.1);
-    border: 1px solid var(--status-deleted);
+    background: var(--ui-danger-bg);
+    border: 1px solid var(--ui-danger);
     border-radius: 4px;
-    color: var(--status-deleted);
+    color: var(--ui-danger);
     font-size: var(--size-sm);
   }
 
@@ -474,13 +477,13 @@
   }
 
   .btn-primary {
-    background: var(--ui-accent);
-    border: 1px solid var(--ui-accent);
-    color: white;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-muted);
+    color: var(--text-primary);
   }
 
   .btn-primary:hover:not(:disabled) {
-    background: var(--ui-accent-hover);
-    border-color: var(--ui-accent-hover);
+    background: var(--bg-primary);
+    border-color: var(--border-emphasis);
   }
 </style>
