@@ -40,6 +40,7 @@
 
   --diff-added-bg: rgba(63, 185, 80, 0.08);
   --diff-removed-bg: rgba(248, 81, 73, 0.08);
+  --diff-changed-bg: rgba(212, 212, 212, 0.04);
   --diff-range-border: #505050;
 
   --ui-accent: #238636;

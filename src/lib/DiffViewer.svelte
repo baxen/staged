@@ -285,6 +285,7 @@
     drawConnectors(connectorSvg, activeAlignments, beforePane.scrollTop, afterPane.scrollTop, {
       lineHeight,
       verticalOffset,
+      hoveredIndex: hoveredRangeIndex,
     });
   }
 
@@ -311,6 +312,15 @@
       requestAnimationFrame(() => {
         redrawConnectors();
       });
+    }
+  });
+
+  // Redraw connectors when hover state changes
+  $effect(() => {
+    // Dependency on hoveredRangeIndex
+    const _ = hoveredRangeIndex;
+    if (diff && connectorSvg && beforePane) {
+      redrawConnectors();
     }
   });
 
@@ -719,9 +729,9 @@
     white-space: pre;
   }
 
-  /* Changed line highlight */
+  /* Changed line highlight - neutral tint that works for both sides */
   .line.content-changed {
-    background-color: var(--diff-added-bg);
+    background-color: var(--diff-changed-bg);
   }
 
   /* Range boundary markers - visible but not distracting */

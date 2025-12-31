@@ -53,6 +53,7 @@ export interface Theme {
   diff: {
     addedBg: string; // Background tint for added lines
     removedBg: string; // Background tint for removed lines
+    changedBg: string; // Neutral background for changed lines (not add/remove specific)
     rangeBorder: string; // Border color for change range markers
   };
 
@@ -207,6 +208,8 @@ export function createAdaptiveTheme(
       // Very subtle tints - the syntax highlighting should dominate
       addedBg: overlay(accentGreen, isDark ? 0.08 : 0.1),
       removedBg: overlay(accentRed, isDark ? 0.08 : 0.1),
+      // Neutral highlight for changed lines - subtle foreground tint
+      changedBg: overlay(syntaxFg, isDark ? 0.04 : 0.06),
       // Range borders need to be visible but not distracting
       rangeBorder: mix(syntaxBg, syntaxFg, isDark ? 0.2 : 0.15),
     },
@@ -254,6 +257,7 @@ export function themeToCssVars(t: Theme): string {
 
     --diff-added-bg: ${t.diff.addedBg};
     --diff-removed-bg: ${t.diff.removedBg};
+    --diff-changed-bg: ${t.diff.changedBg};
     --diff-range-border: ${t.diff.rangeBorder};
 
     --ui-accent: ${t.ui.accent};
