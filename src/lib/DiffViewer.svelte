@@ -56,9 +56,12 @@
   let beforeCollapsed = $state(false);
   let afterCollapsed = $state(false);
 
-  // Hover state for showing collapse/expand buttons
+  // Panel hover state for dynamic sizing
   let beforeHovered = $state(false);
   let afterHovered = $state(false);
+
+  // Space key held = 90/10 split instead of 60/40 (like zoom key in photo editors)
+  let spaceHeld = $state(false);
 
   // Range hover state (for showing discard toolbar on changed ranges)
   let hoveredRangeIndex: number | null = $state(null);
@@ -296,9 +299,9 @@
     });
   }
 
-  // Redraw connectors when collapse state changes (after transition)
+  // Redraw connectors when panel size state changes (after transition)
   $effect(() => {
-    const _ = [beforeCollapsed, afterCollapsed];
+    const _ = [beforeCollapsed, afterCollapsed, beforeHovered, afterHovered, spaceHeld];
     // Wait for flex transition to complete
     setTimeout(redrawConnectors, 250);
   });
@@ -420,9 +423,36 @@
       highlighterReady = true;
     });
 
-    return setupKeyboardNav({
+    // Space key = zoom modifier (hold to expand hovered panel to 90%)
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.code === 'Space' && !e.repeat) {
+        // Only capture space if we're not in an input/textarea
+        const target = e.target as HTMLElement;
+        if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+          e.preventDefault();
+          spaceHeld = true;
+        }
+      }
+    }
+
+    function handleKeyUp(e: KeyboardEvent) {
+      if (e.code === 'Space') {
+        spaceHeld = false;
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+
+    const cleanupKeyboardNav = setupKeyboardNav({
       getScrollTarget: () => afterPane,
     });
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      cleanupKeyboardNav?.();
+    };
   });
 </script>
 
@@ -442,6 +472,8 @@
       <div
         class="diff-pane before-pane"
         class:collapsed={beforeCollapsed}
+        class:focused={beforeHovered && !beforeCollapsed}
+        class:zoomed={beforeHovered && !beforeCollapsed && spaceHeld}
         onmouseenter={() => (beforeHovered = true)}
         onmouseleave={() => (beforeHovered = false)}
       >
@@ -507,6 +539,8 @@
       <div
         class="diff-pane after-pane"
         class:collapsed={afterCollapsed}
+        class:focused={afterHovered && !afterCollapsed}
+        class:zoomed={afterHovered && !afterCollapsed && spaceHeld}
         onmouseenter={() => (afterHovered = true)}
         onmouseleave={() => (afterHovered = false)}
       >
@@ -599,13 +633,52 @@
     transition: flex 0.2s ease;
   }
 
-  /* 40/60 split: before gets 40%, after gets 60% */
+  /* Default: 40/60 split (before gets 40%, after gets 60%) */
   .before-pane {
     flex: 4;
   }
 
   .after-pane {
     flex: 6;
+  }
+
+  /* Focused (hovered): 60/40 split - hovered pane expands */
+  .before-pane.focused:not(.zoomed) {
+    flex: 6;
+  }
+
+  .before-pane.focused:not(.zoomed) ~ .spine ~ .after-pane:not(.focused) {
+    flex: 4;
+  }
+
+  .after-pane.focused:not(.zoomed) {
+    flex: 6;
+  }
+
+  .before-pane:not(.focused) ~ .spine ~ .after-pane.focused:not(.zoomed) {
+    flex: 6;
+  }
+
+  /* Zoomed (space held): 90/10 split - zoomed pane dominates */
+  .before-pane.zoomed {
+    flex: 9;
+  }
+
+  .before-pane.zoomed ~ .spine ~ .after-pane {
+    flex: 1;
+  }
+
+  .after-pane.zoomed {
+    flex: 9;
+  }
+
+  .before-pane:not(.zoomed) ~ .spine ~ .after-pane.zoomed {
+    flex: 9;
+  }
+
+  /* When after is zoomed, before shrinks */
+  .before-pane:has(~ .spine ~ .after-pane.zoomed) {
+    flex: 1;
   }
 
   /* Collapsed state: 10% width (flex: 1 vs 9 for the other) */
@@ -617,17 +690,13 @@
     flex: 1;
   }
 
-  /* When one is collapsed, the other expands */
+  /* When one is collapsed, the other expands to 90% */
   .before-pane.collapsed ~ .spine ~ .after-pane {
     flex: 9;
   }
 
   .before-pane:not(.collapsed) ~ .spine ~ .after-pane.collapsed {
     flex: 1;
-  }
-
-  .before-pane:not(.collapsed) ~ .spine ~ .after-pane:not(.collapsed) {
-    flex: 6;
   }
 
   /* Collapse/expand button */
