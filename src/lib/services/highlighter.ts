@@ -24,12 +24,54 @@ export interface HighlighterTheme {
   name: string;
   bg: string;
   fg: string;
+  comment: string; // Color used for comments - useful for muted UI text
 }
 
 // Singleton highlighter instance
 let highlighter: Highlighter | null = null;
 let currentTheme: HighlighterTheme | null = null;
+let currentThemeName: string = 'github-dark';
 let initPromise: Promise<void> | null = null;
+
+// Available syntax themes (curated set that work well)
+export const SYNTAX_THEMES = [
+  'github-dark',
+  'github-dark-dimmed',
+  'one-dark-pro',
+  'dracula',
+  'nord',
+  'vitesse-dark',
+  'tokyo-night',
+  'catppuccin-mocha',
+  'rose-pine-moon',
+  'min-dark',
+] as const;
+
+export type SyntaxThemeName = (typeof SYNTAX_THEMES)[number];
+
+// Static theme imports (Vite can't handle dynamic imports for these)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const themeImports: Record<SyntaxThemeName, () => Promise<any>> = {
+  'github-dark': () => import('shiki/themes/github-dark.mjs'),
+  'github-dark-dimmed': () => import('shiki/themes/github-dark-dimmed.mjs'),
+  'one-dark-pro': () => import('shiki/themes/one-dark-pro.mjs'),
+  dracula: () => import('shiki/themes/dracula.mjs'),
+  nord: () => import('shiki/themes/nord.mjs'),
+  'vitesse-dark': () => import('shiki/themes/vitesse-dark.mjs'),
+  'tokyo-night': () => import('shiki/themes/tokyo-night.mjs'),
+  'catppuccin-mocha': () => import('shiki/themes/catppuccin-mocha.mjs'),
+  'rose-pine-moon': () => import('shiki/themes/rose-pine-moon.mjs'),
+  'min-dark': () => import('shiki/themes/min-dark.mjs'),
+};
+
+// Theme change listeners
+type ThemeChangeListener = (theme: HighlighterTheme) => void;
+const themeChangeListeners: Set<ThemeChangeListener> = new Set();
+
+export function onThemeChange(listener: ThemeChangeListener): () => void {
+  themeChangeListeners.add(listener);
+  return () => themeChangeListeners.delete(listener);
+}
 
 // Track which languages we've attempted to load (to avoid repeated failures)
 const loadedLanguages = new Set<string>();
@@ -299,6 +341,30 @@ const EXTENSION_MAP: Record<string, BundledLanguage> = {
 };
 
 /**
+ * Known comment colors for each syntax theme.
+ * Extracted from the theme definitions - more reliable than parsing at runtime.
+ */
+const THEME_COMMENT_COLORS: Record<SyntaxThemeName, string> = {
+  'github-dark': '#8b949e',
+  'github-dark-dimmed': '#768390',
+  'one-dark-pro': '#7f848e',
+  dracula: '#6272a4',
+  nord: '#616e88',
+  'vitesse-dark': '#758575',
+  'tokyo-night': '#565f89',
+  'catppuccin-mocha': '#6c7086',
+  'rose-pine-moon': '#6e6a86',
+  'min-dark': '#6b737c',
+};
+
+/**
+ * Get the comment color for a theme.
+ */
+function getCommentColor(themeName: string, fallback: string): string {
+  return THEME_COMMENT_COLORS[themeName as SyntaxThemeName] || fallback;
+}
+
+/**
  * Initialize the highlighter with a theme.
  * Only loads core languages at startup for fast init.
  * Other languages are lazy-loaded on demand.
@@ -328,10 +394,12 @@ export async function initHighlighter(themeName: string = 'github-dark'): Promis
 
     // Extract theme colors
     const theme = highlighter.getTheme(themeName);
+    const fg = theme.fg || '#d4d4d4';
     currentTheme = {
       name: themeName,
       bg: theme.bg || '#1e1e1e',
-      fg: theme.fg || '#d4d4d4',
+      fg,
+      comment: getCommentColor(themeName, fg),
     };
   })();
 
@@ -458,7 +526,7 @@ export function highlightLines(code: string, lang: BundledLanguage | null): Toke
   try {
     const result = highlighter.codeToTokens(code, {
       lang,
-      theme: currentTheme.name,
+      theme: currentThemeName,
     });
 
     return result.tokens.map((lineTokens: ThemedToken[]) =>
@@ -470,4 +538,45 @@ export function highlightLines(code: string, lang: BundledLanguage | null): Toke
   } catch {
     return code.split('\n').map(fallbackLine);
   }
+}
+
+/**
+ * Get the current syntax theme name.
+ */
+export function getSyntaxThemeName(): string {
+  return currentThemeName;
+}
+
+/**
+ * Switch to a different syntax theme.
+ * Loads the theme if not already loaded, then updates currentTheme.
+ */
+export async function setSyntaxTheme(themeName: SyntaxThemeName): Promise<void> {
+  if (!highlighter) {
+    await initHighlighter(themeName);
+    return;
+  }
+
+  // Load the theme if not already loaded
+  const loadedThemes = highlighter.getLoadedThemes();
+  if (!loadedThemes.includes(themeName)) {
+    const themeImport = themeImports[themeName];
+    if (themeImport) {
+      await highlighter.loadTheme(themeImport());
+    }
+  }
+
+  // Update current theme
+  currentThemeName = themeName;
+  const theme = highlighter.getTheme(themeName);
+  const fg = theme.fg || '#d4d4d4';
+  currentTheme = {
+    name: themeName,
+    bg: theme.bg || '#1e1e1e',
+    fg,
+    comment: getCommentColor(themeName, fg),
+  };
+
+  // Notify listeners
+  themeChangeListeners.forEach((listener) => listener(currentTheme!));
 }

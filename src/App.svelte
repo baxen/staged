@@ -13,6 +13,13 @@
   } from './lib/services/statusEvents';
   import type { FileDiff, DiffSpec } from './lib/types';
   import { getFilePath } from './lib/diffUtils';
+  import { themeToCssVars, createAdaptiveTheme } from './lib/theme';
+  import {
+    SYNTAX_THEMES,
+    setSyntaxTheme,
+    getTheme,
+    type SyntaxThemeName,
+  } from './lib/services/highlighter';
 
   // UI scaling
   const SIZE_STEP = 1;
@@ -76,6 +83,76 @@
         resetSize();
       }
     }
+    // T to cycle syntax themes
+    if (event.key === 't' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+      // Don't trigger if typing in an input
+      const target = event.target as HTMLElement;
+      if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
+        event.preventDefault();
+        cycleSyntaxTheme();
+      }
+    }
+  }
+
+  // ==========================================================================
+  // Theme (Adaptive - derived from syntax theme)
+  // ==========================================================================
+
+  function applyCssVars(cssVars: string) {
+    cssVars.split('\n').forEach((line) => {
+      const match = line.match(/^\s*(--[\w-]+):\s*(.+);?\s*$/);
+      if (match) {
+        document.documentElement.style.setProperty(match[1], match[2].replace(';', ''));
+      }
+    });
+  }
+
+  /**
+   * Apply adaptive theme based on current syntax theme colors.
+   */
+  function applyAdaptiveTheme() {
+    const themeInfo = getTheme();
+    if (themeInfo) {
+      const adaptiveTheme = createAdaptiveTheme(themeInfo.bg, themeInfo.fg, themeInfo.comment);
+      const cssVars = themeToCssVars(adaptiveTheme);
+      applyCssVars(cssVars);
+    }
+  }
+
+  // ==========================================================================
+  // Syntax Theme
+  // ==========================================================================
+
+  const SYNTAX_THEME_STORAGE_KEY = 'staged-syntax-theme';
+
+  let currentSyntaxTheme = $state<SyntaxThemeName>('github-dark');
+  // Trigger re-render when syntax theme changes
+  let syntaxThemeVersion = $state(0);
+
+  async function loadSavedSyntaxTheme() {
+    const saved = localStorage.getItem(SYNTAX_THEME_STORAGE_KEY);
+    if (saved && SYNTAX_THEMES.includes(saved as SyntaxThemeName)) {
+      currentSyntaxTheme = saved as SyntaxThemeName;
+      await setSyntaxTheme(currentSyntaxTheme);
+    }
+    // Apply adaptive theme from syntax theme colors
+    applyAdaptiveTheme();
+  }
+
+  async function selectSyntaxTheme(name: SyntaxThemeName) {
+    currentSyntaxTheme = name;
+    await setSyntaxTheme(name);
+    localStorage.setItem(SYNTAX_THEME_STORAGE_KEY, name);
+    // Bump version to trigger re-render of diff viewer
+    syntaxThemeVersion++;
+    // Update chrome to match new syntax theme
+    applyAdaptiveTheme();
+  }
+
+  function cycleSyntaxTheme() {
+    const currentIndex = SYNTAX_THEMES.indexOf(currentSyntaxTheme);
+    const nextIndex = (currentIndex + 1) % SYNTAX_THEMES.length;
+    selectSyntaxTheme(SYNTAX_THEMES[nextIndex]);
   }
 
   // ==========================================================================
@@ -231,8 +308,10 @@
   }
 
   onMount(async () => {
-    // Load saved UI size preference
+    // Load saved preferences
     loadSavedSize();
+    // Load syntax theme (this also applies the adaptive chrome theme)
+    await loadSavedSyntaxTheme();
 
     // Listen for keyboard shortcuts
     window.addEventListener('keydown', handleKeydown);
@@ -313,6 +392,20 @@
         </div>
       {/if}
     </div>
+
+    <!-- Theme picker -->
+    <div class="theme-picker">
+      <span class="picker-label">Theme:</span>
+      <select
+        class="theme-select"
+        onchange={(e) =>
+          selectSyntaxTheme((e.target as HTMLSelectElement).value as SyntaxThemeName)}
+      >
+        {#each SYNTAX_THEMES as name}
+          <option value={name} selected={name === currentSyntaxTheme}>{name}</option>
+        {/each}
+      </select>
+    </div>
   </header>
 
   <div class="app-container">
@@ -327,7 +420,7 @@
           <p class="error-message">{diffsError}</p>
         </div>
       {:else}
-        <DiffViewer diff={currentDiff} {diffHead} {sizeBase} />
+        <DiffViewer diff={currentDiff} {diffHead} {sizeBase} {syntaxThemeVersion} />
       {/if}
     </section>
     <aside class="sidebar">
@@ -511,5 +604,37 @@
     font-size: var(--size-sm);
     color: var(--text-muted);
     margin-top: 8px;
+  }
+
+  /* Theme picker */
+  .theme-picker {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .picker-label {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+  }
+
+  .theme-select {
+    padding: 3px 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-primary);
+    border-radius: 4px;
+    color: var(--text-primary);
+    font-size: var(--size-xs);
+    cursor: pointer;
+  }
+
+  .theme-select:hover {
+    border-color: var(--text-muted);
+  }
+
+  .theme-select:focus {
+    outline: none;
+    border-color: var(--text-link);
   }
 </style>

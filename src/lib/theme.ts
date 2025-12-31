@@ -1,15 +1,13 @@
 /**
- * Color Theme Infrastructure for Staged
+ * Adaptive Theme Infrastructure for Staged
  *
- * All colors in the app should reference this theme.
- * This makes it easy to tune the look of the app by adjusting values here.
+ * The UI chrome colors are derived from the syntax highlighting theme.
+ * This ensures a unified look where the sidebar and controls blend
+ * seamlessly with the code area.
  *
- * Usage in Svelte components:
- *   import { theme } from './theme';
- *   <div style="color: {theme.text.primary}">
- *
- * Usage in CSS (via CSS custom properties set in app.css):
+ * Usage in CSS (via CSS custom properties):
  *   color: var(--text-primary);
+ *   background: var(--bg-primary);
  */
 
 export interface Theme {
@@ -47,7 +45,6 @@ export interface Theme {
   // Diff viewer colors
   diff: {
     // Overlay tints - applied on TOP of syntax theme background
-    // Only removed lines (left pane) and added lines (right pane) get overlays
     addedOverlay: string; // Tint for added lines (right pane)
     removedOverlay: string; // Tint for removed lines (left pane)
 
@@ -71,7 +68,7 @@ export interface Theme {
     selection: string; // Selected items
   };
 
-  // Syntax highlighting (for future use)
+  // Syntax highlighting fallbacks (Shiki handles actual highlighting)
   syntax: {
     keyword: string;
     string: string;
@@ -92,89 +89,137 @@ export interface Theme {
   };
 }
 
+// =============================================================================
+// Color Utilities
+// =============================================================================
+
 /**
- * Default dark theme - inspired by VS Code Dark+
+ * Parse a hex color to RGB components
  */
-export const darkTheme: Theme = {
-  bg: {
-    primary: '#1e1e1e',
-    secondary: '#252526',
-    tertiary: '#2d2d2d',
-    input: '#3c3c3c',
-  },
-
-  border: {
-    primary: '#3c3c3c',
-    subtle: '#2d2d2d',
-  },
-
-  text: {
-    primary: '#d4d4d4',
-    secondary: '#cccccc',
-    muted: '#888888',
-    link: '#4fc1ff',
-  },
-
-  status: {
-    modified: '#e2c08d',
-    added: '#89d185',
-    deleted: '#f14c4c',
-    renamed: '#4fc1ff',
-    untracked: '#888888',
-  },
-
-  diff: {
-    // Overlay tints - transparent colors layered on syntax theme background
-    // Both use gray - subtle tint to indicate changed regions
-    addedOverlay: 'rgba(110, 118, 129, 0.10)',
-    removedOverlay: 'rgba(110, 118, 129, 0.10)',
-
-    // Text colors
-    addedText: '#7ee787',
-    removedText: '#f85149',
-    lineNumber: '#6e7681',
-
-    // Other
-    emptyBg: '#2d2d2d',
-    headerBg: '#2d2d2d',
-  },
-
-  ui: {
-    accent: '#0e639c',
-    accentHover: '#1177bb',
-    danger: '#5a1d1d',
-    dangerHover: '#742a2a',
-    success: '#2ea043',
-    selection: '#094771',
-  },
-
-  syntax: {
-    keyword: '#569cd6',
-    string: '#ce9178',
-    number: '#b5cea8',
-    comment: '#6a9955',
-    function: '#dcdcaa',
-    variable: '#9cdcfe',
-    type: '#4ec9b0',
-    operator: '#d4d4d4',
-    punctuation: '#d4d4d4',
-  },
-
-  scrollbar: {
-    track: '#1e1e1e',
-    thumb: '#424242',
-    thumbHover: '#4f4f4f',
-  },
-};
+function hexToRgb(hex: string): { r: number; g: number; b: number } {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  if (!result) return { r: 30, g: 30, b: 30 }; // fallback dark
+  return {
+    r: parseInt(result[1], 16),
+    g: parseInt(result[2], 16),
+    b: parseInt(result[3], 16),
+  };
+}
 
 /**
- * The active theme - change this to switch themes
+ * Convert RGB to hex
  */
-export const theme: Theme = darkTheme;
+function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  return `#${[r, g, b].map((c) => clamp(c).toString(16).padStart(2, '0')).join('')}`;
+}
 
 /**
- * Generate CSS custom properties from theme
- * This can be injected into :root for CSS-based theming
+ * Lighten a color by a factor (0-1)
+ */
+function lighten(hex: string, factor: number): string {
+  const { r, g, b } = hexToRgb(hex);
+  return rgbToHex(r + (255 - r) * factor, g + (255 - g) * factor, b + (255 - b) * factor);
+}
+
+// =============================================================================
+// Adaptive Theme Generator
+// =============================================================================
+
+/**
+ * Create an adaptive theme based on syntax theme colors.
+ * Uses the exact bg/fg/comment colors from the syntax theme for a unified look.
+ */
+export function createAdaptiveTheme(
+  syntaxBg: string,
+  syntaxFg: string,
+  syntaxComment: string
+): Theme {
+  // Use exact colors from syntax theme
+  const bg = syntaxBg;
+  const fg = syntaxFg;
+  const muted = syntaxComment;
+
+  // Borders - subtle lift from background
+  const borderPrimary = lighten(bg, 0.12);
+  const borderSubtle = lighten(bg, 0.06);
+
+  // Accent - use a standard blue that works across themes
+  const accent = '#58a6ff';
+
+  return {
+    bg: {
+      primary: bg,
+      secondary: bg, // Same as primary - no layering, borders define regions
+      tertiary: lighten(bg, 0.05),
+      input: lighten(bg, 0.08),
+    },
+
+    border: {
+      primary: borderPrimary,
+      subtle: borderSubtle,
+    },
+
+    text: {
+      primary: fg,
+      secondary: fg, // Same as primary for cleaner look
+      muted: muted, // Comment color for muted text
+      link: accent,
+    },
+
+    // Status colors - consistent across themes for recognition
+    status: {
+      modified: '#d29922',
+      added: '#3fb950',
+      deleted: '#f85149',
+      renamed: '#58a6ff',
+      untracked: muted,
+    },
+
+    diff: {
+      // Neutral smoke overlays - just subtle lightening, no color tint
+      addedOverlay: 'rgba(255, 255, 255, 0.04)',
+      removedOverlay: 'rgba(255, 255, 255, 0.04)',
+      addedText: '#3fb950',
+      removedText: '#f85149',
+      lineNumber: muted,
+      emptyBg: bg,
+      headerBg: bg,
+    },
+
+    ui: {
+      accent: '#238636',
+      accentHover: '#2ea043',
+      danger: '#da3633',
+      dangerHover: '#f85149',
+      success: '#238636',
+      selection: `${accent}33`,
+    },
+
+    // Syntax colors are handled by Shiki, these are fallbacks
+    syntax: {
+      keyword: '#ff7b72',
+      string: '#a5d6ff',
+      number: '#79c0ff',
+      comment: muted,
+      function: '#d2a8ff',
+      variable: '#ffa657',
+      type: '#7ee787',
+      operator: fg,
+      punctuation: fg,
+    },
+
+    scrollbar: {
+      track: bg,
+      thumb: borderPrimary,
+      thumbHover: lighten(borderPrimary, 0.1),
+    },
+  };
+}
+
+/**
+ * Generate CSS custom properties from theme.
+ * These are applied to :root for CSS-based theming.
  */
 export function themeToCssVars(t: Theme): string {
   return `

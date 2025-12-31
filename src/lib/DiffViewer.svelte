@@ -35,10 +35,12 @@
     /** Head ref for the diff - "@" means working tree, enabling discard */
     diffHead?: string;
     sizeBase?: number;
+    /** Bumped when syntax theme changes to trigger re-highlight */
+    syntaxThemeVersion?: number;
     onRangeDiscard?: () => void;
   }
 
-  let { diff, diffHead = '@', sizeBase, onRangeDiscard }: Props = $props();
+  let { diff, diffHead = '@', sizeBase, syntaxThemeVersion = 0, onRangeDiscard }: Props = $props();
 
   let beforePane: HTMLDivElement | null = $state(null);
   let afterPane: HTMLDivElement | null = $state(null);
@@ -191,26 +193,6 @@
     }
   });
 
-  // Sync scroll position when expanding a collapsed panel
-  function expandBefore() {
-    beforeCollapsed = false;
-    // Sync scroll on next tick after DOM updates
-    requestAnimationFrame(() => {
-      if (beforePane && afterPane && diff) {
-        scrollSync.onScroll('after', afterPane, beforePane);
-      }
-    });
-  }
-
-  function expandAfter() {
-    afterCollapsed = false;
-    requestAnimationFrame(() => {
-      if (beforePane && afterPane && diff) {
-        scrollSync.onScroll('before', beforePane, afterPane);
-      }
-    });
-  }
-
   const scrollSync = createScrollSync();
 
   // Update scroll sync with active alignments (progressively)
@@ -236,8 +218,11 @@
 
   let language = $derived(diff ? getLanguageFromDiff(diff, detectLanguage) : null);
 
-  // Pre-compute all tokens when diff or language readiness changes
+  // Pre-compute all tokens when diff, language, or syntax theme changes
   $effect(() => {
+    // Include syntaxThemeVersion in dependencies to re-highlight on theme change
+    const _version = syntaxThemeVersion;
+
     if (!diff) {
       beforeTokens = [];
       afterTokens = [];
@@ -251,6 +236,10 @@
 
       beforeTokens = beforeCode ? highlightLines(beforeCode, language) : [];
       afterTokens = afterCode ? highlightLines(afterCode, language) : [];
+
+      // Update background color from current theme
+      const theme = getTheme();
+      if (theme) themeBg = theme.bg;
     } else {
       // Fallback: plain text tokens
       const defaultColor = '#d4d4d4';
@@ -477,16 +466,6 @@
         onmouseenter={() => (beforeHovered = true)}
         onmouseleave={() => (beforeHovered = false)}
       >
-        <!-- Collapse/expand button (shows on hover near top-left) -->
-        {#if beforeHovered}
-          <button
-            class="collapse-btn"
-            onclick={() => (beforeCollapsed ? expandBefore() : (beforeCollapsed = true))}
-            title={beforeCollapsed ? 'Expand panel' : 'Collapse panel'}
-          >
-            {beforeCollapsed ? '›' : '‹'}
-          </button>
-        {/if}
         <div
           class="code-container"
           bind:this={beforePane}
@@ -544,16 +523,6 @@
         onmouseenter={() => (afterHovered = true)}
         onmouseleave={() => (afterHovered = false)}
       >
-        <!-- Collapse/expand button (shows on hover near top-left) -->
-        {#if afterHovered}
-          <button
-            class="collapse-btn"
-            onclick={() => (afterCollapsed ? expandAfter() : (afterCollapsed = true))}
-            title={afterCollapsed ? 'Expand panel' : 'Collapse panel'}
-          >
-            {afterCollapsed ? '‹' : '›'}
-          </button>
-        {/if}
         <div
           class="code-container"
           bind:this={afterPane}
@@ -697,35 +666,6 @@
 
   .before-pane:not(.collapsed) ~ .spine ~ .after-pane.collapsed {
     flex: 1;
-  }
-
-  /* Collapse/expand button */
-  .collapse-btn {
-    position: absolute;
-    top: 8px;
-    left: 8px;
-    z-index: 10;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
-    border-radius: 4px;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: var(--size-lg);
-    line-height: 1;
-    opacity: 0.8;
-    transition:
-      opacity 0.15s,
-      background-color 0.15s;
-  }
-
-  .collapse-btn:hover {
-    opacity: 1;
-    background-color: var(--bg-tertiary);
   }
 
   .spine {
