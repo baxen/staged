@@ -19,8 +19,8 @@
   --theme-is-dark: 1;
 
   --bg-primary: #1e1e1e;
+  --bg-chrome: #0f0f0f;
   --bg-elevated: #252526;
-  --bg-sunken: #1a1a1a;
   --bg-hover: #2d2d2d;
 
   --border-subtle: #2d2d2d;
@@ -100,9 +100,4 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--scrollbar-thumb-hover);
-}
-
-/* Hide scrollbar in code areas - they have their own scroll handling */
-.code-container::-webkit-scrollbar {
-  display: none;
 }

@@ -421,7 +421,7 @@
           <p class="error-message">{diffsError}</p>
         </div>
       {:else}
-        <DiffViewer diff={currentDiff} {diffHead} {sizeBase} {syntaxThemeVersion} />
+        <DiffViewer diff={currentDiff} {diffBase} {diffHead} {sizeBase} {syntaxThemeVersion} />
       {/if}
     </section>
     <aside class="sidebar">
@@ -449,7 +449,7 @@
     margin: 0;
     padding: 0;
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-    background-color: var(--bg-primary);
+    background-color: var(--bg-chrome);
     color: var(--text-primary);
   }
 
@@ -458,15 +458,15 @@
     flex-direction: column;
     height: 100vh;
     overflow: hidden;
+    background-color: var(--bg-chrome);
   }
 
-  /* Header - floating style, blends with content */
+  /* Header - part of unified chrome, no border */
   .diff-header {
     display: flex;
     align-items: center;
     padding: 6px 12px;
-    background-color: var(--bg-elevated);
-    border-bottom: 1px solid var(--border-subtle);
+    background-color: transparent;
     flex-shrink: 0;
   }
 
@@ -561,13 +561,14 @@
     display: flex;
     flex: 1;
     overflow: hidden;
+    padding: 0 8px 8px 8px;
+    gap: 8px;
   }
 
   .sidebar {
     width: 260px;
     min-width: 180px;
-    background-color: var(--bg-sunken);
-    border-left: 1px solid var(--border-subtle);
+    background-color: transparent;
     display: flex;
     flex-direction: column;
     overflow: hidden;

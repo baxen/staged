@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { X } from 'lucide-svelte';
+  import { X, GitBranch } from 'lucide-svelte';
   import type { FileDiff, Alignment } from './types';
   import {
     initHighlighter,
@@ -32,6 +32,8 @@
 
   interface Props {
     diff: FileDiff | null;
+    /** Base ref for the diff (before side) */
+    diffBase?: string;
     /** Head ref for the diff - "@" means working tree, enabling discard */
     diffHead?: string;
     sizeBase?: number;
@@ -40,7 +42,14 @@
     onRangeDiscard?: () => void;
   }
 
-  let { diff, diffHead = '@', sizeBase, syntaxThemeVersion = 0, onRangeDiscard }: Props = $props();
+  let {
+    diff,
+    diffBase = 'HEAD',
+    diffHead = '@',
+    sizeBase,
+    syntaxThemeVersion = 0,
+    onRangeDiscard,
+  }: Props = $props();
 
   let beforePane: HTMLDivElement | null = $state(null);
   let afterPane: HTMLDivElement | null = $state(null);
@@ -139,6 +148,16 @@
   let isNewFile = $derived(diff !== null && diff.before === null);
   // Detect if this is a deleted file (no after content)
   let isDeletedFile = $derived(diff !== null && diff.after === null);
+
+  // File paths for headers
+  let beforePath = $derived(diff?.before?.path ?? null);
+  let afterPath = $derived(diff?.after?.path ?? null);
+
+  // Helper to get just the filename from a path
+  function getFileName(path: string | null): string {
+    if (!path) return '';
+    return path.split('/').pop() || path;
+  }
 
   // Check if binary
   let isBinary = $derived(diff !== null && isBinaryDiff(diff));
@@ -477,13 +496,16 @@
         class:zoomed={beforeHovered && !beforeCollapsed && spaceHeld}
         onmouseenter={() => (beforeHovered = true)}
         onmouseleave={() => (beforeHovered = false)}
+        style="background-color: {themeBg}"
       >
-        <div
-          class="code-container"
-          bind:this={beforePane}
-          onscroll={handleBeforeScroll}
-          style="background-color: {themeBg}"
-        >
+        <div class="pane-header">
+          <span class="pane-ref">
+            <GitBranch size={12} />
+            {diffBase}
+          </span>
+          <span class="pane-path" title={beforePath}>{beforePath ?? 'No file'}</span>
+        </div>
+        <div class="code-container" bind:this={beforePane} onscroll={handleBeforeScroll}>
           <div class="lines-wrapper">
             {#each beforeLines as line, i}
               {@const boundary = showRangeMarkers
@@ -534,13 +556,16 @@
         class:zoomed={afterHovered && !afterCollapsed && spaceHeld}
         onmouseenter={() => (afterHovered = true)}
         onmouseleave={() => (afterHovered = false)}
+        style="background-color: {themeBg}"
       >
-        <div
-          class="code-container"
-          bind:this={afterPane}
-          onscroll={handleAfterScroll}
-          style="background-color: {themeBg}"
-        >
+        <div class="pane-header">
+          <span class="pane-ref">
+            <GitBranch size={12} />
+            {diffHead === '@' ? 'Working Tree' : diffHead}
+          </span>
+          <span class="pane-path" title={afterPath}>{afterPath ?? 'No file'}</span>
+        </div>
+        <div class="code-container" bind:this={afterPane} onscroll={handleAfterScroll}>
           <div class="lines-wrapper">
             {#each afterLines as line, i}
               {@const boundary = showRangeMarkers
@@ -603,6 +628,8 @@
     display: flex;
     flex: 1;
     overflow: hidden;
+    /* Small left margin for before pane */
+    padding-left: 8px;
   }
 
   .diff-pane {
@@ -612,6 +639,37 @@
     min-width: 0;
     position: relative;
     transition: flex 0.2s ease;
+    /* Island styling */
+    border-radius: 12px;
+  }
+
+  /* Pane header - ref and file path */
+  .pane-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .pane-ref {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: var(--size-xs);
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .pane-path {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Default: 40/60 split (before gets 40%, after gets 60%) */
@@ -680,13 +738,13 @@
     flex: 1;
   }
 
-  /* Spine - minimal, same bg as code, just a thin gap */
+  /* Spine - chrome background, connectors draw on top */
   .spine {
-    width: 20px;
+    width: 24px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
-    background-color: var(--bg-primary);
+    background-color: transparent;
   }
 
   .spine-connector,
@@ -703,12 +761,27 @@
     font-size: var(--size-md);
     line-height: 1.5;
     min-width: 0;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
+    /* Re-enable scrollbars for islands */
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) transparent;
   }
 
   .code-container::-webkit-scrollbar {
-    display: none;
+    width: 8px;
+    height: 8px;
+  }
+
+  .code-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .code-container::-webkit-scrollbar-thumb {
+    background: var(--scrollbar-thumb);
+    border-radius: 4px;
+  }
+
+  .code-container::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-thumb-hover);
   }
 
   /* Wrapper sizes to longest line, ensuring all lines can fill its width */
@@ -767,6 +840,8 @@
     height: 100%;
     color: var(--text-muted);
     font-size: var(--size-lg);
+    background-color: var(--bg-primary);
+    border-radius: 12px;
   }
 
   .empty-file-notice {

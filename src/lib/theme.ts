@@ -19,9 +19,9 @@ export interface Theme {
 
   // Base colors
   bg: {
-    primary: string; // Main background (same as syntax theme)
-    elevated: string; // Floating elements (header, tooltips)
-    sunken: string; // Recessed areas (sidebar)
+    primary: string; // Main background (same as syntax theme) - used for editor islands
+    chrome: string; // Unified chrome background (header, sidebar, spine)
+    elevated: string; // Floating elements (dropdowns, tooltips)
     hover: string; // Hover states
   };
 
@@ -177,9 +177,9 @@ export function createAdaptiveTheme(
     isDark,
 
     bg: {
-      primary: syntaxBg,
-      elevated: elevate(0.04), // Subtle lift for floating elements
-      sunken: sink(0.02), // Subtle recession for sidebar
+      primary: syntaxBg, // Editor islands use syntax theme bg
+      chrome: sink(0.12), // Unified chrome - noticeably darker/lighter than editor
+      elevated: elevate(0.04), // Floating elements (dropdowns, tooltips)
       hover: elevate(0.06), // Hover state
     },
 
@@ -236,8 +236,8 @@ export function themeToCssVars(t: Theme): string {
     --theme-is-dark: ${t.isDark ? '1' : '0'};
 
     --bg-primary: ${t.bg.primary};
+    --bg-chrome: ${t.bg.chrome};
     --bg-elevated: ${t.bg.elevated};
-    --bg-sunken: ${t.bg.sunken};
     --bg-hover: ${t.bg.hover};
 
     --border-subtle: ${t.border.subtle};

@@ -314,7 +314,6 @@
     align-items: center;
     justify-content: space-between;
     padding: 8px 12px;
-    border-bottom: 1px solid var(--border-subtle);
     gap: 8px;
   }
 
