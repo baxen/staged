@@ -41,6 +41,7 @@
   import { setupKeyboardNav } from './diffKeyboard';
   import { WORKDIR } from './stores/diffSelection.svelte';
   import CommentEditor from './CommentEditor.svelte';
+  import ScrollbarMarkers from './ScrollbarMarkers.svelte';
 
   // ==========================================================================
   // Constants
@@ -1096,36 +1097,44 @@
             </span>
             <span class="pane-path" title={beforePath}>{beforePath ?? 'No file'}</span>
           </div>
-          <div class="code-container" bind:this={beforePane} onscroll={handleBeforeScroll}>
-            <div class="lines-wrapper">
-              {#each beforeLines as line, i}
-                {@const boundary = showRangeMarkers
-                  ? getLineBoundary(activeAlignments, 'before', i)
-                  : { isStart: false, isEnd: false }}
-                {@const isInHoveredRange = isLineInHoveredRange('before', i)}
-                {@const isChanged = showRangeMarkers && isLineInChangedAlignment('before', i)}
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="line"
-                  class:range-start={boundary.isStart}
-                  class:range-end={boundary.isEnd}
-                  class:range-hovered={isInHoveredRange}
-                  class:content-changed={isChanged}
-                  onmouseenter={() => handleLineMouseEnter('before', i)}
-                  onmouseleave={handleLineMouseLeave}
-                >
-                  <span class="line-content">
-                    {#each getBeforeTokens(i) as token}
-                      <span style="color: {token.color}">{token.content}</span>
-                    {/each}
-                  </span>
-                </div>
-              {/each}
-              {#if beforeLines.length === 0}
-                <div class="empty-pane-notice">
-                  <span class="empty-pane-label">No previous version</span>
-                </div>
-              {/if}
+          <div class="code-area">
+            <ScrollbarMarkers
+              alignments={activeAlignments}
+              comments={[]}
+              totalLines={beforeLines.length}
+              side="before"
+            />
+            <div class="code-container" bind:this={beforePane} onscroll={handleBeforeScroll}>
+              <div class="lines-wrapper">
+                {#each beforeLines as line, i}
+                  {@const boundary = showRangeMarkers
+                    ? getLineBoundary(activeAlignments, 'before', i)
+                    : { isStart: false, isEnd: false }}
+                  {@const isInHoveredRange = isLineInHoveredRange('before', i)}
+                  {@const isChanged = showRangeMarkers && isLineInChangedAlignment('before', i)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="line"
+                    class:range-start={boundary.isStart}
+                    class:range-end={boundary.isEnd}
+                    class:range-hovered={isInHoveredRange}
+                    class:content-changed={isChanged}
+                    onmouseenter={() => handleLineMouseEnter('before', i)}
+                    onmouseleave={handleLineMouseLeave}
+                  >
+                    <span class="line-content">
+                      {#each getBeforeTokens(i) as token}
+                        <span style="color: {token.color}">{token.content}</span>
+                      {/each}
+                    </span>
+                  </div>
+                {/each}
+                {#if beforeLines.length === 0}
+                  <div class="empty-pane-notice">
+                    <span class="empty-pane-label">No previous version</span>
+                  </div>
+                {/if}
+              </div>
             </div>
           </div>
         </div>
@@ -1179,40 +1188,48 @@
             </span>
             <span class="pane-path" title={afterPath}>{afterPath ?? 'No file'}</span>
           </div>
-          <div class="code-container" bind:this={afterPane} onscroll={handleAfterScroll}>
-            <div class="lines-wrapper">
-              {#each afterLines as line, i}
-                {@const boundary = showRangeMarkers
-                  ? getLineBoundary(activeAlignments, 'after', i)
-                  : { isStart: false, isEnd: false }}
-                {@const isInHoveredRange = isLineInHoveredRange('after', i)}
-                {@const isChanged = showRangeMarkers && isLineInChangedAlignment('after', i)}
-                {@const isSelected = isLineSelected('after', i)}
-                <!-- svelte-ignore a11y_no_static_element_interactions -->
-                <div
-                  class="line"
-                  class:range-start={boundary.isStart}
-                  class:range-end={boundary.isEnd}
-                  class:range-hovered={isInHoveredRange}
-                  class:content-changed={isChanged}
-                  class:line-selected={isSelected}
-                  onmouseenter={() => handleLineMouseEnter('after', i)}
-                  onmouseleave={handleLineMouseLeave}
-                  onmousedown={(e) => handleLineMouseDown('after', i, e)}
-                >
-                  <span class="line-content">
-                    {#each getAfterTokens(i) as token}
-                      <span style="color: {token.color}">{token.content}</span>
-                    {/each}
-                  </span>
-                </div>
-              {/each}
-              {#if afterLines.length === 0}
-                <div class="empty-pane-notice">
-                  <span class="empty-pane-label">File deleted</span>
-                </div>
-              {/if}
+          <div class="code-area">
+            <div class="code-container" bind:this={afterPane} onscroll={handleAfterScroll}>
+              <div class="lines-wrapper">
+                {#each afterLines as line, i}
+                  {@const boundary = showRangeMarkers
+                    ? getLineBoundary(activeAlignments, 'after', i)
+                    : { isStart: false, isEnd: false }}
+                  {@const isInHoveredRange = isLineInHoveredRange('after', i)}
+                  {@const isChanged = showRangeMarkers && isLineInChangedAlignment('after', i)}
+                  {@const isSelected = isLineSelected('after', i)}
+                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <div
+                    class="line"
+                    class:range-start={boundary.isStart}
+                    class:range-end={boundary.isEnd}
+                    class:range-hovered={isInHoveredRange}
+                    class:content-changed={isChanged}
+                    class:line-selected={isSelected}
+                    onmouseenter={() => handleLineMouseEnter('after', i)}
+                    onmouseleave={handleLineMouseLeave}
+                    onmousedown={(e) => handleLineMouseDown('after', i, e)}
+                  >
+                    <span class="line-content">
+                      {#each getAfterTokens(i) as token}
+                        <span style="color: {token.color}">{token.content}</span>
+                      {/each}
+                    </span>
+                  </div>
+                {/each}
+                {#if afterLines.length === 0}
+                  <div class="empty-pane-notice">
+                    <span class="empty-pane-label">File deleted</span>
+                  </div>
+                {/if}
+              </div>
             </div>
+            <ScrollbarMarkers
+              alignments={activeAlignments}
+              comments={currentFileComments}
+              totalLines={afterLines.length}
+              side="after"
+            />
           </div>
         </div>
       {:else if isNewFile}
@@ -1524,6 +1541,15 @@
     overflow: visible;
   }
 
+  /* Code area wrapper - contains code-container and scrollbar markers */
+  .code-area {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
   /* Code container */
   .code-container {
     flex: 1;
@@ -1535,6 +1561,8 @@
     user-select: none;
     scrollbar-width: thin;
     scrollbar-color: var(--scrollbar-thumb) transparent;
+    position: relative;
+    z-index: 2;
   }
 
   .code-container::-webkit-scrollbar {
@@ -1554,6 +1582,9 @@
   .code-container::-webkit-scrollbar-thumb:hover {
     background: var(--scrollbar-thumb-hover);
   }
+
+  /* Left-side scrollbar for before pane - not currently possible without side effects */
+  /* Markers are positioned on the left via ScrollbarMarkers component */
 
   .lines-wrapper {
     display: inline-block;
@@ -1599,7 +1630,7 @@
   }
 
   .line.range-hovered {
-    background-color: var(--bg-hover);
+    background-color: rgba(128, 128, 128, 0.15);
   }
 
   /* Line selection highlight */
