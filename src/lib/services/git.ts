@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { RepoInfo, GitRef, FileDiff } from '../types';
+import type { RepoInfo, GitRef, FileDiff, PullRequest, GitHubAuthStatus } from '../types';
 
 // =============================================================================
 // Repository Info
@@ -56,5 +56,47 @@ export async function resolveRef(refStr: string, repoPath?: string): Promise<str
   return invoke<string>('resolve_ref', {
     repoPath: repoPath ?? null,
     refStr,
+  });
+}
+
+// =============================================================================
+// GitHub API
+// =============================================================================
+
+/**
+ * Check if the user is authenticated with GitHub CLI.
+ */
+export async function checkGitHubAuth(): Promise<GitHubAuthStatus> {
+  return invoke<GitHubAuthStatus>('check_github_auth');
+}
+
+/**
+ * List open pull requests for the current repository.
+ * Uses caching by default; pass forceRefresh=true to bypass.
+ */
+export async function listPullRequests(
+  repoPath?: string,
+  forceRefresh?: boolean
+): Promise<PullRequest[]> {
+  return invoke<PullRequest[]>('list_pull_requests', {
+    repoPath: repoPath ?? null,
+    forceRefresh: forceRefresh ?? false,
+  });
+}
+
+/**
+ * Fetch a PR branch from the remote and set up locally.
+ * This is idempotent - if the branch already exists, it will be updated.
+ * Returns the merge-base SHA to use as the base for the PR diff.
+ */
+export async function fetchPRBranch(
+  baseRef: string,
+  headRef: string,
+  repoPath?: string
+): Promise<string> {
+  return invoke<string>('fetch_pr_branch', {
+    repoPath: repoPath ?? null,
+    baseRef,
+    headRef,
   });
 }

@@ -52,6 +52,30 @@ export interface GitRef {
 }
 
 // =============================================================================
+// GitHub types
+// =============================================================================
+
+/** A GitHub pull request */
+export interface PullRequest {
+  number: number;
+  title: string;
+  author: string;
+  base_ref: string;
+  head_ref: string;
+  head_sha: string;
+  draft: boolean;
+  additions: number;
+  deletions: number;
+  updated_at: string;
+}
+
+/** GitHub authentication status */
+export interface GitHubAuthStatus {
+  authenticated: boolean;
+  setup_hint: string | null;
+}
+
+// =============================================================================
 // Review types
 // =============================================================================
 

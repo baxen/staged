@@ -274,7 +274,7 @@
   }
 
   .modal {
-    background: var(--bg-elevated);
+    background: var(--bg-chrome);
     border-radius: 12px;
     box-shadow: var(--shadow-elevated);
     width: 420px;

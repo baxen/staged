@@ -11,8 +11,10 @@
     GitCompareArrows,
     FolderOpen,
     X,
+    GitPullRequest,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
+  import PRSelectorModal from './PRSelectorModal.svelte';
   import type { DiffSpec } from './types';
   import {
     preferences,
@@ -48,6 +50,7 @@
 
   // Modal state
   let showCustomModal = $state(false);
+  let showPRModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
@@ -74,6 +77,16 @@
   function handleCustomClick() {
     diffDropdownOpen = false;
     showCustomModal = true;
+  }
+
+  function handlePRClick() {
+    diffDropdownOpen = false;
+    showPRModal = true;
+  }
+
+  function handlePRSubmit(base: string, head: string, label: string) {
+    showPRModal = false;
+    onCustomDiff(base, head);
   }
 
   function handleCustomSubmit(base: string, head: string) {
@@ -225,6 +238,10 @@
             </button>
           {/each}
           <div class="dropdown-divider"></div>
+          <button class="dropdown-item custom-item" onclick={handlePRClick}>
+            <GitPullRequest size={12} />
+            <span>Pull Request...</span>
+          </button>
           <button class="dropdown-item custom-item" onclick={handleCustomClick}>
             <Settings2 size={12} />
             <span>Custom range...</span>
@@ -294,6 +311,14 @@
     initialHead={diffSelection.spec.head}
     onSubmit={handleCustomSubmit}
     onClose={() => (showCustomModal = false)}
+  />
+{/if}
+
+{#if showPRModal}
+  <PRSelectorModal
+    repoPath={repoState.currentPath}
+    onSubmit={handlePRSubmit}
+    onClose={() => (showPRModal = false)}
   />
 {/if}
 

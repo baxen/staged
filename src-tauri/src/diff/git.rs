@@ -156,6 +156,95 @@ pub fn last_commit_message(repo: &Repository) -> Result<Option<String>> {
     Ok(commit.message().map(String::from))
 }
 
+/// Fetch a PR branch from the remote and set up a local tracking branch.
+///
+/// This is idempotent - if the branch already exists locally, it will be updated.
+/// Uses `git fetch` to get the branch from the remote.
+///
+/// Returns the merge-base SHA between base_ref and head_ref, which should be used
+/// as the base for PR diffs (to show only the PR's changes, not changes on the base branch).
+pub fn fetch_pr_branch(repo: &Repository, base_ref: &str, head_ref: &str) -> Result<String> {
+    use std::process::Command;
+
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError("Bare repository".into()))?;
+
+    // First, check if the branch already exists locally
+    if repo.find_branch(head_ref, git2::BranchType::Local).is_ok() {
+        // Branch exists, fetch to update it
+        log::info!("Branch '{}' exists locally, fetching updates", head_ref);
+
+        let output = Command::new("git")
+            .args(["fetch", "origin", &format!("{}:{}", head_ref, head_ref)])
+            .current_dir(workdir)
+            .output()
+            .map_err(|e| GitError(format!("Failed to run git fetch: {}", e)))?;
+
+        if !output.status.success() {
+            // Fetch might fail if the branch is checked out, which is fine
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if !stderr.contains("cannot be resolved to branch")
+                && !stderr.contains("refusing to fetch into branch")
+            {
+                log::warn!("git fetch warning: {}", stderr);
+            }
+        }
+    } else {
+        // Branch doesn't exist locally, fetch and create it
+        log::info!("Fetching branch '{}' from origin", head_ref);
+
+        let output = Command::new("git")
+            .args(["fetch", "origin", &format!("{}:{}", head_ref, head_ref)])
+            .current_dir(workdir)
+            .output()
+            .map_err(|e| GitError(format!("Failed to run git fetch: {}", e)))?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // If the remote branch doesn't exist, that's an error
+            if stderr.contains("couldn't find remote ref") {
+                return Err(GitError(format!(
+                    "Branch '{}' not found on remote. It may have been deleted.",
+                    head_ref
+                )));
+            }
+            return Err(GitError(format!("Failed to fetch branch: {}", stderr)));
+        }
+    }
+
+    // Compute merge-base between base and head
+    // This is the commit where the PR branch diverged from the base branch
+    let merge_base = get_merge_base(repo, base_ref, head_ref)?;
+    Ok(merge_base)
+}
+
+/// Compute the merge-base between two refs.
+///
+/// The merge-base is the best common ancestor of the two commits.
+/// For PR diffs, this gives us the point where the feature branch diverged
+/// from the base branch, so we can show only the PR's changes.
+pub fn get_merge_base(repo: &Repository, ref1: &str, ref2: &str) -> Result<String> {
+    let obj1 = repo
+        .revparse_single(ref1)
+        .map_err(|e| GitError(format!("Cannot resolve '{}': {}", ref1, e)))?;
+    let obj2 = repo
+        .revparse_single(ref2)
+        .map_err(|e| GitError(format!("Cannot resolve '{}': {}", ref2, e)))?;
+
+    let oid1 = obj1.id();
+    let oid2 = obj2.id();
+
+    let merge_base_oid = repo.merge_base(oid1, oid2).map_err(|e| {
+        GitError(format!(
+            "Cannot find merge-base between '{}' and '{}': {}",
+            ref1, ref2, e
+        ))
+    })?;
+
+    Ok(merge_base_oid.to_string())
+}
+
 /// Resolve a ref string to a tree.
 ///
 /// Special values:

@@ -2,7 +2,10 @@ pub mod diff;
 mod refresh;
 mod watcher;
 
-use diff::{Comment, DiffId, Edit, GitRef, NewComment, NewEdit, RepoInfo, Review};
+use diff::{
+    Comment, DiffId, Edit, GitHubAuthStatus, GitRef, NewComment, NewEdit, PullRequest, RepoInfo,
+    Review,
+};
 use refresh::RefreshController;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -89,6 +92,54 @@ fn get_repo_info(repo_path: Option<String>) -> Result<RepoInfo, String> {
 fn get_last_commit_message(repo_path: Option<String>) -> Result<Option<String>, String> {
     let repo = open_repo_from_path(repo_path.as_deref())?;
     diff::last_commit_message(&repo).map_err(|e| e.0)
+}
+
+// =============================================================================
+// GitHub Commands
+// =============================================================================
+
+/// Check if the user is authenticated with GitHub CLI.
+#[tauri::command]
+fn check_github_auth() -> GitHubAuthStatus {
+    diff::check_github_auth()
+}
+
+/// List open pull requests for the current repository.
+///
+/// Returns PRs from GitHub API, using cache when available.
+/// Pass `force_refresh: true` to bypass cache.
+#[tauri::command]
+async fn list_pull_requests(
+    repo_path: Option<String>,
+    force_refresh: Option<bool>,
+) -> Result<Vec<PullRequest>, String> {
+    // Get GitHub token first
+    let token = diff::github::get_github_token().map_err(|e| e.0)?;
+
+    // Open repo and find GitHub remote
+    let repo = open_repo_from_path(repo_path.as_deref())?;
+    let gh_repo = diff::get_github_remote(&repo).ok_or_else(|| {
+        "No GitHub remote found. This repository is not hosted on GitHub.".to_string()
+    })?;
+
+    // Fetch PRs (with caching)
+    diff::list_pull_requests(&gh_repo, &token, force_refresh.unwrap_or(false))
+        .await
+        .map_err(|e| e.0)
+}
+
+/// Fetch a PR branch from the remote and set up locally.
+///
+/// This is idempotent - if the branch already exists, it will be updated.
+/// Returns the merge-base SHA to use as the base for the PR diff.
+#[tauri::command]
+fn fetch_pr_branch(
+    repo_path: Option<String>,
+    base_ref: String,
+    head_ref: String,
+) -> Result<String, String> {
+    let repo = open_repo_from_path(repo_path.as_deref())?;
+    diff::fetch_pr_branch(&repo, &base_ref, &head_ref).map_err(|e| e.0)
 }
 
 // =============================================================================
@@ -229,6 +280,10 @@ pub fn run() {
             // Git commands
             get_repo_info,
             get_last_commit_message,
+            // GitHub commands
+            check_github_auth,
+            list_pull_requests,
+            fetch_pr_branch,
             // Review commands
             get_review,
             add_comment,
