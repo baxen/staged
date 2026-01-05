@@ -56,8 +56,10 @@
   // Copy feedback
   let copiedFeedback = $state(false);
 
-  // Check if we're viewing working directory changes (can commit)
-  let canCommit = $derived(diffSelection.spec.head === WORKDIR && files.length > 0);
+  // Check if we're viewing working directory changes (can show commit button)
+  let isWorkingTree = $derived(diffSelection.spec.head === WORKDIR);
+  // Can only commit if there are files to commit
+  let canCommit = $derived(isWorkingTree && files.length > 0);
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffSpec): boolean {
@@ -255,8 +257,14 @@
 
   <!-- Center section: Actions (Commit, Comments) -->
   <div class="section section-center">
-    {#if canCommit}
-      <button class="action-btn" onclick={() => (showCommitModal = true)} title="Commit">
+    {#if isWorkingTree}
+      <button
+        class="action-btn"
+        class:disabled={!canCommit}
+        onclick={() => canCommit && (showCommitModal = true)}
+        title={canCommit ? 'Commit' : 'No changes to commit'}
+        disabled={!canCommit}
+      >
         <GitCommitHorizontal size={14} />
         <span class="action-label">Commit</span>
       </button>
@@ -698,9 +706,15 @@
       color 0.1s;
   }
 
-  .action-btn:hover {
+  .action-btn:hover:not(:disabled) {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  .action-btn:disabled,
+  .action-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .action-btn :global(svg) {
@@ -711,7 +725,7 @@
     display: none;
   }
 
-  .action-btn:hover .action-label {
+  .action-btn:hover:not(:disabled) .action-label {
     display: inline;
   }
 </style>

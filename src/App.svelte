@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import Sidebar from './lib/Sidebar.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
+  import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
   import { getRefs } from './lib/services/git';
   import type { GitRef, DiffSpec } from './lib/types';
@@ -138,6 +139,17 @@
 
   let currentDiff = $derived(getCurrentDiff());
 
+  // Show empty state when we have a repo, finished loading, no error, but no diffs
+  let showEmptyState = $derived(
+    repoState.currentPath &&
+      !repoState.error &&
+      !diffState.loading &&
+      !diffState.error &&
+      diffState.diffs.length === 0
+  );
+
+  let isWorkingTree = $derived(diffSelection.spec.head === WORKDIR);
+
   // Lifecycle
   onMount(() => {
     loadSavedSize();
@@ -190,40 +202,42 @@
   />
 
   <div class="app-container">
-    <section class="main-content">
-      {#if !repoState.currentPath || repoState.error}
-        <div class="empty-state">
-          <p>{repoState.error ?? 'No repository selected'}</p>
-          <p class="empty-hint">Use the repository selector to open a git repository</p>
-        </div>
-      {:else if diffState.loading}
-        <div class="loading-state">
-          <p>Loading...</p>
-        </div>
-      {:else if diffState.error}
-        <div class="error-state">
-          <p>Error loading diff:</p>
-          <p class="error-message">{diffState.error}</p>
-        </div>
-      {:else}
-        <DiffViewer
-          diff={currentDiff}
+    {#if !repoState.currentPath || repoState.error || showEmptyState}
+      <!-- Full-width empty state -->
+      <section class="main-content full-width">
+        <EmptyState />
+      </section>
+    {:else}
+      <section class="main-content">
+        {#if diffState.loading}
+          <div class="loading-state">
+            <p>Loading...</p>
+          </div>
+        {:else if diffState.error}
+          <div class="error-state">
+            <p>Error loading diff:</p>
+            <p class="error-message">{diffState.error}</p>
+          </div>
+        {:else}
+          <DiffViewer
+            diff={currentDiff}
+            diffBase={diffSelection.spec.base}
+            diffHead={diffSelection.spec.head}
+            sizeBase={preferences.sizeBase}
+            syntaxThemeVersion={preferences.syntaxThemeVersion}
+          />
+        {/if}
+      </section>
+      <aside class="sidebar">
+        <Sidebar
+          bind:this={sidebarRef}
+          onFileSelect={selectFile}
+          selectedFile={diffState.selectedFile}
           diffBase={diffSelection.spec.base}
           diffHead={diffSelection.spec.head}
-          sizeBase={preferences.sizeBase}
-          syntaxThemeVersion={preferences.syntaxThemeVersion}
         />
-      {/if}
-    </section>
-    <aside class="sidebar">
-      <Sidebar
-        bind:this={sidebarRef}
-        onFileSelect={selectFile}
-        selectedFile={diffState.selectedFile}
-        diffBase={diffSelection.spec.base}
-        diffHead={diffSelection.spec.head}
-      />
-    </aside>
+      </aside>
+    {/if}
   </div>
 </main>
 
@@ -275,22 +289,6 @@
     height: 100%;
     color: var(--text-muted);
     font-size: var(--size-lg);
-  }
-
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    color: var(--text-muted);
-    font-size: var(--size-lg);
-  }
-
-  .empty-hint {
-    font-size: var(--size-sm);
-    color: var(--text-faint);
-    margin-top: 8px;
   }
 
   .error-state {
