@@ -78,9 +78,9 @@
   }
 
   // Custom diff selection
-  async function handleCustomDiff(base: string, head: string) {
+  async function handleCustomDiff(base: string, head: string, label?: string) {
     resetState();
-    await selectCustomDiff(base, head);
+    await selectCustomDiff(base, head, label);
     await loadAllDiffs();
   }
 

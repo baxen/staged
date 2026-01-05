@@ -37,7 +37,7 @@
 
   interface Props {
     onDiffSelect: (spec: DiffSpec) => void;
-    onCustomDiff: (base: string, head: string) => void;
+    onCustomDiff: (base: string, head: string, label?: string) => void;
     onRepoChange?: () => void;
   }
 
@@ -66,7 +66,13 @@
     const match = presets.find(
       (p) => p.base === diffSelection.spec.base && p.head === diffSelection.spec.head
     );
-    return match?.label ?? `${diffSelection.spec.base}..${diffSelection.spec.head}`;
+    // Use preset label if matched, otherwise use the spec's label (e.g., "PR #123")
+    // Fall back to "base..head" format if no label is set
+    return (
+      match?.label ??
+      diffSelection.spec.label ??
+      `${diffSelection.spec.base}..${diffSelection.spec.head}`
+    );
   });
 
   function handlePresetSelect(preset: DiffSpec) {
@@ -86,7 +92,7 @@
 
   function handlePRSubmit(base: string, head: string, label: string) {
     showPRModal = false;
-    onCustomDiff(base, head);
+    onCustomDiff(base, head, label);
   }
 
   function handleCustomSubmit(base: string, head: string) {

@@ -170,7 +170,28 @@ pub fn fetch_pr_branch(repo: &Repository, base_ref: &str, head_ref: &str) -> Res
         .workdir()
         .ok_or_else(|| GitError("Bare repository".into()))?;
 
-    // First, check if the branch already exists locally
+    let origin_base = format!("origin/{}", base_ref);
+
+    // Fast path: try to compute merge-base without fetching
+    // This works if both branches are already available locally
+    if let Ok(merge_base) = get_merge_base(repo, &origin_base, head_ref) {
+        log::info!(
+            "Merge-base found without fetching: {} between {} and {}",
+            &merge_base[..8.min(merge_base.len())],
+            origin_base,
+            head_ref
+        );
+        return Ok(merge_base);
+    }
+
+    // Need to fetch - branches aren't available locally
+    log::info!(
+        "Merge-base not found locally, fetching branches for PR: {} -> {}",
+        base_ref,
+        head_ref
+    );
+
+    // Fetch the head branch
     if repo.find_branch(head_ref, git2::BranchType::Local).is_ok() {
         // Branch exists, fetch to update it
         log::info!("Branch '{}' exists locally, fetching updates", head_ref);
@@ -213,9 +234,18 @@ pub fn fetch_pr_branch(repo: &Repository, base_ref: &str, head_ref: &str) -> Res
         }
     }
 
-    // Compute merge-base between base and head
-    // This is the commit where the PR branch diverged from the base branch
-    let merge_base = get_merge_base(repo, base_ref, head_ref)?;
+    // Also fetch the base branch to ensure we have the latest
+    log::info!("Fetching base branch '{}' from origin", base_ref);
+    let _ = Command::new("git")
+        .args(["fetch", "origin", base_ref])
+        .current_dir(workdir)
+        .output();
+
+    // Compute merge-base between origin/base and head
+    // Use origin/base_ref to get the remote's version of the base branch,
+    // since the PR is based on the remote, not the local branch
+    let origin_base = format!("origin/{}", base_ref);
+    let merge_base = get_merge_base(repo, &origin_base, head_ref)?;
     Ok(merge_base)
 }
 
