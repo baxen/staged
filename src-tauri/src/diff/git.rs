@@ -156,6 +156,80 @@ pub fn last_commit_message(repo: &Repository) -> Result<Option<String>> {
     Ok(commit.message().map(String::from))
 }
 
+/// Create a commit with the specified files and message.
+///
+/// This stages only the specified files (resetting the index first to avoid
+/// including previously staged files), then creates a commit.
+///
+/// Returns the short SHA of the new commit.
+pub fn create_commit(repo: &Repository, paths: &[String], message: &str) -> Result<String> {
+    if paths.is_empty() {
+        return Err(GitError("No files selected for commit".into()));
+    }
+
+    if message.trim().is_empty() {
+        return Err(GitError("Commit message cannot be empty".into()));
+    }
+
+    // Get the current HEAD commit (parent for new commit)
+    let parent_commit = match repo.head() {
+        Ok(head) => Some(head.peel_to_commit()?),
+        Err(_) => None, // Initial commit - no parent
+    };
+
+    // Get the index
+    let mut index = repo.index()?;
+
+    // Reset index to HEAD to start fresh (removes any previously staged changes)
+    if let Some(ref parent) = parent_commit {
+        repo.reset(parent.as_object(), git2::ResetType::Mixed, None)?;
+        // Reload index after reset
+        index = repo.index()?;
+    }
+
+    // Stage only the specified files
+    // We need to handle both tracked and untracked files
+    let workdir = repo
+        .workdir()
+        .ok_or_else(|| GitError("Bare repository".into()))?;
+
+    for path in paths {
+        let full_path = workdir.join(path);
+
+        if full_path.exists() {
+            // File exists - add it (handles both modified and new files)
+            index.add_path(Path::new(path))?;
+        } else {
+            // File was deleted - remove from index
+            index.remove_path(Path::new(path))?;
+        }
+    }
+
+    index.write()?;
+
+    // Create the tree from the index
+    let tree_oid = index.write_tree()?;
+    let tree = repo.find_tree(tree_oid)?;
+
+    // Get signature for commit
+    let signature = repo.signature()?;
+
+    // Create the commit
+    let parents: Vec<&git2::Commit> = parent_commit.iter().collect();
+    let commit_oid = repo.commit(
+        Some("HEAD"),
+        &signature,
+        &signature,
+        message,
+        &tree,
+        &parents,
+    )?;
+
+    // Return short SHA
+    let full_sha = commit_oid.to_string();
+    Ok(full_sha[..8.min(full_sha.len())].to_string())
+}
+
 /// Fetch a PR branch from the remote and set up a local tracking branch.
 ///
 /// This is idempotent - if the branch already exists locally, it will be updated.

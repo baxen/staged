@@ -182,9 +182,11 @@
 
 <main>
   <TopBar
+    files={diffState.diffs}
     onDiffSelect={handleDiffSelect}
     onCustomDiff={handleCustomDiff}
     onRepoChange={handleRepoChange}
+    onCommit={handleFilesChanged}
   />
 
   <div class="app-container">

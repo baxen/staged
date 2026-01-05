@@ -94,6 +94,19 @@ fn get_last_commit_message(repo_path: Option<String>) -> Result<Option<String>, 
     diff::last_commit_message(&repo).map_err(|e| e.0)
 }
 
+/// Create a commit with the specified files and message.
+///
+/// Returns the short SHA of the new commit.
+#[tauri::command]
+fn create_commit(
+    repo_path: Option<String>,
+    paths: Vec<String>,
+    message: String,
+) -> Result<String, String> {
+    let repo = open_repo_from_path(repo_path.as_deref())?;
+    diff::create_commit(&repo, &paths, &message).map_err(|e| e.0)
+}
+
 // =============================================================================
 // GitHub Commands
 // =============================================================================
@@ -280,6 +293,7 @@ pub fn run() {
             // Git commands
             get_repo_info,
             get_last_commit_message,
+            create_commit,
             // GitHub commands
             check_github_auth,
             list_pull_requests,

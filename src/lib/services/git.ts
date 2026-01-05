@@ -23,6 +23,22 @@ export async function getLastCommitMessage(repoPath?: string): Promise<string | 
   });
 }
 
+/**
+ * Create a commit with the specified files and message.
+ * Returns the short SHA of the new commit.
+ */
+export async function createCommit(
+  paths: string[],
+  message: string,
+  repoPath?: string
+): Promise<string> {
+  return invoke<string>('create_commit', {
+    repoPath: repoPath ?? null,
+    paths,
+    message,
+  });
+}
+
 // =============================================================================
 // Diff API
 // =============================================================================

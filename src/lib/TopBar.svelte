@@ -12,16 +12,18 @@
     FolderOpen,
     X,
     GitPullRequest,
+    GitCommitHorizontal,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
-  import type { DiffSpec } from './types';
+  import CommitModal from './CommitModal.svelte';
+  import type { DiffSpec, FileDiff } from './types';
   import {
     preferences,
     getAvailableSyntaxThemes,
     selectSyntaxTheme,
   } from './stores/preferences.svelte';
-  import { getPresets, diffSelection } from './stores/diffSelection.svelte';
+  import { getPresets, diffSelection, WORKDIR } from './stores/diffSelection.svelte';
   import {
     commentsState,
     copyCommentsToClipboard,
@@ -36,12 +38,14 @@
   } from './stores/repoState.svelte';
 
   interface Props {
+    files: FileDiff[];
     onDiffSelect: (spec: DiffSpec) => void;
     onCustomDiff: (base: string, head: string, label?: string) => void;
     onRepoChange?: () => void;
+    onCommit?: () => void;
   }
 
-  let { onDiffSelect, onCustomDiff, onRepoChange }: Props = $props();
+  let { files, onDiffSelect, onCustomDiff, onRepoChange, onCommit }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -51,9 +55,13 @@
   // Modal state
   let showCustomModal = $state(false);
   let showPRModal = $state(false);
+  let showCommitModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
+
+  // Check if we're viewing working directory changes (can commit)
+  let canCommit = $derived(diffSelection.spec.head === WORKDIR && files.length > 0);
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffSpec): boolean {
@@ -257,8 +265,15 @@
     </div>
   </div>
 
-  <!-- Center section: Comments -->
+  <!-- Center section: Actions (Commit, Comments) -->
   <div class="section section-center">
+    {#if canCommit}
+      <button class="action-btn" onclick={() => (showCommitModal = true)} title="Commit">
+        <GitCommitHorizontal size={14} />
+        <span class="action-label">Commit</span>
+      </button>
+    {/if}
+
     <div class="comments-section">
       <MessageSquare size={14} />
       <span class="comment-count">{commentsState.comments.length}</span>
@@ -282,7 +297,7 @@
     </div>
   </div>
 
-  <!-- Right section: Theme -->
+  <!-- Right section: Settings -->
   <div class="section section-right">
     <div class="theme-picker">
       <button
@@ -325,6 +340,18 @@
     repoPath={repoState.currentPath}
     onSubmit={handlePRSubmit}
     onClose={() => (showPRModal = false)}
+  />
+{/if}
+
+{#if showCommitModal}
+  <CommitModal
+    {files}
+    repoPath={repoState.currentPath}
+    onCommit={() => {
+      showCommitModal = false;
+      onCommit?.();
+    }}
+    onClose={() => (showCommitModal = false)}
   />
 {/if}
 
@@ -624,6 +651,7 @@
     align-items: center;
     gap: 6px;
     padding: 4px 8px;
+    height: 24px;
     background-color: var(--bg-primary);
     border-radius: 6px;
     color: var(--text-muted);
@@ -679,5 +707,40 @@
   .theme-btn.open {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  /* Action button (Commit, etc.) - icon only, label on hover */
+  .action-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    height: 24px;
+    background: var(--bg-primary);
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .action-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .action-btn :global(svg) {
+    flex-shrink: 0;
+  }
+
+  .action-label {
+    display: none;
+  }
+
+  .action-btn:hover .action-label {
+    display: inline;
   }
 </style>

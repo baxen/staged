@@ -13,8 +13,8 @@ pub mod types;
 
 // Re-export types used by lib.rs Tauri commands
 pub use git::{
-    compute_diff, fetch_pr_branch, get_merge_base, get_refs, get_repo_info, last_commit_message,
-    open_repo, resolve_ref, GitRef, RepoInfo, WORKDIR,
+    compute_diff, create_commit, fetch_pr_branch, get_merge_base, get_refs, get_repo_info,
+    last_commit_message, open_repo, resolve_ref, GitRef, RepoInfo, WORKDIR,
 };
 pub use github::{
     check_github_auth, get_github_remote, list_pull_requests, GitHubAuthStatus, GitHubRepo,
