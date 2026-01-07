@@ -16,9 +16,16 @@ Key concepts:
 
 ### Prerequisites
 
-- [Rust](https://rustup.rs/) (1.77.2+)
-- [Node.js](https://nodejs.org/) (v18+)
-- [just](https://github.com/casey/just) (command runner)
+This project uses [Hermit](https://github.com/cashapp/hermit) to manage development tools (Rust, Node.js, just). Hermit ensures everyone uses the same tool versions without global installs.
+
+**First time setup:**
+
+```bash
+source bin/activate-hermit   # Activate hermit environment
+rustup default stable        # Set the default Rust toolchain
+```
+
+After activation, `cargo`, `node`, `npm`, and `just` are all available from the hermit-managed versions.
 
 ### Quick Start
 
