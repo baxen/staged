@@ -19,8 +19,17 @@ export function validateEmail(email: string): boolean {
   return email.includes("@");
 }
 
+// New function with issues to comment on
+export function parseDate(dateStr: string): Date {
+  // Doesn't handle invalid dates
+  return new Date(dateStr);
+}
+
+// Modified config with more issues
 export const CONFIG = {
   apiUrl: "http://localhost:3000",  // Should use HTTPS in production
   timeout: 5000,
   retries: 3,
+  maxConnections: 100,  // Seems high?
+  debugMode: true,  // Should be false in production!
 };
