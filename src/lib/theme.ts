@@ -11,6 +11,9 @@
  * Usage in CSS (via CSS custom properties):
  *   color: var(--text-primary);
  *   background: var(--bg-primary);
+ *
+ * TODO: Consider adding support for custom accent colors
+ * TODO: Add high contrast mode for accessibility
  */
 
 export interface Theme {
