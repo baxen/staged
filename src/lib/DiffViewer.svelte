@@ -1120,6 +1120,28 @@
     }
   }
 
+  function handleLineSelectionKeydown(event: KeyboardEvent) {
+    // Skip if focus is in an input or textarea
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    // Enter: Open comment dialog when lines are selected but dialog not open
+    if (event.key === 'Enter' && selectedLineRange && !commentingOnLines) {
+      event.preventDefault();
+      handleStartLineComment();
+      return;
+    }
+
+    // Escape: Clear line selection when lines are selected but dialog not open
+    if (event.key === 'Escape' && selectedLineRange && !commentingOnLines) {
+      event.preventDefault();
+      clearLineSelection();
+      return;
+    }
+  }
+
   function handleCopy(event: ClipboardEvent) {
     if (selectedLineRange) {
       event.preventDefault();
@@ -1196,6 +1218,7 @@
     document.addEventListener('copy', handleCopy);
     document.addEventListener('mouseup', handleGlobalMouseUp);
     document.addEventListener('click', handleGlobalClick);
+    document.addEventListener('keydown', handleLineSelectionKeydown);
 
     return () => {
       cleanupSpaceKey();
@@ -1203,6 +1226,7 @@
       document.removeEventListener('copy', handleCopy);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('click', handleGlobalClick);
+      document.removeEventListener('keydown', handleLineSelectionKeydown);
       document.removeEventListener('mousemove', handleDragMove);
       // Clean up connector renderer
       if (connectorRenderer) {
@@ -1545,10 +1569,10 @@
             ? 's'
             : ''}
         </span>
-        <button class="range-btn comment-btn" onclick={handleStartLineComment} title="Add comment">
+        <button class="range-btn comment-btn" onclick={handleStartLineComment} title="Add comment (Enter)">
           <MessageSquarePlus size={12} />
         </button>
-        <button class="range-btn" onclick={clearLineSelection} title="Clear selection">
+        <button class="range-btn" onclick={clearLineSelection} title="Clear selection (Esc)">
           <X size={12} />
         </button>
       </div>
@@ -1574,10 +1598,7 @@
             handleLineCommentSubmit(content);
           }
         }}
-        onCancel={() => {
-          handleLineCommentCancel();
-          clearLineSelection();
-        }}
+        onCancel={handleLineCommentCancel}
         onDelete={existingComment
           ? () => {
               handleCommentDelete(existingComment.id);
