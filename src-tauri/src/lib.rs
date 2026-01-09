@@ -172,6 +172,28 @@ fn fetch_pr_branch(
 }
 
 // =============================================================================
+// AI Commands
+// =============================================================================
+
+/// Describe a code change using goose AI.
+///
+/// Takes the before/after lines of a hunk and the file path.
+/// Calls `goose run` to generate a description of what changed.
+#[tauri::command]
+async fn describe_hunk(
+    file_path: String,
+    before_lines: Vec<String>,
+    after_lines: Vec<String>,
+) -> Result<String, String> {
+    // Run in blocking task since it spawns a subprocess
+    tokio::task::spawn_blocking(move || {
+        diff::describe_hunk(&file_path, &before_lines, &after_lines)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
+}
+
+// =============================================================================
 // Review Commands
 // =============================================================================
 
@@ -371,6 +393,8 @@ pub fn run() {
             check_github_auth,
             list_pull_requests,
             fetch_pr_branch,
+            // AI commands
+            describe_hunk,
             // Review commands
             get_review,
             add_comment,
