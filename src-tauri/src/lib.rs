@@ -1,14 +1,20 @@
-pub mod diff;
+//! Tauri commands for the Staged diff viewer.
+//!
+//! This module provides the bridge between the frontend and the git/github modules.
+
+pub mod git;
 mod refresh;
+pub mod review;
 mod themes;
 mod watcher;
 
-use diff::{
-    Comment, DiffId, Edit, GitHubAuthStatus, GitRef, NewComment, NewEdit, PRFetchResult,
-    PullRequest, RepoInfo, Review,
+use git::{
+    DiffId, DiffSpec, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
+    PullRequest,
 };
 use refresh::RefreshController;
-use std::path::PathBuf;
+use review::{Comment, Edit, NewComment, NewEdit, Review};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{Manager, State};
 
@@ -16,233 +22,227 @@ use tauri::{Manager, State};
 // Helpers
 // =============================================================================
 
-/// Open a repository from an optional path (defaults to current directory).
-fn open_repo_from_path(repo_path: Option<&str>) -> Result<git2::Repository, String> {
-    let path = repo_path
-        .map(std::path::Path::new)
-        .unwrap_or_else(|| std::path::Path::new("."));
-    diff::open_repo(path).map_err(|e| e.0)
+/// Get the repo path, defaulting to current directory.
+fn get_repo_path(path: Option<&str>) -> &Path {
+    path.map(Path::new).unwrap_or(Path::new("."))
 }
 
-/// Resolve a ref to a full SHA for use as a stable storage key.
-/// WORKDIR is kept as-is (represents working tree).
-/// Full SHAs (40 hex chars) are kept as-is - they're already stable.
-/// All other refs are resolved to their full SHA.
-fn resolve_for_storage(repo: &git2::Repository, ref_str: &str) -> Result<String, String> {
-    if ref_str == diff::WORKDIR {
-        return Ok(diff::WORKDIR.to_string());
-    }
+/// Create a DiffId from a DiffSpec for review storage.
+/// Resolves refs to SHAs for stable keys.
+fn make_diff_id(repo: &Path, spec: &DiffSpec) -> Result<DiffId, String> {
+    let resolve = |r: &GitRef| -> Result<String, String> {
+        match r {
+            GitRef::WorkingTree => Ok("@".to_string()),
+            GitRef::Rev(rev) => git::resolve_ref(repo, rev).map_err(|e| e.to_string()),
+        }
+    };
 
-    // If it's already a full SHA, use it directly.
-    // This handles cases where the SHA might be from a fetched PR ref
-    // that isn't reachable from local branches.
-    if is_full_sha(ref_str) {
-        return Ok(ref_str.to_string());
-    }
-
-    let obj = repo
-        .revparse_single(ref_str)
-        .map_err(|e| format!("Cannot resolve '{}': {}", ref_str, e))?;
-
-    Ok(obj.id().to_string())
-}
-
-/// Check if a string is a full 40-character SHA.
-fn is_full_sha(s: &str) -> bool {
-    s.len() == 40 && s.chars().all(|c| c.is_ascii_hexdigit())
-}
-
-/// Create a DiffId with resolved SHAs for stable storage.
-fn make_diff_id(repo_path: Option<&str>, base: &str, head: &str) -> Result<DiffId, String> {
-    let repo = open_repo_from_path(repo_path)?;
-    let resolved_base = resolve_for_storage(&repo, base)?;
-    let resolved_head = resolve_for_storage(&repo, head)?;
-    Ok(DiffId::new(resolved_base, resolved_head))
-}
-
-// =============================================================================
-// Diff Commands
-// =============================================================================
-
-/// Get the full diff between two refs.
-///
-/// If `use_merge_base` is true, diffs from the merge-base instead of base directly.
-#[tauri::command]
-fn get_diff(
-    repo_path: Option<String>,
-    base: String,
-    head: String,
-    use_merge_base: Option<bool>,
-) -> Result<Vec<diff::FileDiff>, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::compute_diff(&repo, &base, &head, use_merge_base.unwrap_or(false)).map_err(|e| e.0)
-}
-
-/// Get list of refs (branches, tags, special) with type info for autocomplete.
-#[tauri::command]
-fn get_refs(repo_path: Option<String>) -> Result<Vec<GitRef>, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::get_refs(&repo).map_err(|e| e.0)
-}
-
-/// Resolve a ref to its short SHA for display/validation.
-#[tauri::command]
-fn resolve_ref(repo_path: Option<String>, ref_str: String) -> Result<String, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::resolve_ref(&repo, &ref_str).map_err(|e| e.0)
+    Ok(DiffId::new(resolve(&spec.base)?, resolve(&spec.head)?))
 }
 
 // =============================================================================
 // Git Commands
 // =============================================================================
 
-/// Get basic repository info (path and branch name).
-#[tauri::command]
-fn get_repo_info(repo_path: Option<String>) -> Result<RepoInfo, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::get_repo_info(&repo).map_err(|e| e.0)
+/// Get the absolute path to the repository root.
+#[tauri::command(rename_all = "camelCase")]
+fn get_repo_root(repo_path: Option<String>) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::get_repo_root(path).map_err(|e| e.to_string())
 }
 
-/// Get the last commit message (for amend UI).
-#[tauri::command]
-fn get_last_commit_message(repo_path: Option<String>) -> Result<Option<String>, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::last_commit_message(&repo).map_err(|e| e.0)
+/// List refs (branches, tags, remotes) for autocomplete.
+#[tauri::command(rename_all = "camelCase")]
+fn list_refs(repo_path: Option<String>) -> Result<Vec<String>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::list_refs(path).map_err(|e| e.to_string())
 }
 
-/// Create a commit with the specified files and message.
-///
+/// Resolve a ref to its full SHA. Used for validation.
+#[tauri::command(rename_all = "camelCase")]
+fn resolve_ref(repo_path: Option<String>, reference: String) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::resolve_ref(path, &reference).map_err(|e| e.to_string())
+}
+
+/// List files changed in a diff (for sidebar).
+#[tauri::command(rename_all = "camelCase")]
+fn list_diff_files(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+) -> Result<Vec<FileDiffSummary>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::list_diff_files(path, &spec).map_err(|e| e.to_string())
+}
+
+/// Get full diff content for a single file.
+#[tauri::command(rename_all = "camelCase")]
+fn get_file_diff(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    file_path: String,
+) -> Result<FileDiff, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::get_file_diff(path, &spec, Path::new(&file_path)).map_err(|e| e.to_string())
+}
+
+/// Create a commit with the specified files.
 /// Returns the short SHA of the new commit.
-#[tauri::command]
-fn create_commit(
+#[tauri::command(rename_all = "camelCase")]
+fn commit(
     repo_path: Option<String>,
     paths: Vec<String>,
     message: String,
 ) -> Result<String, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::create_commit(&repo, &paths, &message).map_err(|e| e.0)
+    let path = get_repo_path(repo_path.as_deref());
+    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    git::commit(path, &paths, &message).map_err(|e| e.to_string())
 }
 
 // =============================================================================
 // GitHub Commands
 // =============================================================================
 
-/// Check if the user is authenticated with GitHub CLI.
+/// Check if GitHub CLI is installed and authenticated.
 #[tauri::command]
 fn check_github_auth() -> GitHubAuthStatus {
-    diff::check_github_auth()
+    git::check_github_auth()
 }
 
-/// List open pull requests for the current repository.
-///
-/// Returns PRs from GitHub API, using cache when available.
-/// Pass `force_refresh: true` to bypass cache.
-#[tauri::command]
-async fn list_pull_requests(
-    repo_path: Option<String>,
-    force_refresh: Option<bool>,
-) -> Result<Vec<PullRequest>, String> {
-    // Get GitHub token first
-    let token = diff::github::get_github_token().map_err(|e| e.0)?;
-
-    // Open repo and find GitHub remote
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    let gh_repo = diff::get_github_remote(&repo).ok_or_else(|| {
-        "No GitHub remote found. This repository is not hosted on GitHub.".to_string()
-    })?;
-
-    // Fetch PRs (with caching)
-    diff::list_pull_requests(&gh_repo, &token, force_refresh.unwrap_or(false))
-        .await
-        .map_err(|e| e.0)
+/// List open pull requests for the repo.
+#[tauri::command(rename_all = "camelCase")]
+fn list_pull_requests(repo_path: Option<String>) -> Result<Vec<PullRequest>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::list_pull_requests(path).map_err(|e| e.to_string())
 }
 
-/// Fetch a PR branch from the remote and set up locally.
-///
-/// This is idempotent - if the branch already exists, it will be updated.
-/// Returns both the merge-base SHA and head SHA for stable diff identification.
-#[tauri::command]
-fn fetch_pr_branch(
+/// Fetch PR refs and compute merge-base.
+/// Returns DiffSpec with concrete SHAs.
+#[tauri::command(rename_all = "camelCase")]
+async fn fetch_pr(
     repo_path: Option<String>,
     base_ref: String,
-    pr_number: u32,
-) -> Result<PRFetchResult, String> {
-    let repo = open_repo_from_path(repo_path.as_deref())?;
-    diff::fetch_pr_branch(&repo, &base_ref, pr_number).map_err(|e| e.0)
+    pr_number: u64,
+) -> Result<DiffSpec, String> {
+    // Convert to owned PathBuf for the blocking task
+    let path = repo_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Run on blocking thread pool to avoid blocking the UI
+    tokio::task::spawn_blocking(move || {
+        git::fetch_pr(&path, &base_ref, pr_number).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Sync local review comments to a GitHub PR as a pending review.
+///
+/// This will delete any existing pending review and create a new one
+/// with all the local comments. Returns the URL to the pending review.
+#[tauri::command(rename_all = "camelCase")]
+async fn sync_review_to_github(
+    repo_path: Option<String>,
+    pr_number: u64,
+    spec: DiffSpec,
+) -> Result<GitHubSyncResult, String> {
+    let path = repo_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    // Get the review with comments
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(&path, &spec)?;
+    let review = store.get_or_create(&id).map_err(|e| e.0)?;
+
+    if review.comments.is_empty() {
+        return Err("No comments to sync".to_string());
+    }
+
+    // Sync to GitHub
+    git::sync_review_to_github(&path, pr_number, &review.comments)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // =============================================================================
 // Review Commands
 // =============================================================================
 
-#[tauri::command]
-fn get_review(base: String, head: String, repo_path: Option<String>) -> Result<Review, String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(repo_path.as_deref(), &base, &head)?;
+#[tauri::command(rename_all = "camelCase")]
+fn get_review(repo_path: Option<String>, spec: DiffSpec) -> Result<Review, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
     store.get_or_create(&id).map_err(|e| e.0)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn add_comment(
-    base: String,
-    head: String,
-    comment: NewComment,
     repo_path: Option<String>,
+    spec: DiffSpec,
+    comment: NewComment,
 ) -> Result<Comment, String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(repo_path.as_deref(), &base, &head)?;
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
     let comment = Comment::new(comment.path, comment.span, comment.content);
     store.add_comment(&id, &comment).map_err(|e| e.0)?;
     Ok(comment)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn update_comment(comment_id: String, content: String) -> Result<(), String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
+    let store = review::get_store().map_err(|e| e.0)?;
     store.update_comment(&comment_id, &content).map_err(|e| e.0)
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn delete_comment(comment_id: String) -> Result<(), String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
+    let store = review::get_store().map_err(|e| e.0)?;
     store.delete_comment(&comment_id).map_err(|e| e.0)
 }
 
-#[tauri::command]
-fn mark_reviewed(base: String, head: String, path: String) -> Result<(), String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(None, &base, &head)?;
+#[tauri::command(rename_all = "camelCase")]
+fn mark_reviewed(repo_path: Option<String>, spec: DiffSpec, path: String) -> Result<(), String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(repo, &spec)?;
     store.mark_reviewed(&id, &path).map_err(|e| e.0)
 }
 
-#[tauri::command]
-fn unmark_reviewed(base: String, head: String, path: String) -> Result<(), String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(None, &base, &head)?;
+#[tauri::command(rename_all = "camelCase")]
+fn unmark_reviewed(repo_path: Option<String>, spec: DiffSpec, path: String) -> Result<(), String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(repo, &spec)?;
     store.unmark_reviewed(&id, &path).map_err(|e| e.0)
 }
 
-#[tauri::command]
-fn record_edit(base: String, head: String, edit: NewEdit) -> Result<Edit, String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(None, &base, &head)?;
+#[tauri::command(rename_all = "camelCase")]
+fn record_edit(repo_path: Option<String>, spec: DiffSpec, edit: NewEdit) -> Result<Edit, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
     let edit = Edit::new(edit.path, edit.diff);
     store.add_edit(&id, &edit).map_err(|e| e.0)?;
     Ok(edit)
 }
 
-#[tauri::command]
-fn export_review_markdown(base: String, head: String) -> Result<String, String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(None, &base, &head)?;
+#[tauri::command(rename_all = "camelCase")]
+fn export_review_markdown(repo_path: Option<String>, spec: DiffSpec) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
     let review = store.get_or_create(&id).map_err(|e| e.0)?;
-    Ok(diff::export_markdown(&review))
+    Ok(review::export_markdown(&review))
 }
 
-#[tauri::command]
-fn clear_review(base: String, head: String) -> Result<(), String> {
-    let store = diff::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(None, &base, &head)?;
+#[tauri::command(rename_all = "camelCase")]
+fn clear_review(repo_path: Option<String>, spec: DiffSpec) -> Result<(), String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
     store.delete(&id).map_err(|e| e.0)
 }
 
@@ -291,8 +291,6 @@ fn install_theme(content: String, filename: String) -> Result<themes::CustomThem
 /// Only allows .json files for security.
 #[tauri::command]
 fn read_json_file(path: String) -> Result<String, String> {
-    use std::path::Path;
-
     let path = Path::new(&path);
 
     // Security: only allow .json files
@@ -308,10 +306,9 @@ fn read_json_file(path: String) -> Result<String, String> {
 // =============================================================================
 
 /// State container for the refresh controller.
-/// Wrapped in Option because it's created during setup with the AppHandle.
 struct RefreshControllerState(Mutex<Option<RefreshController>>);
 
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 async fn start_watching(
     repo_path: String,
     state: State<'_, RefreshControllerState>,
@@ -347,7 +344,7 @@ pub fn run() {
         .manage(RefreshControllerState(Mutex::new(None)))
         .setup(|app| {
             // Initialize the review store with app data directory
-            diff::init_store(app.handle()).map_err(|e| e.0)?;
+            review::init_store(app.handle()).map_err(|e| e.0)?;
 
             // Initialize the refresh controller with the app handle
             let controller = RefreshController::new(app.handle().clone());
@@ -364,18 +361,18 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            // Diff commands
-            get_diff,
-            get_refs,
-            resolve_ref,
             // Git commands
-            get_repo_info,
-            get_last_commit_message,
-            create_commit,
+            get_repo_root,
+            list_refs,
+            resolve_ref,
+            list_diff_files,
+            get_file_diff,
+            commit,
             // GitHub commands
             check_github_auth,
             list_pull_requests,
-            fetch_pr_branch,
+            fetch_pr,
+            sync_review_to_github,
             // Review commands
             get_review,
             add_comment,
