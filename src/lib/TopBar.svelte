@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import {
     ChevronDown,
     Palette,
@@ -160,6 +161,30 @@
       diffDropdownOpen = false;
     }
   }
+
+  // Keyboard shortcut handler for copy comments
+  function handleKeydown(event: KeyboardEvent) {
+    // Skip if focus is in an input or textarea (e.g., comment dialog is open)
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    // 'c' to copy all comments
+    if (event.key === 'c' && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      if (commentsState.comments.length > 0) {
+        event.preventDefault();
+        handleCopyComments();
+      }
+    }
+  }
+
+  onMount(() => {
+    document.addEventListener('keydown', handleKeydown);
+    return () => {
+      document.removeEventListener('keydown', handleKeydown);
+    };
+  });
 </script>
 
 <svelte:window onclick={handleClickOutside} />
@@ -278,7 +303,7 @@
           class="icon-btn"
           class:copied={copiedFeedback}
           onclick={handleCopyComments}
-          title="Copy all comments"
+          title="Copy all comments (c)"
         >
           {#if copiedFeedback}
             <Check size={12} />
