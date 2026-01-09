@@ -106,9 +106,11 @@
   // Panel state (two-pane mode only)
   // ==========================================================================
 
-  let beforeHovered = $state(false);
-  let afterHovered = $state(false);
-  let spaceHeld = $state(false);
+  /** Ratio of before pane width (0-1). 0.4 = 40% before, 60% after */
+  let paneRatio = $state(0.4);
+
+  /** Whether user is currently dragging the divider */
+  let isDraggingDivider = $state(false);
 
   // ==========================================================================
   // Range hover state (for toolbar on changed ranges)
@@ -501,33 +503,6 @@
     redrawConnectorsImpl();
   }
 
-  // Panel transition animation effect
-  $effect(() => {
-    const _ = [beforeHovered, afterHovered, spaceHeld];
-
-    if (!isTwoPaneMode) return;
-
-    const startTime = performance.now();
-    let rafId: number;
-
-    function animateUpdate() {
-      redrawConnectors();
-      updateToolbarPosition();
-      updateCommentEditorPosition();
-      updateLineSelectionToolbar();
-      updateLineCommentEditorPosition();
-
-      if (performance.now() - startTime < PANEL_TRANSITION_MS) {
-        rafId = requestAnimationFrame(animateUpdate);
-      }
-    }
-
-    rafId = requestAnimationFrame(animateUpdate);
-
-    return () => {
-      cancelAnimationFrame(rafId);
-    };
-  });
 
   // Redraw triggers
   $effect(() => {
@@ -593,40 +568,6 @@
     return getCommentsForAlignment(alignmentIndex).length > 0;
   }
 
-  // ==========================================================================
-  // Space key handler (zoom modifier)
-  // ==========================================================================
-
-  function setupSpaceKeyHandler(onSpaceChange: (held: boolean) => void): () => void {
-    function handleKeyDown(e: KeyboardEvent) {
-      if (e.code === 'Space' && !e.repeat) {
-        const target = e.target as HTMLElement;
-        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-          return;
-        }
-        if (document.activeElement instanceof HTMLElement) {
-          document.activeElement.blur();
-        }
-        e.preventDefault();
-        e.stopPropagation();
-        onSpaceChange(true);
-      }
-    }
-
-    function handleKeyUp(e: KeyboardEvent) {
-      if (e.code === 'Space') {
-        onSpaceChange(false);
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown, { capture: true });
-    window.addEventListener('keyup', handleKeyUp, { capture: true });
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown, { capture: true });
-      window.removeEventListener('keyup', handleKeyUp, { capture: true });
-    };
-  }
 
   // ==========================================================================
   // Scroll handlers (custom scroll via wheel events)
@@ -681,6 +622,58 @@
     const _after = scrollController.afterScrollY;
     if (diff && connectorCanvas && afterPane) {
       scheduleConnectorRedraw();
+    }
+  });
+
+  // ==========================================================================
+  // Divider drag handling
+  // ==========================================================================
+
+  function handleDividerMouseDown(e: MouseEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    isDraggingDivider = true;
+    document.addEventListener('mousemove', handleDividerMouseMove);
+    document.addEventListener('mouseup', handleDividerMouseUp);
+  }
+
+  function handleDividerMouseMove(e: MouseEvent) {
+    if (!isDraggingDivider || !diffViewerEl) return;
+
+    const rect = diffViewerEl.getBoundingClientRect();
+    // Account for left padding (8px) and spine width (24px)
+    const availableWidth = rect.width - 8 - 24;
+    const mouseX = e.clientX - rect.left - 8;
+
+    // Calculate ratio, clamping to reasonable bounds (15% - 85%)
+    let ratio = mouseX / availableWidth;
+    ratio = Math.max(0.15, Math.min(0.85, ratio));
+
+    paneRatio = ratio;
+
+    // Update connectors during drag
+    redrawConnectors();
+  }
+
+  function handleDividerMouseUp() {
+    isDraggingDivider = false;
+    document.removeEventListener('mousemove', handleDividerMouseMove);
+    document.removeEventListener('mouseup', handleDividerMouseUp);
+  }
+
+  function handleDividerDoubleClick() {
+    // Reset to default 40/60 split
+    paneRatio = 0.4;
+    redrawConnectors();
+  }
+
+  // Redraw connectors when pane ratio changes
+  $effect(() => {
+    const _ = paneRatio;
+    if (diff && connectorCanvas && afterPane) {
+      requestAnimationFrame(() => {
+        scheduleConnectorRedraw();
+      });
     }
   });
 
@@ -1185,10 +1178,6 @@
       highlighterReady = true;
     });
 
-    const cleanupSpaceKey = setupSpaceKeyHandler((held) => {
-      spaceHeld = held;
-    });
-
     const cleanupKeyboardNav = setupKeyboardNav({
       getScrollTarget: () => afterPane,
     });
@@ -1198,12 +1187,13 @@
     document.addEventListener('click', handleGlobalClick);
 
     return () => {
-      cleanupSpaceKey();
       cleanupKeyboardNav?.();
       document.removeEventListener('copy', handleCopy);
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('click', handleGlobalClick);
       document.removeEventListener('mousemove', handleDragMove);
+      document.removeEventListener('mousemove', handleDividerMouseMove);
+      document.removeEventListener('mouseup', handleDividerMouseUp);
       // Clean up connector renderer
       if (connectorRenderer) {
         connectorRenderer.destroy();
@@ -1249,10 +1239,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="diff-pane before-pane"
-          class:focused={beforeHovered}
-          class:zoomed={beforeHovered && spaceHeld}
-          onmouseenter={() => (beforeHovered = true)}
-          onmouseleave={() => (beforeHovered = false)}
+          style="flex: {paneRatio}"
         >
           <div class="pane-header">
             <span class="pane-ref">
@@ -1348,8 +1335,15 @@
         </div>
       {/if}
 
-      <!-- Spine (always present) -->
-      <div class="spine">
+      <!-- Spine / Divider -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="spine"
+        class:dragging={isDraggingDivider}
+        onmousedown={handleDividerMouseDown}
+        ondblclick={handleDividerDoubleClick}
+      >
+        <div class="divider-handle"></div>
         <canvas class="spine-connector" bind:this={connectorCanvas}></canvas>
       </div>
 
@@ -1358,10 +1352,7 @@
         <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="diff-pane after-pane"
-          class:focused={afterHovered}
-          class:zoomed={afterHovered && spaceHeld}
-          onmouseenter={() => (afterHovered = true)}
-          onmouseleave={() => (afterHovered = false)}
+          style="flex: {1 - paneRatio}"
         >
           <div class="pane-header">
             <span class="pane-ref">
@@ -1611,48 +1602,8 @@
     overflow: hidden;
     min-width: 0;
     position: relative;
-    transition: flex 0.2s ease;
     border-radius: 12px;
     background-color: var(--bg-primary);
-  }
-
-  /* Two-pane mode: default 40/60 split */
-  .before-pane {
-    flex: 4;
-  }
-
-  .after-pane {
-    flex: 6;
-  }
-
-  /* Focused (hovered): 60/40 split */
-  .before-pane.focused:not(.zoomed) {
-    flex: 6;
-  }
-
-  .before-pane.focused:not(.zoomed) ~ .spine ~ .after-pane:not(.focused) {
-    flex: 4;
-  }
-
-  .after-pane.focused:not(.zoomed) {
-    flex: 6;
-  }
-
-  /* Zoomed (space held): 90/10 split */
-  .before-pane.zoomed {
-    flex: 9;
-  }
-
-  .before-pane.zoomed ~ .spine ~ .after-pane {
-    flex: 1;
-  }
-
-  .after-pane.zoomed {
-    flex: 9;
-  }
-
-  .before-pane:has(~ .spine ~ .after-pane.zoomed) {
-    flex: 1;
   }
 
   /* Single pane mode */
@@ -1726,13 +1677,44 @@
     white-space: nowrap;
   }
 
-  /* Spine */
+  /* Spine / Divider */
   .spine {
     width: 24px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
     background-color: transparent;
+    position: relative;
+    cursor: col-resize;
+  }
+
+  .spine:hover .divider-handle,
+  .spine.dragging .divider-handle {
+    opacity: 1;
+  }
+
+  .divider-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 4px;
+    background-color: var(--border-muted);
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .spine.dragging .divider-handle {
+    background-color: var(--accent-primary);
+  }
+
+  /* Prevent text selection during drag */
+  .diff-viewer:has(.spine.dragging) {
+    user-select: none;
   }
 
   .spine-connector {
