@@ -771,11 +771,11 @@
 
   /* Smart diff button */
   .smart-diff-btn :global(svg) {
-    color: var(--accent-primary);
+    color: var(--ui-accent);
   }
 
   .smart-diff-btn.active {
-    background: var(--accent-primary);
+    background: var(--ui-accent);
     color: var(--bg-chrome);
   }
 
