@@ -4,8 +4,8 @@ mod themes;
 mod watcher;
 
 use diff::{
-    Comment, DiffId, Edit, GitHubAuthStatus, GitRef, NewComment, NewEdit, PRFetchResult,
-    PullRequest, RepoInfo, Review,
+    Comment, DiffId, Edit, GitHubAuthStatus, GitRef, HunkDescription, NewComment, NewEdit,
+    PRFetchResult, PullRequest, RepoInfo, Review,
 };
 use refresh::RefreshController;
 use std::path::PathBuf;
@@ -169,6 +169,24 @@ fn fetch_pr_branch(
 ) -> Result<PRFetchResult, String> {
     let repo = open_repo_from_path(repo_path.as_deref())?;
     diff::fetch_pr_branch(&repo, &base_ref, pr_number).map_err(|e| e.0)
+}
+
+// =============================================================================
+// AI Commands
+// =============================================================================
+
+#[tauri::command]
+async fn describe_hunk(
+    file_path: String,
+    before_lines: Vec<String>,
+    after_lines: Vec<String>,
+) -> Result<HunkDescription, String> {
+    // Run in blocking task since it spawns a subprocess
+    tokio::task::spawn_blocking(move || {
+        diff::describe_hunk(&file_path, &before_lines, &after_lines)
+    })
+    .await
+    .map_err(|e| format!("Task join error: {}", e))?
 }
 
 // =============================================================================
@@ -376,6 +394,8 @@ pub fn run() {
             check_github_auth,
             list_pull_requests,
             fetch_pr_branch,
+            // AI commands
+            describe_hunk,
             // Review commands
             get_review,
             add_comment,

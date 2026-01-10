@@ -1,14 +1,14 @@
 <!--
   DiffViewer.svelte - Unified diff display
-  
+
   Handles three display modes:
   1. Two-pane diff: Side-by-side before/after with synchronized scrolling and spine connectors
   2. Created file: Status label + spine + single after pane (commentable)
   3. Deleted file: Single before pane + spine + status label
-  
+
   The spine is always present - it shows bezier connectors for two-pane diffs,
   and comment highlights for all modes.
-  
+
   Uses custom scroll implementation for frame-perfect sync between panes.
 -->
 <script lang="ts">
@@ -45,6 +45,8 @@
   } from './diffUtils';
   import { setupKeyboardNav } from './diffKeyboard';
   import { WORKDIR } from './stores/diffSelection.svelte';
+  import { smartDiffState } from './stores/smartDiff.svelte';
+  import SmartDiffView from './SmartDiffView.svelte';
   import { diffState, clearScrollTarget } from './stores/diffState.svelte';
   import CommentEditor from './CommentEditor.svelte';
   import Scrollbar from './Scrollbar.svelte';
@@ -425,7 +427,11 @@
 
   // Initialize renderer when Canvas is available
   $effect(() => {
-    if (connectorCanvas && !connectorRenderer) {
+    if (connectorCanvas) {
+      // Destroy old renderer if canvas changed
+      if (connectorRenderer) {
+        connectorRenderer.destroy();
+      }
       connectorRenderer = new ConnectorRendererCanvas(connectorCanvas, {
         onCommentClick: handleCommentHighlightClick,
       });
@@ -1222,7 +1228,9 @@
 </script>
 
 <div class="diff-viewer" bind:this={diffViewerEl}>
-  {#if diff === null}
+  {#if smartDiffState.enabled}
+    <SmartDiffView {diff} />
+  {:else if diff === null}
     <div class="empty-state">
       <p>Select a file to view changes</p>
     </div>

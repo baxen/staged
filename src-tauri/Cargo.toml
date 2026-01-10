@@ -23,8 +23,8 @@ log = "0.4"
 tauri = { version = "2.9.5", features = [] }
 tauri-plugin-log = "2"
 
-# Git integration
-git2 = "0.19"
+# Git integration (no ssh/https to avoid openssl dependency for distribution)
+git2 = { version = "0.19", default-features = false }
 
 # File watching
 notify = "8.0"

@@ -14,6 +14,8 @@
     X,
     GitPullRequest,
     GitCommitHorizontal,
+    Sparkles,
+    Loader2,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
@@ -33,6 +35,7 @@
     removeFromRecent,
     type RepoEntry,
   } from './stores/repoState.svelte';
+  import { smartDiffState } from './stores/smartDiff.svelte';
 
   interface Props {
     files: FileDiff[];
@@ -40,9 +43,17 @@
     onCustomDiff: (base: string, head: string, label?: string) => void;
     onRepoChange?: () => void;
     onCommit?: () => void;
+    currentFile?: FileDiff | null;
   }
 
-  let { files, onDiffSelect, onCustomDiff, onRepoChange, onCommit }: Props = $props();
+  let {
+    files,
+    currentFile = null,
+    onDiffSelect,
+    onCustomDiff,
+    onRepoChange,
+    onCommit,
+  }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -61,6 +72,10 @@
   let isWorkingTree = $derived(diffSelection.spec.head === WORKDIR);
   // Can only commit if there are files to commit
   let canCommit = $derived(isWorkingTree && files.length > 0);
+  // Can run smart diff if there's a current file with changes
+  let canSmartDiff = $derived(
+    currentFile != null && currentFile.alignments?.some((a) => a.changed)
+  );
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffSpec): boolean {
@@ -105,6 +120,16 @@
   function handleCustomSubmit(base: string, head: string) {
     showCustomModal = false;
     onCustomDiff(base, head);
+  }
+
+  // Smart diff toggle - when enabled, starts calculating descriptions
+
+  // Smart diff toggle
+  function toggleSmartDiff() {
+    smartDiffState.toggle();
+    if (smartDiffState.enabled && files.length > 0) {
+      // View mode toggled - DiffViewer will calculate on demand
+    }
   }
 
   async function handleCopyComments() {
@@ -294,6 +319,21 @@
         <span class="action-label">Commit</span>
       </button>
     {/if}
+
+    <button
+      class="action-btn smart-diff-btn"
+      class:active={smartDiffState.enabled}
+      class:loading={smartDiffState.loading}
+      onclick={toggleSmartDiff}
+      title={smartDiffState.enabled ? 'Disable Smart Diff' : 'Enable Smart Diff'}
+    >
+      {#if smartDiffState.loading}
+        <Loader2 size={14} class="spinning" />
+      {:else}
+        <Sparkles size={14} />
+      {/if}
+      <span class="action-label">{smartDiffState.enabled ? 'Smart On' : 'Smart Diff'}</span>
+    </button>
 
     <div class="comments-section">
       <MessageSquare size={14} />
@@ -752,5 +792,32 @@
 
   .action-btn:hover:not(:disabled) .action-label {
     display: inline;
+  }
+
+  /* Smart diff button */
+  .smart-diff-btn :global(svg) {
+    color: var(--ui-accent);
+  }
+
+  .smart-diff-btn.active {
+    background: var(--ui-accent);
+    color: var(--bg-chrome);
+  }
+
+  .smart-diff-btn.active :global(svg) {
+    color: var(--bg-chrome);
+  }
+
+  .smart-diff-btn.loading :global(svg) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>
