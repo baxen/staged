@@ -237,8 +237,10 @@
   const scrollController = createScrollController();
 
   // Update scroll controller with active alignments
+  // Pass file path so scroll only resets on file change, not content refresh
   $effect(() => {
-    scrollController.setAlignments(activeAlignments);
+    const filePath = diff ? getFilePath(diff) : null;
+    scrollController.setAlignments(activeAlignments, filePath);
   });
 
   // Measure line height from DOM
