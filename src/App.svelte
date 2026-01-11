@@ -44,8 +44,9 @@
 
   // Load files and comments for current spec
   async function loadAll() {
-    await loadFiles(diffSelection.spec, repoState.currentPath ?? undefined);
-    await loadComments(diffSelection.spec);
+    const repoPath = repoState.currentPath ?? undefined;
+    await loadFiles(diffSelection.spec, repoPath);
+    await loadComments(diffSelection.spec, repoPath);
   }
 
   // Update comments store when selected file changes

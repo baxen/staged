@@ -32,6 +32,8 @@ interface CommentsState {
   currentPath: string | null;
   /** Current diff spec for API calls */
   currentSpec: DiffSpec | null;
+  /** Current repo path for API calls */
+  currentRepoPath: string | null;
   /** Loading state */
   loading: boolean;
 }
@@ -41,6 +43,7 @@ export const commentsState: CommentsState = $state({
   reviewedPaths: [],
   currentPath: null,
   currentSpec: null,
+  currentRepoPath: null,
   loading: false,
 });
 
@@ -114,12 +117,13 @@ export function getTotalCommentCount(): number {
  * Load review data (comments and reviewed paths) for a diff.
  * This is the single API call for all review data.
  */
-export async function loadComments(spec: DiffSpec): Promise<void> {
+export async function loadComments(spec: DiffSpec, repoPath?: string): Promise<void> {
   commentsState.loading = true;
   commentsState.currentSpec = spec;
+  commentsState.currentRepoPath = repoPath ?? null;
 
   try {
-    const review = await getReview(spec);
+    const review = await getReview(spec, repoPath);
     commentsState.comments = review.comments;
     commentsState.reviewedPaths = review.reviewed;
   } catch (e) {
@@ -148,13 +152,14 @@ export async function toggleReviewed(path: string): Promise<boolean> {
   }
 
   const isCurrentlyReviewed = isPathReviewed(path);
+  const repoPath = commentsState.currentRepoPath ?? undefined;
 
   try {
     if (isCurrentlyReviewed) {
-      await apiUnmarkReviewed(commentsState.currentSpec, path);
+      await apiUnmarkReviewed(commentsState.currentSpec, path, repoPath);
       commentsState.reviewedPaths = commentsState.reviewedPaths.filter((p) => p !== path);
     } else {
-      await apiMarkReviewed(commentsState.currentSpec, path);
+      await apiMarkReviewed(commentsState.currentSpec, path, repoPath);
       commentsState.reviewedPaths = [...commentsState.reviewedPaths, path];
     }
     return true;
@@ -186,7 +191,8 @@ export async function addComment(
 
   try {
     const newComment: NewComment = { path, span, content };
-    const comment = await apiAddComment(commentsState.currentSpec, newComment);
+    const repoPath = commentsState.currentRepoPath ?? undefined;
+    const comment = await apiAddComment(commentsState.currentSpec, newComment, repoPath);
     commentsState.comments = [...commentsState.comments, comment];
     return comment;
   } catch (e) {
@@ -256,7 +262,8 @@ export async function copyCommentsToClipboard(): Promise<boolean> {
   }
 
   try {
-    const markdown = await exportReviewMarkdown(commentsState.currentSpec);
+    const repoPath = commentsState.currentRepoPath ?? undefined;
+    const markdown = await exportReviewMarkdown(commentsState.currentSpec, repoPath);
     await writeText(markdown);
     return true;
   } catch (e) {
@@ -273,5 +280,6 @@ export function clearComments(): void {
   commentsState.reviewedPaths = [];
   commentsState.currentPath = null;
   commentsState.currentSpec = null;
+  commentsState.currentRepoPath = null;
   commentsState.loading = false;
 }
