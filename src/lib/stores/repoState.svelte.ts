@@ -6,7 +6,7 @@
  */
 
 import { open } from '@tauri-apps/plugin-dialog';
-import { getRepoInfo } from '../services/git';
+import { getRepoRoot } from '../services/git';
 
 // =============================================================================
 // Constants
@@ -33,8 +33,6 @@ export const repoState = $state({
   currentPath: null as string | null,
   /** Display name for current repo */
   currentName: 'No Repository',
-  /** Whether we're in an error state (e.g., not a git repo) */
-  error: null as string | null,
   /** List of recent repositories */
   recentRepos: [] as RepoEntry[],
 });
@@ -87,63 +85,62 @@ function extractRepoName(repoPath: string): string {
 // =============================================================================
 
 /**
- * Initialize repo state - load recent repos and try to open current directory.
- * Returns true if a repo was successfully loaded.
+ * Initialize repo state - load recent repos and resolve current directory to canonical path.
+ * Returns the canonical repo path, or null if not in a git repo.
  */
-export async function initRepoState(): Promise<boolean> {
+export async function initRepoState(): Promise<string | null> {
   repoState.recentRepos = loadRecentRepos();
 
-  // Try current directory first
+  // Resolve current directory to canonical path
   try {
-    const info = await getRepoInfo();
-    if (info?.repo_path) {
-      repoState.currentPath = info.repo_path;
-      repoState.currentName = extractRepoName(info.repo_path);
-      repoState.error = null;
-      addToRecentRepos({ path: info.repo_path, name: repoState.currentName });
-      return true;
-    }
-  } catch {
-    // Not in a git repo - that's fine
-  }
+    const canonicalPath = await getRepoRoot('.');
 
-  // No repo loaded
-  repoState.currentPath = null;
-  repoState.currentName = 'No Repository';
-  repoState.error = null;
-  return false;
+    // Check if this path is already in recent repos
+    const existing = repoState.recentRepos.find((r) => r.path === canonicalPath);
+    if (existing) {
+      // Reuse existing entry (moves it to front)
+      repoState.currentPath = existing.path;
+      repoState.currentName = existing.name;
+      addToRecentRepos(existing);
+    } else {
+      // New repo - add it
+      repoState.currentPath = canonicalPath;
+      repoState.currentName = extractRepoName(canonicalPath);
+      addToRecentRepos({ path: canonicalPath, name: repoState.currentName });
+    }
+    return canonicalPath;
+  } catch {
+    // Not in a git repo - leave state as null
+    repoState.currentPath = null;
+    repoState.currentName = 'No Repository';
+    return null;
+  }
+}
+
+/**
+ * Set the current repository after successful operations.
+ * Call this after confirming a path works (e.g., after loading refs/diffs).
+ */
+export function setCurrentRepo(path: string): void {
+  repoState.currentPath = path;
+  repoState.currentName = extractRepoName(path);
+  addToRecentRepos({ path, name: repoState.currentName });
 }
 
 /**
  * Open a repository by path.
- * Returns true if successful, false if not a git repo.
  */
-export async function openRepo(path: string): Promise<boolean> {
-  try {
-    const info = await getRepoInfo(path);
-    if (info?.repo_path) {
-      repoState.currentPath = info.repo_path;
-      repoState.currentName = extractRepoName(info.repo_path);
-      repoState.error = null;
-      addToRecentRepos({ path: info.repo_path, name: repoState.currentName });
-      return true;
-    }
-  } catch (e) {
-    repoState.currentPath = path;
-    repoState.currentName = extractRepoName(path);
-    repoState.error = e instanceof Error ? e.message : String(e);
-    return false;
-  }
-
-  repoState.error = 'Not a git repository';
-  return false;
+export function openRepo(path: string): void {
+  repoState.currentPath = path;
+  repoState.currentName = extractRepoName(path);
+  addToRecentRepos({ path, name: repoState.currentName });
 }
 
 /**
- * Open a directory picker and try to open the selected directory as a repo.
- * Returns true if a repo was successfully opened.
+ * Open a directory picker and set the selected directory as current repo.
+ * Returns the selected path, or null if cancelled.
  */
-export async function openRepoPicker(): Promise<boolean> {
+export async function openRepoPicker(): Promise<string | null> {
   const selected = await open({
     directory: true,
     multiple: false,
@@ -151,10 +148,11 @@ export async function openRepoPicker(): Promise<boolean> {
   });
 
   if (selected && typeof selected === 'string') {
-    return openRepo(selected);
+    openRepo(selected);
+    return selected;
   }
 
-  return false;
+  return null;
 }
 
 /**

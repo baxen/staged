@@ -14,13 +14,22 @@
     X,
     GitPullRequest,
     GitCommitHorizontal,
+    Upload,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
   import CommitModal from './CommitModal.svelte';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
-  import type { DiffSpec, FileDiff } from './types';
-  import { getPresets, diffSelection, WORKDIR } from './stores/diffSelection.svelte';
+  import GitHubSyncModal from './GitHubSyncModal.svelte';
+  import { DiffSpec } from './types';
+  import type { DiffSpec as DiffSpecType } from './types';
+  import {
+    getPresets,
+    diffSelection,
+    getDisplayLabel,
+    type DiffPreset,
+  } from './stores/diffSelection.svelte';
+  import { diffState } from './stores/diffState.svelte';
   import {
     commentsState,
     copyCommentsToClipboard,
@@ -35,14 +44,13 @@
   } from './stores/repoState.svelte';
 
   interface Props {
-    files: FileDiff[];
-    onDiffSelect: (spec: DiffSpec) => void;
-    onCustomDiff: (base: string, head: string, label?: string) => void;
+    onPresetSelect: (preset: DiffPreset) => void;
+    onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
     onRepoChange?: () => void;
     onCommit?: () => void;
   }
 
-  let { files, onDiffSelect, onCustomDiff, onRepoChange, onCommit }: Props = $props();
+  let { onPresetSelect, onCustomDiff, onRepoChange, onCommit }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -53,38 +61,29 @@
   let showPRModal = $state(false);
   let showCommitModal = $state(false);
   let showThemeModal = $state(false);
+  let showSyncModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
 
   // Check if we're viewing working directory changes (can show commit button)
-  let isWorkingTree = $derived(diffSelection.spec.head === WORKDIR);
+  let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
   // Can only commit if there are files to commit
-  let canCommit = $derived(isWorkingTree && files.length > 0);
+  let canCommit = $derived(isWorkingTree && diffState.files.length > 0);
+  // Can sync if viewing a PR with comments
+  let canSync = $derived(diffSelection.prNumber !== undefined && commentsState.comments.length > 0);
 
   // Check if current selection matches a preset
-  function isPresetSelected(preset: DiffSpec): boolean {
-    return preset.base === diffSelection.spec.base && preset.head === diffSelection.spec.head;
+  function isPresetSelected(preset: DiffPreset): boolean {
+    return DiffSpec.display(preset.spec) === DiffSpec.display(diffSelection.spec);
   }
 
   // Get current display label
-  let currentLabel = $derived.by(() => {
-    const presets = getPresets();
-    const match = presets.find(
-      (p) => p.base === diffSelection.spec.base && p.head === diffSelection.spec.head
-    );
-    // Use preset label if matched, otherwise use the spec's label (e.g., "PR #123")
-    // Fall back to "base..head" format if no label is set
-    return (
-      match?.label ??
-      diffSelection.spec.label ??
-      `${diffSelection.spec.base}..${diffSelection.spec.head}`
-    );
-  });
+  let currentLabel = $derived(getDisplayLabel());
 
-  function handlePresetSelect(preset: DiffSpec) {
+  function handlePresetSelect(preset: DiffPreset) {
     diffDropdownOpen = false;
-    onDiffSelect(preset);
+    onPresetSelect(preset);
   }
 
   function handleCustomClick() {
@@ -97,14 +96,14 @@
     showPRModal = true;
   }
 
-  function handlePRSubmit(base: string, head: string, label: string) {
-    showPRModal = false;
-    onCustomDiff(base, head, label);
+  async function handlePRSubmit(spec: DiffSpecType, label: string, prNumber: number) {
+    // Modal will close itself after this completes
+    await onCustomDiff(spec, label, prNumber);
   }
 
-  function handleCustomSubmit(base: string, head: string) {
+  function handleCustomSubmit(spec: DiffSpecType) {
     showCustomModal = false;
-    onCustomDiff(base, head);
+    onCustomDiff(spec);
   }
 
   async function handleCopyComments() {
@@ -120,18 +119,16 @@
   // Repo selection handlers
   async function handleOpenRepo() {
     repoDropdownOpen = false;
-    const success = await openRepoPicker();
-    if (success) {
+    const path = await openRepoPicker();
+    if (path) {
       onRepoChange?.();
     }
   }
 
-  async function handleRecentRepoSelect(entry: RepoEntry) {
+  function handleRecentRepoSelect(entry: RepoEntry) {
     repoDropdownOpen = false;
-    const success = await openRepo(entry.path);
-    if (success) {
-      onRepoChange?.();
-    }
+    openRepo(entry.path);
+    onRepoChange?.();
   }
 
   function handleRemoveRecent(event: MouseEvent, path: string) {
@@ -149,6 +146,27 @@
       return path.replace(homeDir, '~');
     }
     return path;
+  }
+
+  /**
+   * Get display string for a DiffSpec in the dropdown
+   */
+  function getSpecDisplay(spec: DiffSpecType): string {
+    return DiffSpec.display(spec);
+  }
+
+  /**
+   * Get initial base string for the custom modal
+   */
+  function getInitialBase(): string {
+    return diffSelection.spec.base.type === 'WorkingTree' ? '@' : diffSelection.spec.base.value;
+  }
+
+  /**
+   * Get initial head string for the custom modal
+   */
+  function getInitialHead(): string {
+    return diffSelection.spec.head.type === 'WorkingTree' ? '@' : diffSelection.spec.head.value;
   }
 
   // Close dropdowns when clicking outside
@@ -262,7 +280,7 @@
               <GitCompareArrows size={14} />
               <div class="diff-item-content">
                 <span class="diff-item-label">{preset.label}</span>
-                <span class="diff-item-spec">{preset.base}..{preset.head}</span>
+                <span class="diff-item-spec">{getSpecDisplay(preset.spec)}</span>
               </div>
             </button>
           {/each}
@@ -299,6 +317,15 @@
       <MessageSquare size={14} />
       <span class="comment-count">{commentsState.comments.length}</span>
       {#if commentsState.comments.length > 0}
+        {#if canSync}
+          <button
+            class="icon-btn sync-btn"
+            onclick={() => (showSyncModal = true)}
+            title="Sync comments to GitHub"
+          >
+            <Upload size={12} />
+          </button>
+        {/if}
         <button
           class="icon-btn"
           class:copied={copiedFeedback}
@@ -339,8 +366,8 @@
 
 {#if showCustomModal}
   <DiffSelectorModal
-    initialBase={diffSelection.spec.base}
-    initialHead={diffSelection.spec.head}
+    initialBase={getInitialBase()}
+    initialHead={getInitialHead()}
     onSubmit={handleCustomSubmit}
     onClose={() => (showCustomModal = false)}
   />
@@ -356,13 +383,22 @@
 
 {#if showCommitModal}
   <CommitModal
-    {files}
     repoPath={repoState.currentPath}
     onCommit={() => {
       showCommitModal = false;
       onCommit?.();
     }}
     onClose={() => (showCommitModal = false)}
+  />
+{/if}
+
+{#if showSyncModal && diffSelection.prNumber}
+  <GitHubSyncModal
+    prNumber={diffSelection.prNumber}
+    spec={diffSelection.spec}
+    repoPath={repoState.currentPath}
+    comments={commentsState.comments}
+    onClose={() => (showSyncModal = false)}
   />
 {/if}
 
@@ -694,6 +730,10 @@
 
   .icon-btn.delete-btn:hover {
     color: var(--status-deleted);
+  }
+
+  .icon-btn.sync-btn:hover {
+    color: var(--ui-accent);
   }
 
   /* Theme picker */

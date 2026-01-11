@@ -1,0 +1,16 @@
+mod cli;
+mod commit;
+mod diff;
+pub mod github;
+mod refs;
+mod types;
+
+pub use cli::GitError;
+pub use commit::commit;
+pub use diff::{get_file_diff, list_diff_files};
+pub use github::{
+    check_github_auth, fetch_pr, list_pull_requests, sync_review_to_github, GitHubAuthStatus,
+    GitHubSyncResult, PullRequest,
+};
+pub use refs::{get_repo_root, list_refs, merge_base, resolve_ref};
+pub use types::*;

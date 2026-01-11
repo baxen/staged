@@ -1,26 +1,22 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Review, Comment, Edit, NewComment, NewEdit } from '../types';
+import type { DiffSpec, Review, Comment, Edit, NewComment, NewEdit } from '../types';
 
 /**
  * Get or create a review for a diff.
- * @param base - Base ref (SHA)
- * @param head - Head ref (SHA or "WORKDIR" for working tree)
- * @param repoPath - Optional repository path
  */
-export async function getReview(base: string, head: string, repoPath?: string): Promise<Review> {
-  return invoke<Review>('get_review', { base, head, repoPath: repoPath ?? null });
+export async function getReview(spec: DiffSpec, repoPath?: string): Promise<Review> {
+  return invoke<Review>('get_review', { repoPath: repoPath ?? null, spec });
 }
 
 /**
  * Add a comment to a review.
  */
 export async function addComment(
-  base: string,
-  head: string,
+  spec: DiffSpec,
   comment: NewComment,
   repoPath?: string
 ): Promise<Comment> {
-  return invoke<Comment>('add_comment', { base, head, comment, repoPath: repoPath ?? null });
+  return invoke<Comment>('add_comment', { repoPath: repoPath ?? null, spec, comment });
 }
 
 /**
@@ -40,34 +36,38 @@ export async function deleteComment(commentId: string): Promise<void> {
 /**
  * Mark a file as reviewed.
  */
-export async function markReviewed(base: string, head: string, path: string): Promise<void> {
-  return invoke('mark_reviewed', { base, head, path });
+export async function markReviewed(spec: DiffSpec, path: string, repoPath?: string): Promise<void> {
+  return invoke('mark_reviewed', { repoPath: repoPath ?? null, spec, path });
 }
 
 /**
  * Unmark a file as reviewed.
  */
-export async function unmarkReviewed(base: string, head: string, path: string): Promise<void> {
-  return invoke('unmark_reviewed', { base, head, path });
+export async function unmarkReviewed(
+  spec: DiffSpec,
+  path: string,
+  repoPath?: string
+): Promise<void> {
+  return invoke('unmark_reviewed', { repoPath: repoPath ?? null, spec, path });
 }
 
 /**
  * Record an edit made during review.
  */
-export async function recordEdit(base: string, head: string, edit: NewEdit): Promise<Edit> {
-  return invoke<Edit>('record_edit', { base, head, edit });
+export async function recordEdit(spec: DiffSpec, edit: NewEdit, repoPath?: string): Promise<Edit> {
+  return invoke<Edit>('record_edit', { repoPath: repoPath ?? null, spec, edit });
 }
 
 /**
  * Export review as markdown for clipboard.
  */
-export async function exportReviewMarkdown(base: string, head: string): Promise<string> {
-  return invoke<string>('export_review_markdown', { base, head });
+export async function exportReviewMarkdown(spec: DiffSpec, repoPath?: string): Promise<string> {
+  return invoke<string>('export_review_markdown', { repoPath: repoPath ?? null, spec });
 }
 
 /**
  * Clear a review (e.g., after commit).
  */
-export async function clearReview(base: string, head: string): Promise<void> {
-  return invoke('clear_review', { base, head });
+export async function clearReview(spec: DiffSpec, repoPath?: string): Promise<void> {
+  return invoke('clear_review', { repoPath: repoPath ?? null, spec });
 }

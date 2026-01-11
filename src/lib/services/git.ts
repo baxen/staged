@@ -1,45 +1,76 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
-  RepoInfo,
-  GitRef,
+  DiffSpec,
+  FileDiffSummary,
   FileDiff,
   PullRequest,
   GitHubAuthStatus,
-  PRFetchResult,
+  GitHubSyncResult,
 } from '../types';
 
 // =============================================================================
-// Repository Info
+// Git Commands
 // =============================================================================
 
 /**
- * Get basic repository info (path and branch name).
+ * Get the absolute path to the repository root.
  */
-export async function getRepoInfo(repoPath?: string): Promise<RepoInfo> {
-  return invoke<RepoInfo>('get_repo_info', {
+export async function getRepoRoot(repoPath?: string): Promise<string> {
+  return invoke<string>('get_repo_root', {
     repoPath: repoPath ?? null,
   });
 }
 
 /**
- * Get the last commit message (for amend UI).
+ * List refs (branches, tags, remotes) for autocomplete.
  */
-export async function getLastCommitMessage(repoPath?: string): Promise<string | null> {
-  return invoke<string | null>('get_last_commit_message', {
+export async function listRefs(repoPath?: string): Promise<string[]> {
+  return invoke<string[]>('list_refs', {
     repoPath: repoPath ?? null,
   });
 }
 
 /**
- * Create a commit with the specified files and message.
+ * Resolve a ref to its full SHA. Used for validation.
+ */
+export async function resolveRef(reference: string, repoPath?: string): Promise<string> {
+  return invoke<string>('resolve_ref', {
+    repoPath: repoPath ?? null,
+    reference,
+  });
+}
+
+/**
+ * List files changed in a diff (for sidebar).
+ */
+export async function listDiffFiles(spec: DiffSpec, repoPath?: string): Promise<FileDiffSummary[]> {
+  return invoke<FileDiffSummary[]>('list_diff_files', {
+    repoPath: repoPath ?? null,
+    spec,
+  });
+}
+
+/**
+ * Get full diff content for a single file.
+ */
+export async function getFileDiff(
+  spec: DiffSpec,
+  filePath: string,
+  repoPath?: string
+): Promise<FileDiff> {
+  return invoke<FileDiff>('get_file_diff', {
+    repoPath: repoPath ?? null,
+    spec,
+    filePath,
+  });
+}
+
+/**
+ * Create a commit with the specified files.
  * Returns the short SHA of the new commit.
  */
-export async function createCommit(
-  paths: string[],
-  message: string,
-  repoPath?: string
-): Promise<string> {
-  return invoke<string>('create_commit', {
+export async function commit(paths: string[], message: string, repoPath?: string): Promise<string> {
+  return invoke<string>('commit', {
     repoPath: repoPath ?? null,
     paths,
     message,
@@ -47,85 +78,54 @@ export async function createCommit(
 }
 
 // =============================================================================
-// Diff API
+// GitHub Commands
 // =============================================================================
 
 /**
- * Get the full diff between two refs.
- * If `useMergeBase` is true, diffs from the merge-base instead of base directly.
- */
-export async function getDiff(
-  base: string,
-  head: string,
-  repoPath?: string,
-  useMergeBase?: boolean
-): Promise<FileDiff[]> {
-  return invoke<FileDiff[]>('get_diff', {
-    repoPath: repoPath ?? null,
-    base,
-    head,
-    useMergeBase: useMergeBase ?? false,
-  });
-}
-
-/**
- * Get list of refs (branches, tags, special refs) with type info for autocomplete.
- */
-export async function getRefs(repoPath?: string): Promise<GitRef[]> {
-  return invoke<GitRef[]>('get_refs', {
-    repoPath: repoPath ?? null,
-  });
-}
-
-/**
- * Resolve a ref to its short SHA for display/validation.
- * Returns "working tree" for "WORKDIR", otherwise returns short SHA.
- */
-export async function resolveRef(refStr: string, repoPath?: string): Promise<string> {
-  return invoke<string>('resolve_ref', {
-    repoPath: repoPath ?? null,
-    refStr,
-  });
-}
-
-// =============================================================================
-// GitHub API
-// =============================================================================
-
-/**
- * Check if the user is authenticated with GitHub CLI.
+ * Check if GitHub CLI is installed and authenticated.
  */
 export async function checkGitHubAuth(): Promise<GitHubAuthStatus> {
   return invoke<GitHubAuthStatus>('check_github_auth');
 }
 
 /**
- * List open pull requests for the current repository.
- * Uses caching by default; pass forceRefresh=true to bypass.
+ * List open pull requests for the repo.
  */
-export async function listPullRequests(
-  repoPath?: string,
-  forceRefresh?: boolean
-): Promise<PullRequest[]> {
+export async function listPullRequests(repoPath?: string): Promise<PullRequest[]> {
   return invoke<PullRequest[]>('list_pull_requests', {
     repoPath: repoPath ?? null,
-    forceRefresh: forceRefresh ?? false,
   });
 }
 
 /**
- * Fetch a PR branch from the remote and set up locally.
- * This is idempotent - if the branch already exists, it will be updated.
- * Returns both the merge-base SHA and head SHA for stable diff identification.
+ * Fetch PR refs and compute merge-base.
+ * Returns DiffSpec with concrete SHAs.
  */
-export async function fetchPRBranch(
+export async function fetchPR(
   baseRef: string,
   prNumber: number,
   repoPath?: string
-): Promise<PRFetchResult> {
-  return invoke<PRFetchResult>('fetch_pr_branch', {
+): Promise<DiffSpec> {
+  return invoke<DiffSpec>('fetch_pr', {
     repoPath: repoPath ?? null,
     baseRef,
     prNumber,
+  });
+}
+
+/**
+ * Sync local review comments to a GitHub PR as a pending review.
+ * Deletes any existing pending review and creates a new one.
+ * Returns the URL to the pending review on GitHub.
+ */
+export async function syncReviewToGitHub(
+  prNumber: number,
+  spec: DiffSpec,
+  repoPath?: string
+): Promise<GitHubSyncResult> {
+  return invoke<GitHubSyncResult>('sync_review_to_github', {
+    repoPath: repoPath ?? null,
+    prNumber,
+    spec,
   });
 }

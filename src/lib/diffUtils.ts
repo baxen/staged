@@ -81,8 +81,8 @@ export function getLanguageFromDiff<T>(
  * Check if a diff represents a binary file.
  */
 export function isBinaryDiff(diff: FileDiff): boolean {
-  const beforeBinary = diff.before?.content.type === 'binary';
-  const afterBinary = diff.after?.content.type === 'binary';
+  const beforeBinary = diff.before?.content.type === 'Binary';
+  const afterBinary = diff.after?.content.type === 'Binary';
   return beforeBinary || afterBinary;
 }
 
@@ -91,6 +91,6 @@ export function isBinaryDiff(diff: FileDiff): boolean {
  */
 export function getTextLines(diff: FileDiff, side: 'before' | 'after'): string[] {
   const file = side === 'before' ? diff.before : diff.after;
-  if (!file || file.content.type === 'binary') return [];
+  if (!file || file.content.type === 'Binary') return [];
   return file.content.lines;
 }
