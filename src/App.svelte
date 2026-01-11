@@ -4,8 +4,11 @@
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
-  import { getRefs } from './lib/services/git';
-  import type { GitRef, DiffSpec } from './lib/types';
+  import PRListView from './lib/PRListView.svelte';
+  import ErrorModal from './lib/ErrorModal.svelte';
+  import { getRefs, hasUncommittedChanges, checkoutPRBranch, fetchPRBranch } from './lib/services/git';
+  import type { GitRef, DiffSpec, PullRequest } from './lib/types';
+  import { switchTab } from './lib/stores/viewState.svelte';
   import {
     subscribeToFileChanges,
     startWatching,
@@ -18,6 +21,7 @@
     loadSavedSyntaxTheme,
     handlePreferenceKeydown,
   } from './lib/stores/preferences.svelte';
+  import { loadPRSettings } from './lib/stores/prSettings.svelte';
   import {
     WORKDIR,
     diffSelection,
@@ -37,10 +41,12 @@
   } from './lib/stores/diffState.svelte';
   import { loadComments, setCurrentPath } from './lib/stores/comments.svelte';
   import { repoState, initRepoState } from './lib/stores/repoState.svelte';
+  import { viewState } from './lib/stores/viewState.svelte';
 
   // UI State
   let sidebarRef: Sidebar | null = $state(null);
   let unsubscribe: Unsubscribe | null = null;
+  let errorMessage = $state<string | null>(null);
 
   // Diff Loading
   async function loadAllDiffs() {
@@ -141,6 +147,43 @@
 
   let currentDiff = $derived(getCurrentDiff());
 
+  // PR Checkout Flow
+  async function handlePRCheckout(event: CustomEvent<{ pr: PullRequest }>) {
+    const { pr } = event.detail;
+
+    try {
+      // Check for uncommitted changes
+      const hasChanges = await hasUncommittedChanges(repoState.currentPath ?? undefined);
+      if (hasChanges) {
+        errorMessage = 'Cannot checkout PR: you have uncommitted changes. Commit or stash them first.';
+        return;
+      }
+
+      // Checkout PR
+      const branchName = await checkoutPRBranch(pr.number, pr.base_ref, repoState.currentPath ?? undefined);
+
+      // Switch to diff view and refresh
+      switchTab('diff');
+      await handleRepoChange();
+
+      console.log(`Checked out ${branchName}`);
+    } catch (e) {
+      errorMessage = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function handlePRView(event: CustomEvent<{ pr: PullRequest }>) {
+    const { pr } = event.detail;
+
+    try {
+      const result = await fetchPRBranch(pr.base_ref, pr.number, repoState.currentPath ?? undefined);
+      await handleCustomDiff(result.merge_base, result.head_sha, `PR #${pr.number}`);
+      switchTab('diff');
+    } catch (e) {
+      errorMessage = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   // Show empty state when we have a repo, finished loading, no error, but no diffs
   let showEmptyState = $derived(
     repoState.currentPath &&
@@ -155,6 +198,7 @@
   // Lifecycle
   onMount(() => {
     loadSavedSize();
+    loadPRSettings(); // Load PR settings from localStorage
     window.addEventListener('keydown', handlePreferenceKeydown);
 
     (async () => {
@@ -203,44 +247,54 @@
     onCommit={handleFilesChanged}
   />
 
-  <div class="app-container">
-    {#if !repoState.currentPath || repoState.error || showEmptyState}
-      <!-- Full-width empty state -->
-      <section class="main-content full-width">
-        <EmptyState />
-      </section>
-    {:else}
-      <section class="main-content">
-        {#if diffState.loading}
-          <div class="loading-state">
-            <p>Loading...</p>
-          </div>
-        {:else if diffState.error}
-          <div class="error-state">
-            <p>Error loading diff:</p>
-            <p class="error-message">{diffState.error}</p>
-          </div>
-        {:else}
-          <DiffViewer
-            diff={currentDiff}
+  {#if viewState.activeTab === 'diff'}
+    <div class="app-container">
+      {#if !repoState.currentPath || repoState.error || showEmptyState}
+        <!-- Full-width empty state -->
+        <section class="main-content full-width">
+          <EmptyState />
+        </section>
+      {:else}
+        <section class="main-content">
+          {#if diffState.loading}
+            <div class="loading-state">
+              <p>Loading...</p>
+            </div>
+          {:else if diffState.error}
+            <div class="error-state">
+              <p>Error loading diff:</p>
+              <p class="error-message">{diffState.error}</p>
+            </div>
+          {:else}
+            <DiffViewer
+              diff={currentDiff}
+              diffBase={diffSelection.spec.base}
+              diffHead={diffSelection.spec.head}
+              sizeBase={preferences.sizeBase}
+              syntaxThemeVersion={preferences.syntaxThemeVersion}
+            />
+          {/if}
+        </section>
+        <aside class="sidebar">
+          <Sidebar
+            bind:this={sidebarRef}
+            onFileSelect={selectFile}
+            selectedFile={diffState.selectedFile}
             diffBase={diffSelection.spec.base}
             diffHead={diffSelection.spec.head}
-            sizeBase={preferences.sizeBase}
-            syntaxThemeVersion={preferences.syntaxThemeVersion}
           />
-        {/if}
-      </section>
-      <aside class="sidebar">
-        <Sidebar
-          bind:this={sidebarRef}
-          onFileSelect={selectFile}
-          selectedFile={diffState.selectedFile}
-          diffBase={diffSelection.spec.base}
-          diffHead={diffSelection.spec.head}
-        />
-      </aside>
-    {/if}
-  </div>
+        </aside>
+      {/if}
+    </div>
+  {:else if viewState.activeTab === 'pull-requests'}
+    <div class="pr-view-container">
+      <PRListView on:checkout={handlePRCheckout} on:view={handlePRView} />
+    </div>
+  {/if}
+
+  {#if errorMessage}
+    <ErrorModal message={errorMessage} onClose={() => (errorMessage = null)} />
+  {/if}
 </main>
 
 <style>
@@ -308,5 +362,13 @@
     font-size: var(--size-sm);
     color: var(--text-muted);
     margin-top: 8px;
+  }
+
+  .pr-view-container {
+    flex: 1;
+    overflow: hidden;
+    padding: 0 8px 8px 8px;
+    display: flex;
+    flex-direction: column;
   }
 </style>

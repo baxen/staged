@@ -743,6 +743,84 @@ fn load_file_from_workdir(repo: &Repository, path: &Path) -> Result<Option<File>
     }))
 }
 
+/// Check if the working directory has uncommitted changes (staged or unstaged).
+///
+/// Returns true if there are any changes that would be lost by switching branches.
+/// Used to prevent destructive operations like PR checkout when there are uncommitted changes.
+pub fn has_uncommitted_changes(repo: &Repository) -> Result<bool> {
+    let mut status_opts = git2::StatusOptions::new();
+    status_opts.include_untracked(true);
+    status_opts.include_ignored(false);
+
+    let statuses = repo.statuses(Some(&mut status_opts))?;
+
+    // Check if any files have changes (any status flags set)
+    Ok(!statuses.is_empty())
+}
+
+/// Checkout a PR branch, creating a local tracking branch like "pr-123".
+///
+/// This function:
+/// 1. Checks for uncommitted changes (returns error if dirty)
+/// 2. Fetches the PR using GitHub's PR refs
+/// 3. Creates or updates a local branch named "pr-{number}"
+/// 4. Checks out that branch
+///
+/// Returns the name of the created/updated branch (e.g., "pr-123").
+///
+/// # Errors
+///
+/// - Returns error if there are uncommitted changes
+/// - Returns error if PR fetch fails
+/// - Returns error if branch creation/checkout fails
+pub fn checkout_pr_branch(
+    repo: &Repository,
+    pr_number: u32,
+    base_ref: &str,
+) -> Result<String> {
+    // 1. Check for uncommitted changes
+    if has_uncommitted_changes(repo)? {
+        return Err(GitError(
+            "Cannot checkout PR: you have uncommitted changes. Commit or stash them first.".into()
+        ));
+    }
+
+    // 2. Fetch PR (reuses existing fetch_pr_branch logic)
+    let _pr_fetch_result = fetch_pr_branch(repo, base_ref, pr_number)?;
+
+    // 3. Create local tracking branch "pr-{number}"
+    let branch_name = format!("pr-{}", pr_number);
+    let local_ref = format!("refs/pull/{}/head", pr_number);
+
+    // Get the commit object for the PR head
+    let obj = repo.revparse_single(&local_ref)?;
+    let commit = obj.peel_to_commit()?;
+
+    // Create or update branch
+    let _branch = match repo.find_branch(&branch_name, git2::BranchType::Local) {
+        Ok(mut existing_branch) => {
+            // Branch exists, update it to point to the PR head
+            existing_branch.get_mut().set_target(commit.id(), &format!("Update to PR #{}", pr_number))?;
+            existing_branch
+        }
+        Err(_) => {
+            // Create new branch
+            repo.branch(&branch_name, &commit, false)?
+        }
+    };
+
+    // 4. Checkout the branch
+    repo.set_head(&format!("refs/heads/{}", branch_name))?;
+
+    let mut checkout_builder = git2::build::CheckoutBuilder::new();
+    checkout_builder.force(); // Use force to ensure we switch even if there are untracked files
+    repo.checkout_head(Some(&mut checkout_builder))?;
+
+    log::info!("Checked out PR #{} to branch '{}'", pr_number, branch_name);
+
+    Ok(branch_name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

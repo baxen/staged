@@ -33,6 +33,7 @@
     removeFromRecent,
     type RepoEntry,
   } from './stores/repoState.svelte';
+  import { viewState, switchTab } from './stores/viewState.svelte';
 
   interface Props {
     files: FileDiff[];
@@ -190,8 +191,27 @@
 <svelte:window onclick={handleClickOutside} />
 
 <header class="top-bar">
-  <!-- Left section: Repo selector + Diff selector -->
+  <!-- Left section: Tab switcher + Repo selector + Diff selector -->
   <div class="section section-left">
+    <div class="tab-switcher">
+      <button
+        class="tab-btn"
+        class:active={viewState.activeTab === 'diff'}
+        onclick={() => switchTab('diff')}
+      >
+        <GitCompareArrows size={14} />
+        Diff View
+      </button>
+      <button
+        class="tab-btn"
+        class:active={viewState.activeTab === 'pull-requests'}
+        onclick={() => switchTab('pull-requests')}
+      >
+        <GitPullRequest size={14} />
+        Pull Requests
+      </button>
+    </div>
+
     <div class="repo-selector-container">
       <button
         class="repo-selector"
@@ -752,5 +772,43 @@
 
   .action-btn:hover:not(:disabled) .action-label {
     display: inline;
+  }
+
+  /* Tab switcher */
+  .tab-switcher {
+    display: flex;
+    gap: 4px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    padding: 2px;
+  }
+
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .tab-btn:hover {
+    color: var(--text-primary);
+  }
+
+  .tab-btn.active {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .tab-btn :global(svg) {
+    flex-shrink: 0;
   }
 </style>

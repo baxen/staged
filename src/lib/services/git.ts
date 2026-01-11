@@ -129,3 +129,31 @@ export async function fetchPRBranch(
     prNumber,
   });
 }
+
+/**
+ * Check if the working directory has uncommitted changes.
+ * Returns true if there are any staged or unstaged changes that would be lost
+ * by switching branches.
+ */
+export async function hasUncommittedChanges(repoPath?: string): Promise<boolean> {
+  return invoke<boolean>('has_uncommitted_changes', {
+    repoPath: repoPath ?? null,
+  });
+}
+
+/**
+ * Checkout a PR branch, creating a local tracking branch like "pr-123".
+ * Returns error if there are uncommitted changes.
+ * Returns the name of the created/updated branch (e.g., "pr-123").
+ */
+export async function checkoutPRBranch(
+  prNumber: number,
+  baseRef: string,
+  repoPath?: string
+): Promise<string> {
+  return invoke<string>('checkout_pr_branch', {
+    repoPath: repoPath ?? null,
+    prNumber,
+    baseRef,
+  });
+}

@@ -171,6 +171,30 @@ fn fetch_pr_branch(
     diff::fetch_pr_branch(&repo, &base_ref, pr_number).map_err(|e| e.0)
 }
 
+/// Check if the working directory has uncommitted changes.
+///
+/// Returns true if there are any staged or unstaged changes that would be lost
+/// by switching branches.
+#[tauri::command]
+fn has_uncommitted_changes(repo_path: Option<String>) -> Result<bool, String> {
+    let repo = open_repo_from_path(repo_path.as_deref())?;
+    diff::has_uncommitted_changes(&repo).map_err(|e| e.0)
+}
+
+/// Checkout a PR branch, creating a local tracking branch like "pr-123".
+///
+/// Returns error if there are uncommitted changes.
+/// Returns the name of the created/updated branch (e.g., "pr-123").
+#[tauri::command]
+fn checkout_pr_branch(
+    repo_path: Option<String>,
+    pr_number: u32,
+    base_ref: String,
+) -> Result<String, String> {
+    let repo = open_repo_from_path(repo_path.as_deref())?;
+    diff::checkout_pr_branch(&repo, pr_number, &base_ref).map_err(|e| e.0)
+}
+
 // =============================================================================
 // Review Commands
 // =============================================================================
@@ -376,6 +400,8 @@ pub fn run() {
             check_github_auth,
             list_pull_requests,
             fetch_pr_branch,
+            has_uncommitted_changes,
+            checkout_pr_branch,
             // Review commands
             get_review,
             add_comment,
