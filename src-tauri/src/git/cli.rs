@@ -15,12 +15,19 @@ pub enum GitError {
 
     #[error("invalid utf-8 in git output")]
     InvalidUtf8,
+
+    #[error("path contains invalid UTF-8: {0}")]
+    InvalidPath(String),
 }
 
 /// Run a git command and return stdout as a string
 pub fn run(repo: &Path, args: &[&str]) -> Result<String, GitError> {
+    let repo_str = repo
+        .to_str()
+        .ok_or_else(|| GitError::InvalidPath(repo.display().to_string()))?;
+
     let output = Command::new("git")
-        .args(["-C", repo.to_str().unwrap_or(".")])
+        .args(["-C", repo_str])
         .args(args)
         .output()
         .map_err(|e| {

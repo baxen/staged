@@ -125,28 +125,21 @@ export async function loadFiles(spec: DiffSpec, repoPath?: string): Promise<void
 
 /**
  * Refresh file list without showing loading state.
- * Preserves cached diffs that still exist.
+ * Clears the diff cache since file contents may have changed.
  */
 export async function refreshFiles(spec: DiffSpec, repoPath?: string): Promise<void> {
   try {
     const newFiles = await listDiffFiles(spec, repoPath);
 
-    // Keep cached diffs for files that still exist
-    const newPaths = new Set(newFiles.map(getFilePath));
-    const newCache = new Map<string, FileDiff>();
-    for (const [path, diff] of diffState.diffCache) {
-      if (newPaths.has(path)) {
-        newCache.set(path, diff);
-      }
-    }
+    // Clear cache - file contents may have changed since last refresh
+    diffState.diffCache = new Map();
 
     diffState.files = newFiles;
-    diffState.diffCache = newCache;
     diffState.currentSpec = spec;
     diffState.currentRepoPath = repoPath ?? null;
     const pathToLoad = updateSelection();
-    // Load the diff for the auto-selected file if not cached
-    if (pathToLoad && !diffState.diffCache.has(pathToLoad)) {
+    // Load the diff for the selected file
+    if (pathToLoad) {
       await loadFileDiff(pathToLoad);
     }
   } catch (e) {
@@ -194,15 +187,22 @@ export function clearScrollTarget(): void {
   diffState.scrollTargetLine = null;
 }
 
+/** Counter to track the current selection and ignore stale async results */
+let selectionId = 0;
+
 /**
  * Select a file by path, optionally scrolling to a specific line.
  * Triggers loading the diff if not cached.
+ * Handles rapid selection changes by ignoring stale loads.
  */
 export async function selectFile(path: string | null, scrollToLine?: number): Promise<void> {
+  const thisSelection = ++selectionId;
   diffState.selectedFile = path;
   diffState.scrollTargetLine = scrollToLine ?? null;
   if (path && !diffState.diffCache.has(path)) {
     await loadFileDiff(path);
+    // If user selected a different file while we were loading, don't update
+    if (selectionId !== thisSelection) return;
   }
 }
 

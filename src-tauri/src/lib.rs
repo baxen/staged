@@ -111,9 +111,14 @@ fn check_github_auth() -> GitHubAuthStatus {
 
 /// List open pull requests for the repo.
 #[tauri::command(rename_all = "camelCase")]
-fn list_pull_requests(repo_path: Option<String>) -> Result<Vec<PullRequest>, String> {
-    let path = get_repo_path(repo_path.as_deref());
-    git::list_pull_requests(path).map_err(|e| e.to_string())
+async fn list_pull_requests(repo_path: Option<String>) -> Result<Vec<PullRequest>, String> {
+    let path = repo_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+    // Run on blocking thread pool to avoid blocking the UI
+    tokio::task::spawn_blocking(move || git::list_pull_requests(&path).map_err(|e| e.to_string()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// Fetch PR refs and compute merge-base.
