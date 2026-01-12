@@ -274,7 +274,7 @@
     gap: 6px;
     color: var(--ui-accent);
     font-size: var(--size-xs);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     text-decoration: none;
     overflow: hidden;
     text-overflow: ellipsis;

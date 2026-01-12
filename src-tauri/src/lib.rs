@@ -320,6 +320,23 @@ fn remove_reference_file(
 // Theme Commands
 // =============================================================================
 
+/// List all system fonts, returning unique family names sorted alphabetically.
+#[tauri::command]
+fn list_system_fonts() -> Result<Vec<String>, String> {
+    use font_kit::source::SystemSource;
+    use std::collections::HashSet;
+
+    let source = SystemSource::new();
+    let fonts = source.all_families().map_err(|e| e.to_string())?;
+
+    // Deduplicate and sort
+    let unique: HashSet<String> = fonts.into_iter().collect();
+    let mut sorted: Vec<String> = unique.into_iter().collect();
+    sorted.sort_by_key(|a| a.to_lowercase());
+
+    Ok(sorted)
+}
+
 /// Get list of custom themes from ~/.config/staged/themes/
 #[tauri::command]
 fn get_custom_themes() -> Vec<themes::CustomTheme> {
@@ -438,6 +455,7 @@ pub fn run() {
             add_reference_file,
             remove_reference_file,
             // Theme commands
+            list_system_fonts,
             get_custom_themes,
             read_custom_theme,
             get_themes_dir,

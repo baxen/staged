@@ -355,7 +355,7 @@
     border-radius: 6px;
     color: var(--text-primary);
     font-size: var(--size-sm);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     box-sizing: border-box;
     transition:
       border-color 0.1s,
@@ -403,7 +403,7 @@
     border: none;
     color: var(--text-primary);
     font-size: var(--size-sm);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     text-align: left;
     cursor: pointer;
     transition: background-color 0.1s;

@@ -1622,7 +1622,7 @@
   }
 
   .status-text {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-lg);
     font-weight: 500;
     text-transform: uppercase;
@@ -1664,14 +1664,14 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-xs);
     color: var(--text-faint);
     flex-shrink: 0;
   }
 
   .pane-path {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-sm);
     color: var(--text-muted);
     overflow: hidden;
@@ -1738,7 +1738,7 @@
   .code-container {
     flex: 1;
     overflow: hidden;
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-md);
     line-height: 1.5;
     min-width: 0;

@@ -16,11 +16,13 @@
     GitPullRequest,
     GitCommitHorizontal,
     Upload,
+    Type,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
   import CommitModal from './CommitModal.svelte';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
+  import FontSelectorModal from './FontSelectorModal.svelte';
   import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import { DiffSpec } from './types';
@@ -64,6 +66,7 @@
   let showPRModal = $state(false);
   let showCommitModal = $state(false);
   let showThemeModal = $state(false);
+  let showFontModal = $state(false);
   let showSyncModal = $state(false);
   let showShortcutsModal = $state(false);
 
@@ -361,6 +364,21 @@
       {/if}
     </div>
 
+    <div class="font-picker">
+      <button
+        class="icon-btn font-btn"
+        onclick={() => (showFontModal = !showFontModal)}
+        class:open={showFontModal}
+        title="Select font"
+      >
+        <Type size={14} />
+      </button>
+
+      {#if showFontModal}
+        <FontSelectorModal onClose={() => (showFontModal = false)} />
+      {/if}
+    </div>
+
     <div class="theme-picker">
       <button
         class="icon-btn theme-btn"
@@ -522,7 +540,7 @@
   }
 
   .repo-item-path {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: calc(var(--size-xs) - 1px);
     color: var(--text-faint);
     overflow: hidden;
@@ -654,7 +672,7 @@
   }
 
   .diff-item-spec {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: calc(var(--size-xs) - 1px);
     color: var(--text-faint);
     overflow: hidden;
@@ -780,6 +798,23 @@
 
   .theme-btn:hover,
   .theme-btn.open {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  /* Font picker */
+  .font-picker {
+    position: relative;
+  }
+
+  .font-btn {
+    padding: 5px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+  }
+
+  .font-btn:hover,
+  .font-btn.open {
     background: var(--bg-hover);
     color: var(--text-primary);
   }

@@ -889,7 +889,7 @@
 
   .comment-line {
     flex-shrink: 0;
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: calc(var(--size-xs) - 1px);
     color: var(--text-faint);
   }

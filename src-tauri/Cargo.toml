@@ -46,6 +46,9 @@ reqwest = { version = "0.13.1", features = ["json"] }
 tokio = { version = "1.49.0", features = ["sync"] }
 open = "5"
 
+# Font discovery
+font-kit = "0.14"
+
 [[bin]]
 name = "debug_diff"
 path = "src/bin/debug_diff.rs"
