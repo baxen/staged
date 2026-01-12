@@ -43,15 +43,14 @@
         <FolderGit2 size={14} />
         <span class="tab-name">{tab.repoName}</span>
         {#if windowState.tabs.length > 1}
-          <div
+          <button
             class="close-btn"
             onclick={(e) => handleCloseTab(tab.id, e)}
             title="Close tab"
-            role="button"
-            tabindex="0"
+            type="button"
           >
             <X size={12} />
-          </div>
+          </button>
         {/if}
       </button>
     {/each}
