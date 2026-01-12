@@ -10,7 +10,7 @@
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import TabBar from './lib/TabBar.svelte';
   import { listRefs } from './lib/services/git';
-  import { getWindowLabel, getRepoFromUrl } from './lib/services/window';
+  import { getWindowLabel } from './lib/services/window';
   import {
     windowState,
     addTab,
@@ -70,7 +70,6 @@
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
-  let unsubscribeMenuNewWindow: Unsubscribe | null = null;
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
@@ -164,20 +163,6 @@
   }
 
   // Menu Event Handlers
-  async function handleMenuNewWindow() {
-    // Open repo picker and create new window with selected repo
-    const repoPath = await openRepoPicker();
-    if (!repoPath) return;
-
-    try {
-      const { createWindow } = await import('./lib/services/window');
-      await createWindow(repoPath);
-      console.log('Created new window with repo:', repoPath);
-    } catch (e) {
-      console.error('Failed to create window:', e);
-    }
-  }
-
   async function handleMenuOpenFolder() {
     // Add a new tab for the selected repo
     await handleNewTab();
@@ -460,24 +445,12 @@
       unsubscribeWatcher = await initWatcher(handleFilesChanged);
 
       // Register menu event listeners
-      unsubscribeMenuNewWindow = await listen('menu:new-window', handleMenuNewWindow);
       unsubscribeMenuOpenFolder = await listen('menu:open-folder', handleMenuOpenFolder);
       unsubscribeMenuCloseTab = await listen('menu:close-tab', handleMenuCloseTab);
       unsubscribeMenuCloseWindow = await listen('menu:close-window', handleMenuCloseWindow);
 
-      // Check if this window was opened with a specific repo (from "New Window" menu)
-      const repoFromUrl = getRepoFromUrl();
-      let repoPath: string | null;
-
-      if (repoFromUrl) {
-        // New window with specific repo - use it and add to recent repos
-        console.log('Opening new window with repo from URL:', repoFromUrl);
-        repoPath = repoFromUrl;
-        setCurrentRepo(repoPath);
-      } else {
-        // Initialize repo state normally (resolves canonical path, adds to recent repos)
-        repoPath = await initRepoState();
-      }
+      // Initialize repo state (resolves canonical path, adds to recent repos)
+      const repoPath = await initRepoState();
 
       if (repoPath) {
         // Create initial tab if no tabs loaded from storage
@@ -505,7 +478,6 @@
     unregisterPreferenceShortcuts?.();
     unregisterFileSearchShortcut?.();
     unsubscribeWatcher?.();
-    unsubscribeMenuNewWindow?.();
     unsubscribeMenuOpenFolder?.();
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();

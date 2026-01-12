@@ -4434,6 +4434,7 @@ dependencies = [
  "notify",
  "notify-debouncer-full",
  "open",
+ "percent-encoding",
  "reqwest 0.13.1",
  "rusqlite",
  "serde",
