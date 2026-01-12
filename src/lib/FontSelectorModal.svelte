@@ -24,11 +24,11 @@
     searchInputRef?.focus();
   });
 
-  // Get categorized fonts
-  let categorized = $derived(getCategorizedFonts());
-
   // Filter fonts based on search and active tab
+  // Note: getCategorizedFonts() reads from systemFonts.$state, so we call it
+  // inside the derived to ensure reactivity when fonts load
   let filteredFonts = $derived.by(() => {
+    const categorized = getCategorizedFonts();
     const fonts = activeTab === 'ui' ? categorized.ui : categorized.mono;
     if (!searchQuery.trim()) return fonts;
     const query = searchQuery.toLowerCase();
