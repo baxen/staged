@@ -391,16 +391,25 @@ fn watch_repo(repo_path: String, watch_id: u64, state: State<WatcherHandle>) {
 /// Create a new window for the application.
 /// Returns the window label for the newly created window.
 #[tauri::command]
-fn create_window(app: AppHandle) -> Result<String, String> {
+fn create_window(app: AppHandle, repo_path: Option<String>) -> Result<String, String> {
     static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(1);
 
     let window_id = WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
     let label = format!("window-{}", window_id);
 
+    // Build URL with repo path as query parameter if provided
+    let url = if let Some(path) = repo_path {
+        use percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC};
+        let encoded = utf8_percent_encode(&path, NON_ALPHANUMERIC).to_string();
+        format!("index.html?repo={}", encoded)
+    } else {
+        "index.html".to_string()
+    };
+
     tauri::WebviewWindowBuilder::new(
         &app,
         &label,
-        tauri::WebviewUrl::App("index.html".into()),
+        tauri::WebviewUrl::App(url.into()),
     )
     .title("Staged")
     .inner_size(1600.0, 1200.0)

@@ -10,7 +10,7 @@
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import TabBar from './lib/TabBar.svelte';
   import { listRefs } from './lib/services/git';
-  import { getWindowLabel } from './lib/services/window';
+  import { getWindowLabel, getRepoFromUrl } from './lib/services/window';
   import {
     windowState,
     addTab,
@@ -165,18 +165,14 @@
 
   // Menu Event Handlers
   async function handleMenuNewWindow() {
-    // Open repo picker and create new window
+    // Open repo picker and create new window with selected repo
     const repoPath = await openRepoPicker();
     if (!repoPath) return;
 
     try {
-      // Create new window (it will initialize itself with this repo)
-      // For now, just create the window - it will start with default repo
-      // Full implementation with repo passing would require more work
       const { createWindow } = await import('./lib/services/window');
-      await createWindow();
-
-      console.log('Created new window');
+      await createWindow(repoPath);
+      console.log('Created new window with repo:', repoPath);
     } catch (e) {
       console.error('Failed to create window:', e);
     }
@@ -469,8 +465,19 @@
       unsubscribeMenuCloseTab = await listen('menu:close-tab', handleMenuCloseTab);
       unsubscribeMenuCloseWindow = await listen('menu:close-window', handleMenuCloseWindow);
 
-      // Initialize repo state (resolves canonical path, adds to recent repos)
-      const repoPath = await initRepoState();
+      // Check if this window was opened with a specific repo (from "New Window" menu)
+      const repoFromUrl = getRepoFromUrl();
+      let repoPath: string | null;
+
+      if (repoFromUrl) {
+        // New window with specific repo - use it and add to recent repos
+        console.log('Opening new window with repo from URL:', repoFromUrl);
+        repoPath = repoFromUrl;
+        setCurrentRepo(repoPath);
+      } else {
+        // Initialize repo state normally (resolves canonical path, adds to recent repos)
+        repoPath = await initRepoState();
+      }
 
       if (repoPath) {
         // Create initial tab if no tabs loaded from storage
