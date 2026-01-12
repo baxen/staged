@@ -5,7 +5,7 @@
  * Loads PRs from GitHub API and provides polling functionality.
  */
 
-import { checkGitHubAuth, listPullRequests } from '../services/git';
+import { checkGitHubAuth, listPullRequests, invalidatePRCache } from '../services/git';
 import { repoState } from './repoState.svelte';
 import type { PullRequest, GitHubAuthStatus } from '../types';
 
@@ -46,10 +46,14 @@ export async function loadPRs(forceRefresh = false): Promise<void> {
       return;
     }
 
+    // If force refresh, invalidate cache first
+    if (forceRefresh) {
+      await invalidatePRCache(repoState.currentPath ?? undefined);
+    }
+
     // Fetch PRs using the current repo path
     prState.pullRequests = await listPullRequests(
-      repoState.currentPath ?? undefined,
-      forceRefresh
+      repoState.currentPath ?? undefined
     );
     prState.lastFetched = new Date();
   } catch (e) {

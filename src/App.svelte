@@ -1,137 +1,126 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { AlertCircle } from 'lucide-svelte';
   import Sidebar from './lib/Sidebar.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
   import PRListView from './lib/PRListView.svelte';
   import ErrorModal from './lib/ErrorModal.svelte';
-  import { getRefs, hasUncommittedChanges, checkoutPRBranch, fetchPRBranch } from './lib/services/git';
-  import type { GitRef, DiffSpec, PullRequest } from './lib/types';
-  import { switchTab } from './lib/stores/viewState.svelte';
-  import {
-    subscribeToFileChanges,
-    startWatching,
-    stopWatching,
-    type Unsubscribe,
-  } from './lib/services/statusEvents';
+  import { listRefs, hasUncommittedChanges, checkoutPRBranch, fetchPR } from './lib/services/git';
+  import { DiffSpec, inferRefType } from './lib/types';
+  import type { DiffSpec as DiffSpecType, PullRequest } from './lib/types';
+  import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
   import {
     preferences,
     loadSavedSize,
     loadSavedSyntaxTheme,
-    handlePreferenceKeydown,
+    registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
   import { loadPRSettings } from './lib/stores/prSettings.svelte';
+  import { switchTab } from './lib/stores/viewState.svelte';
   import {
-    WORKDIR,
     diffSelection,
-    selectDiffSpec,
+    selectPreset,
     selectCustomDiff,
-    initDiffSelection,
     resetDiffSelection,
     setDefaultBranch,
+    type DiffPreset,
   } from './lib/stores/diffSelection.svelte';
   import {
     diffState,
     getCurrentDiff,
-    loadDiffs,
-    refreshDiffs,
+    loadFiles,
+    refreshFiles,
     selectFile,
     resetState,
   } from './lib/stores/diffState.svelte';
-  import { loadComments, setCurrentPath } from './lib/stores/comments.svelte';
-  import { repoState, initRepoState } from './lib/stores/repoState.svelte';
+  import { loadComments, setCurrentPath, clearComments } from './lib/stores/comments.svelte';
+  import { repoState, initRepoState, setCurrentRepo } from './lib/stores/repoState.svelte';
   import { viewState } from './lib/stores/viewState.svelte';
 
-  // UI State
-  let sidebarRef: Sidebar | null = $state(null);
-  let unsubscribe: Unsubscribe | null = null;
+  // UI State (note: watcher is handled by initWatcher/watchRepo, no unsubscribe needed)
   let errorMessage = $state<string | null>(null);
 
-  // Diff Loading
-  async function loadAllDiffs() {
-    await loadDiffs(
-      diffSelection.spec.base,
-      diffSelection.spec.head,
-      repoState.currentPath ?? undefined,
-      diffSelection.spec.useMergeBase
-    );
-    await loadComments(diffSelection.spec.base, diffSelection.spec.head, repoState.currentPath ?? undefined);
-    sidebarRef?.setDiffs(diffState.diffs);
+  // Load files and comments for current spec
+  async function loadAll() {
+    const repoPath = repoState.currentPath ?? undefined;
+    await loadFiles(diffSelection.spec, repoPath);
+    await loadComments(diffSelection.spec, repoPath);
   }
 
   // Update comments store when selected file changes
   $effect(() => {
-    const path = currentDiff?.after?.path ?? currentDiff?.before?.path ?? null;
+    const diff = getCurrentDiff();
+    const path = diff?.after?.path ?? diff?.before?.path ?? null;
     setCurrentPath(path);
   });
 
   async function handleFilesChanged() {
-    if (diffSelection.spec.head !== WORKDIR) return;
-    // Use refreshDiffs to avoid loading flicker - keeps content visible during fetch
-    await refreshDiffs(
-      diffSelection.spec.base,
-      diffSelection.spec.head,
-      repoState.currentPath ?? undefined,
-      diffSelection.spec.useMergeBase
-    );
+    // Only refresh if viewing working tree
+    if (diffSelection.spec.head.type !== 'WorkingTree') return;
+
+    await refreshFiles(diffSelection.spec, repoState.currentPath ?? undefined);
     // Reload comments - they may have changed after a commit
-    await loadComments(diffSelection.spec.base, diffSelection.spec.head, repoState.currentPath ?? undefined);
-    sidebarRef?.setDiffs(diffState.diffs);
+    await loadComments(diffSelection.spec);
   }
 
   // Preset selection
-  async function handleDiffSelect(spec: DiffSpec) {
+  async function handlePresetSelect(preset: DiffPreset) {
     resetState();
-    await selectDiffSpec(spec);
-    await loadAllDiffs();
+    selectPreset(preset);
+    await loadAll();
   }
 
-  // Custom diff selection
-  async function handleCustomDiff(base: string, head: string, label?: string) {
+  // Custom diff selection (from DiffSelectorModal or PRSelectorModal)
+  async function handleCustomDiff(spec: DiffSpecType, label?: string, prNumber?: number) {
     resetState();
-    await selectCustomDiff(base, head, label);
-    await loadAllDiffs();
+    selectCustomDiff(spec, label, prNumber);
+    await loadAll();
   }
 
   // Repo change - reload everything
   async function handleRepoChange() {
-    // Stop watching old repo
-    await stopWatching().catch(() => {});
-    unsubscribe?.();
-
-    // Reset state
     resetState();
+    clearComments();
 
-    if (repoState.currentPath && !repoState.error) {
+    if (repoState.currentPath) {
+      watchRepo(repoState.currentPath);
+
       // Load refs and detect default branch for new repo
       try {
-        const refs = await getRefs(repoState.currentPath);
+        const refs = await listRefs(repoState.currentPath);
         const defaultBranch = detectDefaultBranch(refs);
         setDefaultBranch(defaultBranch);
+        // Mark repo as valid since we got refs
+        setCurrentRepo(repoState.currentPath);
       } catch (e) {
+        // Repo doesn't exist or isn't a git repo - show friendly error
+        const errorMsg = e instanceof Error ? e.message : String(e);
+        if (errorMsg.includes('No such file or directory')) {
+          diffState.error = `Repository not found: ${repoState.currentPath}`;
+        } else if (errorMsg.includes('not a git repository')) {
+          diffState.error = `Not a git repository: ${repoState.currentPath}`;
+        } else {
+          diffState.error = errorMsg;
+        }
+        diffState.loading = false;
         console.error('Failed to load refs:', e);
+        return;
       }
 
-      // Reset diff selection to "Uncommitted" and load diffs
-      await resetDiffSelection();
-      await loadAllDiffs();
-
-      // Start watching new repo
-      try {
-        await startWatching(repoState.currentPath);
-        unsubscribe = await subscribeToFileChanges(handleFilesChanged);
-      } catch (e) {
-        console.error('Failed to start watcher:', e);
-      }
+      // Reset diff selection to "Uncommitted" and load
+      resetDiffSelection();
+      await loadAll();
     }
   }
 
   /**
    * Detect the default branch (main, master, etc.) from available refs.
    */
-  function detectDefaultBranch(refs: GitRef[]): string {
-    const branchNames = refs.filter((r) => r.ref_type === 'branch').map((r) => r.name);
+  function detectDefaultBranch(refs: string[]): string {
+    // Filter to likely branch names (not remotes, not tags)
+    const branchNames = refs.filter((r) => inferRefType(r) === 'branch');
 
     // Check common default branch names in order of preference
     const candidates = ['main', 'master', 'develop', 'trunk'];
@@ -144,8 +133,6 @@
     // Fallback to first branch, or 'main' if no branches
     return branchNames[0] ?? 'main';
   }
-
-  let currentDiff = $derived(getCurrentDiff());
 
   // PR Checkout Flow
   async function handlePRCheckout(event: CustomEvent<{ pr: PullRequest }>) {
@@ -176,8 +163,9 @@
     const { pr } = event.detail;
 
     try {
-      const result = await fetchPRBranch(pr.base_ref, pr.number, repoState.currentPath ?? undefined);
-      await handleCustomDiff(result.merge_base, result.head_sha, `PR #${pr.number}`);
+      // Fetch PR and get DiffSpec
+      const spec = await fetchPR(pr.base_ref, pr.number, repoState.currentPath ?? undefined);
+      await handleCustomDiff(spec, `PR #${pr.number}`, pr.number);
       switchTab('diff');
     } catch (e) {
       errorMessage = e instanceof Error ? e.message : String(e);
@@ -187,19 +175,16 @@
   // Show empty state when we have a repo, finished loading, no error, but no diffs
   let showEmptyState = $derived(
     repoState.currentPath &&
-      !repoState.error &&
       !diffState.loading &&
       !diffState.error &&
-      diffState.diffs.length === 0
+      diffState.files.length === 0
   );
-
-  let isWorkingTree = $derived(diffSelection.spec.head === WORKDIR);
 
   // Lifecycle
   onMount(() => {
     loadSavedSize();
     loadPRSettings(); // Load PR settings from localStorage
-    window.addEventListener('keydown', handlePreferenceKeydown);
+    registerPreferenceShortcuts();
 
     (async () => {
       await loadSavedSyntaxTheme();
@@ -208,48 +193,39 @@
       const hasRepo = await initRepoState();
 
       if (hasRepo && repoState.currentPath) {
+        // Initialize watcher
+        watchRepo(repoState.currentPath);
+
         // Load refs for autocomplete and detect default branch
         try {
-          const refs = await getRefs(repoState.currentPath);
+          const refs = await listRefs(repoState.currentPath);
           const defaultBranch = detectDefaultBranch(refs);
           setDefaultBranch(defaultBranch);
         } catch (e) {
           console.error('Failed to load refs:', e);
         }
 
-        await initDiffSelection();
-        await loadAllDiffs();
-
-        // Start file watcher
-        try {
-          await startWatching(repoState.currentPath);
-          unsubscribe = await subscribeToFileChanges(handleFilesChanged);
-        } catch (e) {
-          console.error('Failed to start watcher:', e);
-        }
+        resetDiffSelection();
+        await loadAll();
       }
     })();
   });
 
   onDestroy(() => {
-    window.removeEventListener('keydown', handlePreferenceKeydown);
-    unsubscribe?.();
-    stopWatching().catch(() => {});
+    // Watcher cleanup is handled automatically by the watcher system
   });
 </script>
 
 <main>
   <TopBar
-    files={diffState.diffs}
-    onDiffSelect={handleDiffSelect}
+    onPresetSelect={handlePresetSelect}
     onCustomDiff={handleCustomDiff}
     onRepoChange={handleRepoChange}
-    onCommit={handleFilesChanged}
   />
 
   {#if viewState.activeTab === 'diff'}
     <div class="app-container">
-      {#if !repoState.currentPath || repoState.error || showEmptyState}
+      {#if !repoState.currentPath || showEmptyState}
         <!-- Full-width empty state -->
         <section class="main-content full-width">
           <EmptyState />
@@ -262,14 +238,13 @@
             </div>
           {:else if diffState.error}
             <div class="error-state">
+              <AlertCircle size={24} />
               <p>Error loading diff:</p>
               <p class="error-message">{diffState.error}</p>
             </div>
           {:else}
             <DiffViewer
-              diff={currentDiff}
-              diffBase={diffSelection.spec.base}
-              diffHead={diffSelection.spec.head}
+              diff={getCurrentDiff()}
               sizeBase={preferences.sizeBase}
               syntaxThemeVersion={preferences.syntaxThemeVersion}
             />
@@ -277,11 +252,9 @@
         </section>
         <aside class="sidebar">
           <Sidebar
-            bind:this={sidebarRef}
+            files={diffState.files}
             onFileSelect={selectFile}
             selectedFile={diffState.selectedFile}
-            diffBase={diffSelection.spec.base}
-            diffHead={diffSelection.spec.head}
           />
         </aside>
       {/if}
@@ -338,6 +311,10 @@
     flex-direction: column;
   }
 
+  .full-width {
+    width: 100%;
+  }
+
   .loading-state {
     display: flex;
     align-items: center;
@@ -355,13 +332,13 @@
     height: 100%;
     color: var(--status-deleted);
     font-size: var(--size-lg);
+    gap: 8px;
   }
 
   .error-message {
     font-family: monospace;
     font-size: var(--size-sm);
     color: var(--text-muted);
-    margin-top: 8px;
   }
 
   .pr-view-container {

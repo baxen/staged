@@ -43,18 +43,16 @@
     isBinaryDiff,
     getTextLines,
   } from './diffUtils';
-  import { setupKeyboardNav } from './diffKeyboard';
-  import { WORKDIR } from './stores/diffSelection.svelte';
+  import { setupDiffKeyboardNav } from './diffKeyboard';
+  import { diffSelection } from './stores/diffSelection.svelte';
   import { diffState, clearScrollTarget } from './stores/diffState.svelte';
+  import { DiffSpec } from './types';
   import CommentEditor from './CommentEditor.svelte';
   import Scrollbar from './Scrollbar.svelte';
 
   // ==========================================================================
   // Constants
   // ==========================================================================
-
-  /** Number of alignments to process per batch during progressive loading */
-  const ALIGNMENT_BATCH_SIZE = 20;
 
   /** Duration (ms) for panel flex transitions - used to schedule connector redraws */
   const PANEL_TRANSITION_MS = 250;
@@ -65,24 +63,24 @@
 
   interface Props {
     diff: FileDiff | null;
-    /** Base ref for the diff (before side) */
-    diffBase?: string;
-    /** Head ref for the diff - WORKDIR means working tree, enabling discard */
-    diffHead?: string;
     sizeBase?: number;
     /** Bumped when syntax theme changes to trigger re-highlight */
     syntaxThemeVersion?: number;
+    /** Whether a new file is loading (show subtle indicator, keep old content) */
+    loading?: boolean;
     onRangeDiscard?: () => void;
   }
 
-  let {
-    diff,
-    diffBase = 'HEAD',
-    diffHead = WORKDIR,
-    sizeBase,
-    syntaxThemeVersion = 0,
-    onRangeDiscard,
-  }: Props = $props();
+  let { diff, sizeBase, syntaxThemeVersion = 0, loading = false, onRangeDiscard }: Props = $props();
+
+  // Get diff spec from store for display and logic
+  let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
+  let diffBaseDisplay = $derived(
+    diffSelection.spec.base.type === 'WorkingTree' ? '@' : diffSelection.spec.base.value
+  );
+  let diffHeadDisplay = $derived(
+    diffSelection.spec.head.type === 'WorkingTree' ? 'Working Tree' : diffSelection.spec.head.value
+  );
 
   // ==========================================================================
   // Element refs
@@ -155,13 +153,6 @@
   let lineSelectionToolbarStyle: { top: number; left: number } | null = $state(null);
 
   // ==========================================================================
-  // Progressive alignment loading
-  // ==========================================================================
-
-  let activeAlignmentCount = $state(0);
-  let loadingForDiff: FileDiff | null = null;
-
-  // ==========================================================================
   // Derived state
   // ==========================================================================
 
@@ -173,11 +164,8 @@
     return { pane: lineSelection.pane, start, end };
   });
 
-  // Active alignments (progressively loaded)
-  let activeAlignments = $derived.by(() => {
-    if (!diff) return [];
-    return diff.alignments.slice(0, activeAlignmentCount);
-  });
+  // Alignments from the current diff
+  let activeAlignments = $derived(diff?.alignments ?? []);
 
   // File type detection
   let isNewFile = $derived(diff !== null && diff.before === null);
@@ -187,11 +175,11 @@
 
   // Check if alignment loading is complete
   let alignmentsFullyLoaded = $derived(
-    diff !== null && activeAlignmentCount >= diff.alignments.length
+    diff !== null && activeAlignments.length >= diff.alignments.length
   );
 
   // Discard is only available when viewing the working tree
-  let canDiscard = $derived(diffHead === WORKDIR);
+  let canDiscard = $derived(isWorkingTree);
 
   // Extract lines from the diff
   let beforeLines = $derived(diff ? getTextLines(diff, 'before') : []);
@@ -249,8 +237,10 @@
   const scrollController = createScrollController();
 
   // Update scroll controller with active alignments
+  // Pass file path so scroll only resets on file change, not content refresh
   $effect(() => {
-    scrollController.setAlignments(activeAlignments);
+    const filePath = diff ? getFilePath(diff) : null;
+    scrollController.setAlignments(activeAlignments, filePath);
   });
 
   // Measure line height from DOM
@@ -322,50 +312,11 @@
   let afterContentHeight = $derived(afterLines.length * (measureLineHeight(afterPane) || 20));
 
   // ==========================================================================
-  // Progressive alignment loading
-  // ==========================================================================
-
-  function startAlignmentLoading(targetDiff: FileDiff) {
-    loadingForDiff = targetDiff;
-    activeAlignmentCount = 0;
-
-    const totalAlignments = targetDiff.alignments.length;
-
-    function loadNextBatch() {
-      if (loadingForDiff !== targetDiff) return;
-
-      const nextCount = Math.min(activeAlignmentCount + ALIGNMENT_BATCH_SIZE, totalAlignments);
-      activeAlignmentCount = nextCount;
-
-      if (nextCount < totalAlignments) {
-        if ('requestIdleCallback' in window) {
-          requestIdleCallback(loadNextBatch, { timeout: 50 });
-        } else {
-          setTimeout(loadNextBatch, 16);
-        }
-      }
-    }
-
-    if (totalAlignments > 0) {
-      if ('requestIdleCallback' in window) {
-        requestIdleCallback(loadNextBatch, { timeout: 50 });
-      } else {
-        setTimeout(loadNextBatch, 0);
-      }
-    }
-  }
-
-  // ==========================================================================
   // Effects
   // ==========================================================================
 
-  // Initialize on diff change
+  // Reset UI state on diff change
   $effect(() => {
-    // Clear renderer when diff changes to prevent ghost elements
-    if (connectorRenderer) {
-      connectorRenderer.clear();
-    }
-
     if (diff) {
       hoveredRangeIndex = null;
       rangeToolbarStyle = null;
@@ -376,10 +327,6 @@
       editingCommentId = null;
       commentingOnRange = null;
       commentEditorStyle = null;
-      startAlignmentLoading(diff);
-    } else {
-      loadingForDiff = null;
-      activeAlignmentCount = 0;
     }
   });
 
@@ -421,30 +368,44 @@
   // Connector Renderer (high-performance Canvas rendering)
   // ==========================================================================
 
-  let connectorRenderer: ConnectorRendererCanvas | null = null;
+  let connectorRenderer: ConnectorRendererCanvas | null = $state(null);
 
-  // Initialize renderer when Canvas is available
+  // Initialize renderer when Canvas is available (recreate if canvas element changes)
+  let previousCanvas: HTMLCanvasElement | null = null;
   $effect(() => {
-    if (connectorCanvas && !connectorRenderer) {
+    if (connectorCanvas && connectorCanvas !== previousCanvas) {
+      // Canvas element changed - destroy old renderer and create new one
+      if (connectorRenderer) {
+        connectorRenderer.destroy();
+      }
       connectorRenderer = new ConnectorRendererCanvas(connectorCanvas, {
         onCommentClick: handleCommentHighlightClick,
       });
+      previousCanvas = connectorCanvas;
+      scheduleConnectorRedraw();
     }
   });
 
-  // Update renderer alignments when they change
+  // Update renderer alignments when diff changes
   $effect(() => {
-    if (connectorRenderer) {
-      // In single-pane mode, pass empty alignments (no curves) but still draw comments
-      const alignmentsForRenderer = isTwoPaneMode ? activeAlignments : [];
-      connectorRenderer.setAlignments(alignmentsForRenderer);
+    if (!connectorRenderer) return;
+
+    if (!diff) {
+      connectorRenderer.clear();
+      return;
     }
+
+    // In single-pane mode, pass empty alignments (no curves) but still draw comments
+    const alignmentsForRenderer = isTwoPaneMode ? activeAlignments : [];
+    connectorRenderer.setAlignments(alignmentsForRenderer);
+    scheduleConnectorRedraw();
   });
 
   // Update renderer comments when they change
   $effect(() => {
     if (connectorRenderer) {
       connectorRenderer.setComments(currentFileComments);
+      scheduleConnectorRedraw();
     }
   });
 
@@ -452,6 +413,7 @@
   $effect(() => {
     if (connectorRenderer) {
       connectorRenderer.setHoveredIndex(hoveredRangeIndex);
+      scheduleConnectorRedraw();
     }
   });
 
@@ -460,6 +422,7 @@
     const _version = syntaxThemeVersion;
     if (connectorRenderer) {
       connectorRenderer.updateColors();
+      scheduleConnectorRedraw();
     }
   });
 
@@ -503,21 +466,11 @@
     redrawConnectorsImpl();
   }
 
-
-  // Redraw triggers
+  // Redraw when font size changes (sizeBase affects line height)
   $effect(() => {
-    const _ = [
-      activeAlignmentCount,
-      hoveredRangeIndex,
-      syntaxThemeVersion,
-      currentFileComments.length,
-      sizeBase,
-    ];
-
+    const _ = sizeBase;
     if (diff && connectorCanvas && afterPane) {
-      requestAnimationFrame(() => {
-        scheduleConnectorRedraw();
-      });
+      scheduleConnectorRedraw();
     }
   });
 
@@ -567,7 +520,6 @@
   function alignmentHasComments(alignmentIndex: number): boolean {
     return getCommentsForAlignment(alignmentIndex).length > 0;
   }
-
 
   // ==========================================================================
   // Scroll handlers (custom scroll via wheel events)
@@ -1181,8 +1133,13 @@
       highlighterReady = true;
     });
 
-    const cleanupKeyboardNav = setupKeyboardNav({
-      getScrollTarget: () => afterPane,
+    const cleanupKeyboardNav = setupDiffKeyboardNav({
+      getChangedAlignments: () => changedAlignments,
+      scrollToRow: (row, side) => scrollController.scrollToRow(row, side),
+      scrollBy: (deltaY) => scrollController.scrollBy('after', deltaY),
+      getCurrentScrollY: () => scrollController.afterScrollY,
+      getLineHeight: () => scrollController.getDimensions('after').lineHeight,
+      getViewportHeight: () => scrollController.getDimensions('after').viewportHeight,
     });
 
     document.addEventListener('copy', handleCopy);
@@ -1221,7 +1178,12 @@
   });
 </script>
 
-<div class="diff-viewer" bind:this={diffViewerEl}>
+<div class="diff-viewer" class:loading bind:this={diffViewerEl}>
+  {#if loading}
+    <div class="loading-overlay">
+      <span class="loading-text">Loading...</span>
+    </div>
+  {/if}
   {#if diff === null}
     <div class="empty-state">
       <p>Select a file to view changes</p>
@@ -1242,14 +1204,11 @@
       <!-- Before pane (only in two-pane mode) -->
       {#if isTwoPaneMode}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="diff-pane before-pane"
-          style="flex: {paneRatio}"
-        >
+        <div class="diff-pane before-pane" style="flex: {paneRatio}">
           <div class="pane-header">
             <span class="pane-ref">
               <GitBranch size={12} />
-              {diffBase}
+              {diffBaseDisplay}
             </span>
             <span class="pane-path" title={beforePath}>{beforePath ?? 'No file'}</span>
           </div>
@@ -1307,7 +1266,7 @@
           <div class="pane-header">
             <span class="pane-ref">
               <GitBranch size={12} />
-              {diffBase}
+              {diffBaseDisplay}
             </span>
             <span class="pane-path" title={beforePath}>{beforePath ?? 'No file'}</span>
           </div>
@@ -1355,14 +1314,11 @@
       <!-- After pane (two-pane mode or created file) -->
       {#if isTwoPaneMode}
         <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="diff-pane after-pane"
-          style="flex: {1 - paneRatio}"
-        >
+        <div class="diff-pane after-pane" style="flex: {1 - paneRatio}">
           <div class="pane-header">
             <span class="pane-ref">
               <GitBranch size={12} />
-              {diffHead === WORKDIR ? 'Working Tree' : diffHead}
+              {diffHeadDisplay}
             </span>
             <span class="pane-path" title={afterPath}>{afterPath ?? 'No file'}</span>
           </div>
@@ -1422,7 +1378,7 @@
           <div class="pane-header">
             <span class="pane-ref">
               <GitBranch size={12} />
-              {diffHead === WORKDIR ? 'Working Tree' : diffHead}
+              {diffHeadDisplay}
             </span>
             <span class="pane-path" title={afterPath}>{afterPath ?? 'No file'}</span>
           </div>
@@ -1541,7 +1497,11 @@
             ? 's'
             : ''}
         </span>
-        <button class="range-btn comment-btn" onclick={handleStartLineComment} title="Add comment (Enter)">
+        <button
+          class="range-btn comment-btn"
+          onclick={handleStartLineComment}
+          title="Add comment (Enter)"
+        >
           <MessageSquarePlus size={12} />
         </button>
         <button class="range-btn" onclick={clearLineSelection} title="Clear selection (Esc)">
@@ -1589,6 +1549,23 @@
     height: 100%;
     overflow: hidden;
     position: relative;
+  }
+
+  .diff-viewer.loading {
+    opacity: 0.6;
+    pointer-events: none;
+  }
+
+  .loading-overlay {
+    position: absolute;
+    top: 8px;
+    right: 16px;
+    z-index: 100;
+    padding: 4px 8px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
   }
 
   .diff-content {
@@ -1812,8 +1789,6 @@
     height: 100%;
     color: var(--text-muted);
     font-size: var(--size-lg);
-    background-color: var(--bg-primary);
-    border-radius: 12px;
   }
 
   .empty-pane-notice {

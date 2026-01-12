@@ -1,182 +1,186 @@
 //! File system watcher for detecting repository changes.
 //!
-//! This module provides the `WatcherManager` trait and implementations
-//! for triggering status refreshes when files change.
-//!
-//! The current implementation uses `notify` with FSEvents on macOS.
-//! Uses the `ignore` crate to respect .gitignore and skip ignored directories.
+//! Architecture: A dedicated background thread owns the watcher exclusively.
+//! Commands are sent via channel, so the main thread never blocks on watcher
+//! setup/teardown. Events include a generation counter so the frontend can
+//! ignore stale notifications from old repos.
 
-use ignore::WalkBuilder;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, DebouncedEvent, Debouncer, RecommendedCache};
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::{self, Sender};
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
+use tauri::{AppHandle, Emitter};
 
-/// Callback type for when the watcher detects changes
-pub type OnChangeCallback = Box<dyn Fn() + Send + 'static>;
+/// Event name for file change notifications sent to frontend.
+const EVENT_FILES_CHANGED: &str = "files-changed";
 
-/// Trait for file system watching implementations.
-/// Easy to swap out for different strategies (polling, hooks, etc.)
-pub trait WatcherManager: Send {
-    /// Start watching a repository for changes.
-    /// Calls `on_change` when relevant files change (debounced).
-    fn start(&mut self, repo_path: &Path, on_change: OnChangeCallback) -> Result<(), WatcherError>;
-
-    /// Stop watching the current repository.
-    fn stop(&mut self);
+/// Payload sent with files-changed events
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FilesChangedPayload {
+    watch_id: u64,
 }
 
-#[derive(Debug)]
-pub struct WatcherError {
-    pub message: String,
+/// Commands sent to the watcher background thread
+enum WatcherCommand {
+    /// Switch to watching a new repository
+    Switch { path: PathBuf, watch_id: u64 },
 }
 
-impl std::fmt::Display for WatcherError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.message)
-    }
+/// Handle to the watcher background thread.
+/// Clone-able and thread-safe - just wraps a channel sender.
+pub struct WatcherHandle {
+    tx: Sender<WatcherCommand>,
 }
 
-impl std::error::Error for WatcherError {}
+impl WatcherHandle {
+    /// Spawn the watcher background thread and return a handle to it.
+    pub fn new(app_handle: AppHandle) -> Self {
+        let (tx, rx) = mpsc::channel();
 
-impl From<notify::Error> for WatcherError {
-    fn from(e: notify::Error) -> Self {
-        WatcherError {
-            message: e.to_string(),
-        }
-    }
-}
+        thread::spawn(move || {
+            let mut watcher: Option<Debouncer<RecommendedWatcher, RecommendedCache>> = None;
 
-/// FSEvents-based watcher using the `notify` crate.
-/// Debounces rapid changes and filters irrelevant paths.
-/// Uses `ignore` crate to respect .gitignore when setting up watches.
-pub struct NotifyWatcher {
-    debouncer: Option<Debouncer<RecommendedWatcher, RecommendedCache>>,
-    watched_paths: HashSet<PathBuf>,
-}
-
-impl Default for NotifyWatcher {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl NotifyWatcher {
-    pub fn new() -> Self {
-        Self {
-            debouncer: None,
-            watched_paths: HashSet::new(),
-        }
-    }
-}
-
-impl WatcherManager for NotifyWatcher {
-    fn start(&mut self, repo_path: &Path, on_change: OnChangeCallback) -> Result<(), WatcherError> {
-        // Stop any existing watcher
-        self.stop();
-
-        let repo_path_for_filter = repo_path.to_path_buf();
-
-        // Debouncer timing policy:
-        // - timeout (500ms): fire after 500ms of quiet, coalescing rapid changes
-        // - tick_rate: how often the debouncer checks for expired events (None = timeout/4)
-        //
-        // Combined with backend throttle (refresh.rs), the behavior is:
-        // - Single file save: ~500ms response time
-        // - Burst of saves: coalesced, fires 500ms after last change
-        // - Slow repos: backend adaptive throttle (1.5× duration) adds protection
-        let mut debouncer = new_debouncer(
-            Duration::from_millis(500),
-            None, // Use default tick_rate (timeout / 4 = 125ms)
-            move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| {
-                match result {
-                    Ok(events) => {
-                        // Check if any event is relevant (not filtered out)
-                        let dominated_paths: Vec<_> =
-                            events.iter().flat_map(|e| e.paths.iter()).collect();
-                        let dominated_paths: Vec<_> = dominated_paths
-                            .iter()
-                            .filter(|p| should_trigger_refresh(p, &repo_path_for_filter))
-                            .collect();
-
-                        if !dominated_paths.is_empty() {
-                            log::debug!(
-                                "Watcher detected {} relevant changes",
-                                dominated_paths.len()
-                            );
-                            on_change();
+            for cmd in rx {
+                match cmd {
+                    WatcherCommand::Switch { path, watch_id } => {
+                        // Drop old watcher synchronously - blocking is fine here
+                        // since we're on a dedicated thread
+                        if watcher.is_some() {
+                            log::info!("Dropping old watcher for repo switch");
                         }
-                    }
-                    Err(errors) => {
-                        for e in errors {
-                            log::warn!("Watcher error: {}", e);
+                        watcher = None;
+
+                        // Setup new watcher
+                        match create_watcher(&path, watch_id, &app_handle) {
+                            Ok(w) => {
+                                watcher = Some(w);
+                                log::info!(
+                                    "Started watching {} (watch_id {})",
+                                    path.display(),
+                                    watch_id
+                                );
+                            }
+                            Err(e) => {
+                                log::error!("Failed to create watcher: {}", e);
+                            }
                         }
                     }
                 }
-            },
-        )?;
-
-        // Use ignore crate to walk only non-ignored directories
-        // This respects .gitignore and skips node_modules, target/, etc.
-        let mut dirs_to_watch: HashSet<PathBuf> = HashSet::new();
-
-        // Always include repo root
-        dirs_to_watch.insert(repo_path.to_path_buf());
-
-        // Walk the repo, collecting directories that aren't ignored
-        let walker = WalkBuilder::new(repo_path)
-            .hidden(false) // Don't skip hidden files (we want .gitignore'd stuff skipped, not hidden)
-            .git_ignore(true) // Respect .gitignore
-            .git_global(true) // Respect global gitignore
-            .git_exclude(true) // Respect .git/info/exclude
-            .ignore(true) // Respect .ignore files
-            .parents(true) // Check parent directories for ignore files
-            .build();
-
-        for entry in walker.flatten() {
-            if entry.file_type().is_some_and(|ft| ft.is_dir()) {
-                dirs_to_watch.insert(entry.path().to_path_buf());
             }
-        }
+        });
 
-        // Watch each directory non-recursively
-        // (we've already enumerated the non-ignored dirs)
-        for dir in &dirs_to_watch {
-            if let Err(e) = debouncer.watch(dir, RecursiveMode::NonRecursive) {
-                log::warn!("Failed to watch {}: {}", dir.display(), e);
-            }
-        }
-
-        // Also watch .git directory for index/HEAD changes
-        let git_dir = repo_path.join(".git");
-        if git_dir.exists() {
-            // Watch .git recursively since it's not walked by ignore crate
-            debouncer.watch(&git_dir, RecursiveMode::Recursive)?;
-            dirs_to_watch.insert(git_dir);
-        }
-
-        self.debouncer = Some(debouncer);
-        self.watched_paths = dirs_to_watch;
-
-        log::info!("Started watching repository: {}", repo_path.display());
-        Ok(())
+        Self { tx }
     }
 
-    fn stop(&mut self) {
-        if let Some(mut debouncer) = self.debouncer.take() {
-            for path in &self.watched_paths {
-                let _ = debouncer.unwatch(path);
-            }
-            log::info!("Stopped watching repository");
-        }
-        self.watched_paths.clear();
+    /// Switch to watching a new repository.
+    /// Returns immediately - actual setup happens on background thread.
+    pub fn switch(&self, path: PathBuf, watch_id: u64) {
+        let _ = self.tx.send(WatcherCommand::Switch { path, watch_id });
     }
 }
 
+/// Create a new debounced watcher for the given repository.
+fn create_watcher(
+    repo_path: &Path,
+    watch_id: u64,
+    app_handle: &AppHandle,
+) -> Result<Debouncer<RecommendedWatcher, RecommendedCache>, String> {
+    let gitignore = build_gitignore(repo_path);
+    let repo_path_for_filter = repo_path.to_path_buf();
+    let app_handle = app_handle.clone();
+
+    let mut debouncer = new_debouncer(
+        Duration::from_millis(500),
+        None,
+        move |result: Result<Vec<DebouncedEvent>, Vec<notify::Error>>| match result {
+            Ok(events) => {
+                let relevant_paths: Vec<_> = events
+                    .iter()
+                    .flat_map(|e| e.paths.iter())
+                    .filter(|p| should_trigger_refresh(p, &repo_path_for_filter, &gitignore))
+                    .collect();
+
+                if !relevant_paths.is_empty() {
+                    let _ = app_handle.emit(EVENT_FILES_CHANGED, FilesChangedPayload { watch_id });
+                }
+            }
+            Err(errors) => {
+                for e in errors {
+                    log::warn!("Watcher error: {}", e);
+                }
+            }
+        },
+    )
+    .map_err(|e| e.to_string())?;
+
+    debouncer
+        .watch(repo_path, RecursiveMode::Recursive)
+        .map_err(|e| e.to_string())?;
+
+    Ok(debouncer)
+}
+
+/// Build a Gitignore matcher for the repository.
+fn build_gitignore(repo_path: &Path) -> Arc<Gitignore> {
+    let mut builder = GitignoreBuilder::new(repo_path);
+
+    // Add .gitignore in repo root
+    let gitignore_path = repo_path.join(".gitignore");
+    if gitignore_path.exists() {
+        let _ = builder.add(&gitignore_path);
+    }
+
+    // Add .git/info/exclude
+    let exclude_path = repo_path.join(".git/info/exclude");
+    if exclude_path.exists() {
+        let _ = builder.add(&exclude_path);
+    }
+
+    // Add global gitignore
+    if let Some(global_path) = find_global_gitignore() {
+        let _ = builder.add(&global_path);
+    }
+
+    Arc::new(
+        builder
+            .build()
+            .unwrap_or_else(|_| GitignoreBuilder::new(repo_path).build().unwrap()),
+    )
+}
+
+/// Find the global gitignore file location.
+fn find_global_gitignore() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("GIT_CONFIG_GLOBAL") {
+        let path = PathBuf::from(path);
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if let Ok(config_home) = std::env::var("XDG_CONFIG_HOME") {
+        let path = PathBuf::from(config_home).join("git/ignore");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".config/git/ignore");
+        if path.exists() {
+            return Some(path);
+        }
+    }
+
+    None
+}
+
 /// Determine if a file change should trigger a status refresh.
-/// Filters out noise like .git/objects, node_modules, etc.
-fn should_trigger_refresh(path: &Path, repo_root: &Path) -> bool {
+fn should_trigger_refresh(path: &Path, repo_root: &Path, gitignore: &Gitignore) -> bool {
     let relative = match path.strip_prefix(repo_root) {
         Ok(rel) => rel,
         Err(_) => return false,
@@ -184,102 +188,95 @@ fn should_trigger_refresh(path: &Path, repo_root: &Path) -> bool {
 
     let path_str = relative.to_string_lossy();
 
-    // Always trigger on key .git files
-    if path_str == ".git/index" || path_str == ".git/HEAD" || path_str.starts_with(".git/refs/") {
-        return true;
+    // .git/ directory: only trigger on key state files
+    if path_str.starts_with(".git/") || path_str == ".git" {
+        if path_str == ".git/index" || path_str == ".git/HEAD" || path_str.starts_with(".git/refs/")
+        {
+            return true;
+        }
+        return false;
     }
 
-    // Ignore internal git files that change frequently but don't affect status
-    if path_str.starts_with(".git/objects/")
-        || path_str.starts_with(".git/logs/")
-        || path_str.starts_with(".git/hooks/")
-        || path_str.starts_with(".git/info/")
-        || path_str.contains(".git/fsmonitor")
-        || path_str.ends_with(".lock")
+    // Working tree: use gitignore rules
+    let is_dir = path.is_dir();
+    if gitignore
+        .matched_path_or_any_parents(relative, is_dir)
+        .is_ignore()
     {
         return false;
     }
 
-    // Ignore other .git internals we haven't explicitly allowed
-    if path_str.starts_with(".git/") {
-        return false;
-    }
-
-    // Ignore common build/dependency directories
-    if path_str.starts_with("node_modules/")
-        || path_str.starts_with("target/")
-        || path_str.starts_with(".build/")
-        || path_str.starts_with("build/")
-        || path_str.starts_with("dist/")
-        || path_str.starts_with(".next/")
-        || path_str.starts_with("__pycache__/")
-        || path_str.starts_with(".pytest_cache/")
-        || path_str.starts_with("venv/")
-        || path_str.starts_with(".venv/")
-    {
-        return false;
-    }
-
-    // Ignore common temporary/generated files
-    if path_str.ends_with(".pyc")
-        || path_str.ends_with(".pyo")
-        || path_str.ends_with(".class")
-        || path_str.ends_with(".o")
-        || path_str.ends_with(".a")
-        || path_str.ends_with(".so")
-        || path_str.ends_with(".dylib")
-        || path_str.ends_with("~")
-        || path_str.ends_with(".swp")
-        || path_str.ends_with(".swo")
-        || path_str.contains(".DS_Store")
-    {
-        return false;
-    }
-
-    // Everything else triggers a refresh
     true
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
+
+    fn empty_gitignore(repo: &Path) -> Arc<Gitignore> {
+        Arc::new(GitignoreBuilder::new(repo).build().unwrap())
+    }
+
+    fn gitignore_with_patterns(repo: &Path, patterns: &[&str]) -> Arc<Gitignore> {
+        let mut builder = GitignoreBuilder::new(repo);
+        for pattern in patterns {
+            builder.add_line(None, pattern).unwrap();
+        }
+        Arc::new(builder.build().unwrap())
+    }
 
     #[test]
-    fn test_should_trigger_refresh() {
+    fn test_git_directory_filtering() {
         let repo = Path::new("/repo");
+        let gi = empty_gitignore(repo);
 
-        // Should trigger
-        assert!(should_trigger_refresh(Path::new("/repo/src/main.rs"), repo));
-        assert!(should_trigger_refresh(Path::new("/repo/.git/index"), repo));
-        assert!(should_trigger_refresh(Path::new("/repo/.git/HEAD"), repo));
+        assert!(should_trigger_refresh(
+            Path::new("/repo/.git/index"),
+            repo,
+            &gi
+        ));
+        assert!(should_trigger_refresh(
+            Path::new("/repo/.git/HEAD"),
+            repo,
+            &gi
+        ));
         assert!(should_trigger_refresh(
             Path::new("/repo/.git/refs/heads/main"),
-            repo
+            repo,
+            &gi
         ));
-        assert!(should_trigger_refresh(Path::new("/repo/README.md"), repo));
 
-        // Should NOT trigger
         assert!(!should_trigger_refresh(
             Path::new("/repo/.git/objects/ab/cdef123"),
-            repo
+            repo,
+            &gi
         ));
         assert!(!should_trigger_refresh(
             Path::new("/repo/.git/logs/HEAD"),
-            repo
+            repo,
+            &gi
+        ));
+    }
+
+    #[test]
+    fn test_gitignore_filtering() {
+        let repo = Path::new("/repo");
+        let gi = gitignore_with_patterns(repo, &["node_modules/", "*.pyc", "build/"]);
+
+        assert!(should_trigger_refresh(
+            Path::new("/repo/src/main.rs"),
+            repo,
+            &gi
         ));
         assert!(!should_trigger_refresh(
             Path::new("/repo/node_modules/foo/bar.js"),
-            repo
+            repo,
+            &gi
         ));
         assert!(!should_trigger_refresh(
-            Path::new("/repo/target/debug/build"),
-            repo
+            Path::new("/repo/foo.pyc"),
+            repo,
+            &gi
         ));
-        assert!(!should_trigger_refresh(
-            Path::new("/repo/.git/index.lock"),
-            repo
-        ));
-        assert!(!should_trigger_refresh(Path::new("/repo/foo.pyc"), repo));
     }
 }

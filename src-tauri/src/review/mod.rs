@@ -9,7 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use super::types::{DiffId, Span};
+use crate::git::{DiffId, Span};
 
 // =============================================================================
 // Types
@@ -187,21 +187,15 @@ impl ReviewStore {
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
-        // Drop legacy comments table and recreate with clean schema
         conn.execute_batch(
             r#"
-            DROP TABLE IF EXISTS comments;
-            DROP TABLE IF EXISTS reviewed_files;
-            DROP TABLE IF EXISTS edits;
-            DROP TABLE IF EXISTS reviews;
-
-            CREATE TABLE reviews (
+            CREATE TABLE IF NOT EXISTS reviews (
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
                 PRIMARY KEY (before_ref, after_ref)
             );
 
-            CREATE TABLE reviewed_files (
+            CREATE TABLE IF NOT EXISTS reviewed_files (
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
                 path TEXT NOT NULL,
@@ -209,7 +203,7 @@ impl ReviewStore {
                 FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
             );
 
-            CREATE TABLE comments (
+            CREATE TABLE IF NOT EXISTS comments (
                 id TEXT PRIMARY KEY,
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
@@ -220,7 +214,7 @@ impl ReviewStore {
                 FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
             );
 
-            CREATE TABLE edits (
+            CREATE TABLE IF NOT EXISTS edits (
                 id TEXT PRIMARY KEY,
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,

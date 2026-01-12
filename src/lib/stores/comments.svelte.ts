@@ -7,7 +7,7 @@
  * rather than making their own API calls.
  */
 
-import type { Comment, Span, NewComment } from '../types';
+import type { Comment, Span, NewComment, DiffSpec } from '../types';
 import {
   getReview,
   addComment as apiAddComment,
@@ -30,11 +30,10 @@ interface CommentsState {
   reviewedPaths: string[];
   /** Currently selected file path (for filtering) */
   currentPath: string | null;
-  /** Diff refs for API calls */
-  diffBase: string | null;
-  diffHead: string | null;
-  /** Repository path for API calls */
-  repoPath: string | null;
+  /** Current diff spec for API calls */
+  currentSpec: DiffSpec | null;
+  /** Current repo path for API calls */
+  currentRepoPath: string | null;
   /** Loading state */
   loading: boolean;
 }
@@ -43,9 +42,8 @@ export const commentsState: CommentsState = $state({
   comments: [],
   reviewedPaths: [],
   currentPath: null,
-  diffBase: null,
-  diffHead: null,
-  repoPath: null,
+  currentSpec: null,
+  currentRepoPath: null,
   loading: false,
 });
 
@@ -119,14 +117,13 @@ export function getTotalCommentCount(): number {
  * Load review data (comments and reviewed paths) for a diff.
  * This is the single API call for all review data.
  */
-export async function loadComments(base: string, head: string, repoPath?: string): Promise<void> {
+export async function loadComments(spec: DiffSpec, repoPath?: string): Promise<void> {
   commentsState.loading = true;
-  commentsState.diffBase = base;
-  commentsState.diffHead = head;
-  commentsState.repoPath = repoPath ?? null;
+  commentsState.currentSpec = spec;
+  commentsState.currentRepoPath = repoPath ?? null;
 
   try {
-    const review = await getReview(base, head, repoPath);
+    const review = await getReview(spec, repoPath);
     commentsState.comments = review.comments;
     commentsState.reviewedPaths = review.reviewed;
   } catch (e) {
@@ -149,19 +146,20 @@ export function isPathReviewed(path: string): boolean {
  * Toggle the reviewed status of a file.
  */
 export async function toggleReviewed(path: string): Promise<boolean> {
-  if (!commentsState.diffBase || !commentsState.diffHead) {
+  if (!commentsState.currentSpec) {
     console.error('Cannot toggle reviewed: no diff selected');
     return false;
   }
 
   const isCurrentlyReviewed = isPathReviewed(path);
+  const repoPath = commentsState.currentRepoPath ?? undefined;
 
   try {
     if (isCurrentlyReviewed) {
-      await apiUnmarkReviewed(commentsState.diffBase, commentsState.diffHead, path);
+      await apiUnmarkReviewed(commentsState.currentSpec, path, repoPath);
       commentsState.reviewedPaths = commentsState.reviewedPaths.filter((p) => p !== path);
     } else {
-      await apiMarkReviewed(commentsState.diffBase, commentsState.diffHead, path);
+      await apiMarkReviewed(commentsState.currentSpec, path, repoPath);
       commentsState.reviewedPaths = [...commentsState.reviewedPaths, path];
     }
     return true;
@@ -186,19 +184,15 @@ export async function addComment(
   span: Span,
   content: string
 ): Promise<Comment | null> {
-  if (!commentsState.diffBase || !commentsState.diffHead) {
+  if (!commentsState.currentSpec) {
     console.error('Cannot add comment: no diff selected');
     return null;
   }
 
   try {
     const newComment: NewComment = { path, span, content };
-    const comment = await apiAddComment(
-      commentsState.diffBase,
-      commentsState.diffHead,
-      newComment,
-      commentsState.repoPath ?? undefined
-    );
+    const repoPath = commentsState.currentRepoPath ?? undefined;
+    const comment = await apiAddComment(commentsState.currentSpec, newComment, repoPath);
     commentsState.comments = [...commentsState.comments, comment];
     return comment;
   } catch (e) {
@@ -251,8 +245,8 @@ export async function deleteAllComments(): Promise<boolean> {
   } catch (e) {
     console.error('Failed to delete all comments:', e);
     // Reload to get accurate state
-    if (commentsState.diffBase && commentsState.diffHead) {
-      await loadComments(commentsState.diffBase, commentsState.diffHead);
+    if (commentsState.currentSpec) {
+      await loadComments(commentsState.currentSpec);
     }
     return false;
   }
@@ -262,13 +256,14 @@ export async function deleteAllComments(): Promise<boolean> {
  * Export all comments as markdown and copy to clipboard.
  */
 export async function copyCommentsToClipboard(): Promise<boolean> {
-  if (!commentsState.diffBase || !commentsState.diffHead) {
+  if (!commentsState.currentSpec) {
     console.error('Cannot export: no diff selected');
     return false;
   }
 
   try {
-    const markdown = await exportReviewMarkdown(commentsState.diffBase, commentsState.diffHead);
+    const repoPath = commentsState.currentRepoPath ?? undefined;
+    const markdown = await exportReviewMarkdown(commentsState.currentSpec, repoPath);
     await writeText(markdown);
     return true;
   } catch (e) {
@@ -284,8 +279,7 @@ export function clearComments(): void {
   commentsState.comments = [];
   commentsState.reviewedPaths = [];
   commentsState.currentPath = null;
-  commentsState.diffBase = null;
-  commentsState.diffHead = null;
-  commentsState.repoPath = null;
+  commentsState.currentSpec = null;
+  commentsState.currentRepoPath = null;
   commentsState.loading = false;
 }

@@ -1,8 +1,8 @@
 /**
  * File watcher event subscription service.
  *
- * Listens for backend file change events and forwards them to callbacks.
- * The frontend decides what to refresh when notified.
+ * Uses a generation counter to ignore stale events from old repos.
+ * All watcher commands are fire-and-forget (no awaiting backend).
  */
 
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -14,50 +14,60 @@ export type FilesChangedCallback = () => void;
 /** Cleanup function returned by subscribe */
 export type Unsubscribe = () => void;
 
+/** Payload from backend files-changed event */
+interface FilesChangedPayload {
+  watchId: number;
+}
+
+// Current watch ID - incremented on each repo switch
+let currentWatchId = 0;
+
 // Active listener
 let filesChangedUnlisten: UnlistenFn | null = null;
 
 /**
- * Subscribe to file change events from the backend.
+ * Initialize the watcher event listener.
+ * Call once on app startup. The callback is invoked when files change
+ * in the currently watched repo (stale events are filtered out).
  *
- * @param onFilesChanged - Called whenever files in the repo change
+ * @param onFilesChanged - Called when files in the current repo change
  * @returns Cleanup function to unsubscribe
  */
-export async function subscribeToFileChanges(
-  onFilesChanged: FilesChangedCallback
-): Promise<Unsubscribe> {
-  // Clean up any existing listener first
-  await unsubscribeAll();
-
-  // Listen for file change notifications
-  filesChangedUnlisten = await listen('files-changed', () => {
-    onFilesChanged();
-  });
-
-  return unsubscribeAll;
-}
-
-/**
- * Unsubscribe from file change events.
- */
-async function unsubscribeAll(): Promise<void> {
+export async function initWatcher(onFilesChanged: FilesChangedCallback): Promise<Unsubscribe> {
+  // Clean up any existing listener
   if (filesChangedUnlisten) {
     filesChangedUnlisten();
-    filesChangedUnlisten = null;
   }
+
+  filesChangedUnlisten = await listen<FilesChangedPayload>('files-changed', ({ payload }) => {
+    // Ignore events from old repos
+    if (payload.watchId === currentWatchId) {
+      onFilesChanged();
+    }
+  });
+
+  return () => {
+    if (filesChangedUnlisten) {
+      filesChangedUnlisten();
+      filesChangedUnlisten = null;
+    }
+  };
 }
 
 /**
- * Start watching a repository for changes.
- * The backend will emit 'files-changed' events when files change.
+ * Switch to watching a new repository.
+ * Fire-and-forget: returns immediately, actual setup happens on backend thread.
+ *
+ * @param repoPath - Absolute path to the repository
  */
-export async function startWatching(repoPath: string): Promise<void> {
-  await invoke('start_watching', { repoPath });
+export function watchRepo(repoPath: string): void {
+  currentWatchId++;
+  invoke('watch_repo', { repoPath, watchId: currentWatchId });
 }
 
 /**
- * Stop watching the current repository.
+ * Get the current watch ID (for testing/debugging).
  */
-export async function stopWatching(): Promise<void> {
-  await invoke('stop_watching');
+export function getWatchId(): number {
+  return currentWatchId;
 }

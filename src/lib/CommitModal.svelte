@@ -1,27 +1,30 @@
 <script lang="ts">
   import { X, AlertCircle, Check, GitCommitHorizontal } from 'lucide-svelte';
-  import { createCommit } from './services/git';
-  import type { FileDiff } from './types';
+  import { commit } from './services/git';
+  import { diffState } from './stores/diffState.svelte';
+  import type { FileDiffSummary } from './types';
 
   interface Props {
-    files: FileDiff[];
     repoPath: string | null;
     onCommit: () => void;
     onClose: () => void;
   }
 
-  let { files, repoPath, onCommit, onClose }: Props = $props();
+  let { repoPath, onCommit, onClose }: Props = $props();
 
   let message = $state('');
   let selectedPaths = $state<Set<string>>(new Set());
   let error = $state<string | null>(null);
   let committing = $state(false);
 
+  // Get files from diffState
+  let files = $derived(diffState.files);
+
   // Initialize with all files selected
   $effect(() => {
     const paths = new Set<string>();
     for (const file of files) {
-      const path = file.after?.path ?? file.before?.path;
+      const path = getFilePath(file);
       if (path) paths.add(path);
     }
     selectedPaths = paths;
@@ -43,18 +46,18 @@
     } else {
       const paths = new Set<string>();
       for (const file of files) {
-        const path = file.after?.path ?? file.before?.path;
+        const path = getFilePath(file);
         if (path) paths.add(path);
       }
       selectedPaths = paths;
     }
   }
 
-  function getFilePath(file: FileDiff): string {
-    return file.after?.path ?? file.before?.path ?? '';
+  function getFilePath(file: FileDiffSummary): string {
+    return file.after ?? file.before ?? '';
   }
 
-  function getFileStatus(file: FileDiff): 'added' | 'deleted' | 'modified' {
+  function getFileStatus(file: FileDiffSummary): 'added' | 'deleted' | 'modified' {
     if (!file.before) return 'added';
     if (!file.after) return 'deleted';
     return 'modified';
@@ -76,7 +79,7 @@
     committing = true;
 
     try {
-      await createCommit(Array.from(selectedPaths), message.trim(), repoPath ?? undefined);
+      await commit(Array.from(selectedPaths), message.trim(), repoPath ?? undefined);
       onCommit();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

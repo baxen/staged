@@ -25,6 +25,7 @@ tauri-plugin-log = "2"
 
 # Git integration
 git2 = "0.19"
+thiserror = "2.0"
 
 # File watching
 notify = "8.0"

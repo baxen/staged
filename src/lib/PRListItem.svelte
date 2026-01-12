@@ -39,9 +39,6 @@
   <div class="pr-meta">
     <span class="pr-author">@{pr.author}</span>
     <span class="pr-refs">{pr.base_ref} ← {pr.head_ref}</span>
-    {#if pr.additions > 0 || pr.deletions > 0}
-      <span class="pr-changes">{formatLineChanges(pr.additions, pr.deletions)}</span>
-    {/if}
   </div>
 
   <div class="pr-actions">
@@ -121,11 +118,6 @@
 
   .pr-refs {
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-  }
-
-  .pr-changes {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    color: var(--text-faint);
   }
 
   .pr-actions {
