@@ -88,18 +88,14 @@ export function addTab(
   }
 
   // Create new tab with isolated state instances
-  // State is created at module top level, then assigned to tab object
-  const newDiffState = $state(createDiffState());
-  const newCommentsState = $state(createCommentsState());
-  const newDiffSelection = $state(createDiffSelection());
-
+  // Plain objects are created - the parent windowState.tabs array is already reactive
   const tab: TabState = {
     id: repoPath,
     repoPath,
     repoName,
-    diffState: newDiffState,
-    commentsState: newCommentsState,
-    diffSelection: newDiffSelection,
+    diffState: createDiffState(),
+    commentsState: createCommentsState(),
+    diffSelection: createDiffSelection(),
   };
 
   windowState.tabs.push(tab);
@@ -153,7 +149,7 @@ export async function switchTab(index: number): Promise<void> {
  * Get the currently active tab's repo path.
  */
 export function getActiveRepoPath(): string | null {
-  return activeTab?.repoPath ?? null;
+  return getActiveTab()?.repoPath ?? null;
 }
 
 // =============================================================================
@@ -194,20 +190,15 @@ export function loadTabsFromStorage(
     try {
       const data = JSON.parse(stored);
       // Create tabs with isolated state instances
-      windowState.tabs = data.tabs.map((t: any) => {
-        const newDiffState = $state(createDiffState());
-        const newCommentsState = $state(createCommentsState());
-        const newDiffSelection = $state(createDiffSelection());
-
-        return {
-          id: t.id,
-          repoPath: t.repoPath,
-          repoName: t.repoName,
-          diffState: newDiffState,
-          commentsState: newCommentsState,
-          diffSelection: newDiffSelection,
-        };
-      });
+      // Plain objects are created - the parent windowState.tabs array is already reactive
+      windowState.tabs = data.tabs.map((t: any) => ({
+        id: t.id,
+        repoPath: t.repoPath,
+        repoName: t.repoName,
+        diffState: createDiffState(),
+        commentsState: createCommentsState(),
+        diffSelection: createDiffSelection(),
+      }));
       windowState.activeTabIndex = data.activeTabIndex;
     } catch (e) {
       console.error('Failed to load tabs from storage:', e);
