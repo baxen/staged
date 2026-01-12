@@ -442,7 +442,7 @@ fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> 
                 "open-folder",
                 "Open Folder...",
                 true,
-                Some("CmdOrCtrl+T"),
+                Some("CmdOrCtrl+Shift+T"),
             )?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "close-tab", "Close Tab", true, Some("CmdOrCtrl+W"))?,
