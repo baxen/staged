@@ -65,7 +65,12 @@
     clearComments,
     setReferenceFilesLoader,
   } from './lib/stores/comments.svelte';
-  import { repoState, initRepoState, setCurrentRepo, openRepoPicker } from './lib/stores/repoState.svelte';
+  import {
+    repoState,
+    initRepoState,
+    setCurrentRepo,
+    openRepoPicker,
+  } from './lib/stores/repoState.svelte';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -168,7 +173,7 @@
     await handleNewTab();
   }
 
-  async function handleMenuCloseTab() {
+  function handleMenuCloseTab() {
     // Close the active tab
     const activeTab = getActiveTab();
     if (!activeTab) return;
@@ -178,7 +183,17 @@
     // Close window if no tabs left
     if (windowState.tabs.length === 0) {
       const window = getCurrentWindow();
-      await window.close();
+      window.close();
+      return;
+    }
+
+    // Sync the new active tab's state to global
+    syncTabToGlobal();
+
+    // Watch the new active tab's repo (fire-and-forget)
+    const newTab = getActiveTab();
+    if (newTab) {
+      watchRepo(newTab.repoPath);
     }
   }
 
@@ -326,11 +341,16 @@
     // Load new tab state
     syncTabToGlobal();
 
-    // Watch the new tab's repo
+    // Watch the new tab's repo and initialize if needed
     const tab = getActiveTab();
     if (tab) {
       console.log(`Watching repo: ${tab.repoPath}`);
       await watchRepo(tab.repoPath);
+
+      // Initialize tab if it hasn't been loaded yet (e.g., restored from storage)
+      if (tab.diffState.currentSpec === null) {
+        await initializeNewTab(tab);
+      }
     }
   }
 

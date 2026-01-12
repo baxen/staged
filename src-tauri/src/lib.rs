@@ -406,13 +406,7 @@ fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> 
         "File",
         true,
         &[
-            &MenuItem::with_id(
-                app,
-                "open-folder",
-                "Open Folder...",
-                true,
-                Some("CmdOrCtrl+Shift+T"),
-            )?,
+            &MenuItem::with_id(app, "open-folder", "New Tab...", true, Some("CmdOrCtrl+T"))?,
             &PredefinedMenuItem::separator(app)?,
             &MenuItem::with_id(app, "close-tab", "Close Tab", true, Some("CmdOrCtrl+W"))?,
             &MenuItem::with_id(

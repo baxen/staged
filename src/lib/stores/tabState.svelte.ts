@@ -80,7 +80,7 @@ export function addTab(
   createDiffSelection: () => DiffSelection
 ): void {
   // Check if tab already exists
-  const existingIndex = windowState.tabs.findIndex(t => t.id === repoPath);
+  const existingIndex = windowState.tabs.findIndex((t) => t.id === repoPath);
   if (existingIndex !== -1) {
     // Switch to existing tab
     windowState.activeTabIndex = existingIndex;
@@ -109,7 +109,7 @@ export function addTab(
  * Closes the window if it's the last tab.
  */
 export function closeTab(tabId: string): void {
-  const index = windowState.tabs.findIndex(t => t.id === tabId);
+  const index = windowState.tabs.findIndex((t) => t.id === tabId);
   if (index === -1) return;
 
   windowState.tabs.splice(index, 1);
@@ -164,7 +164,7 @@ const STORAGE_KEY_PREFIX = 'staged-window-';
 function saveTabsToStorage(): void {
   const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
   const data = {
-    tabs: windowState.tabs.map(t => ({
+    tabs: windowState.tabs.map((t) => ({
       id: t.id,
       repoPath: t.repoPath,
       repoName: t.repoName,
