@@ -15,7 +15,7 @@
     await onSwitchTab(index);
   }
 
-  async function handleCloseTab(tabId: string, event: MouseEvent) {
+  async function handleCloseTab(tabId: string, event: MouseEvent | KeyboardEvent) {
     event.stopPropagation();
     closeTab(tabId);
 
@@ -23,6 +23,14 @@
     if (windowState.tabs.length === 0) {
       const window = getCurrentWindow();
       await window.close();
+    }
+  }
+
+  function handleCloseTabKeydown(tabId: string, event: KeyboardEvent) {
+    // Allow Enter or Space to trigger close
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      handleCloseTab(tabId, event);
     }
   }
 
@@ -43,14 +51,16 @@
         <FolderGit2 size={14} />
         <span class="tab-name">{tab.repoName}</span>
         {#if windowState.tabs.length > 1}
-          <button
+          <div
             class="close-btn"
             onclick={(e) => handleCloseTab(tab.id, e)}
+            onkeydown={(e) => handleCloseTabKeydown(tab.id, e)}
             title="Close tab"
-            type="button"
+            role="button"
+            tabindex="0"
           >
             <X size={12} />
-          </button>
+          </div>
         {/if}
       </button>
     {/each}
