@@ -13,7 +13,9 @@ use git::{
 };
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
-use tauri::{Manager, State};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
 
 // =============================================================================
@@ -383,6 +385,104 @@ fn watch_repo(repo_path: String, watch_id: u64, state: State<WatcherHandle>) {
 }
 
 // =============================================================================
+// Window Commands
+// =============================================================================
+
+/// Create a new window for the application.
+/// Returns the window label for the newly created window.
+#[tauri::command]
+fn create_window(app: AppHandle) -> Result<String, String> {
+    static WINDOW_COUNTER: AtomicUsize = AtomicUsize::new(1);
+
+    let window_id = WINDOW_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let label = format!("window-{}", window_id);
+
+    tauri::WebviewWindowBuilder::new(
+        &app,
+        &label,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("Staged")
+    .inner_size(1600.0, 1200.0)
+    .resizable(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(label)
+}
+
+/// Get the current window's label.
+#[tauri::command]
+fn get_window_label(window: tauri::Window) -> String {
+    window.label().to_string()
+}
+
+// =============================================================================
+// Menu System
+// =============================================================================
+
+/// Build the application menu bar.
+fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
+    let menu = Menu::new(app)?;
+
+    let file_menu = Submenu::with_items(
+        app,
+        "File",
+        true,
+        &[
+            &MenuItem::with_id(
+                app,
+                "new-window",
+                "New Window",
+                true,
+                Some("CmdOrCtrl+Shift+N"),
+            )?,
+            &MenuItem::with_id(
+                app,
+                "open-folder",
+                "Open Folder...",
+                true,
+                Some("CmdOrCtrl+T"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "close-tab", "Close Tab", true, Some("CmdOrCtrl+W"))?,
+            &MenuItem::with_id(
+                app,
+                "close-window",
+                "Close Window",
+                true,
+                Some("CmdOrCtrl+Shift+W"),
+            )?,
+        ],
+    )?;
+
+    menu.append(&file_menu)?;
+    Ok(menu)
+}
+
+/// Handle menu events.
+fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
+    match event.id.as_ref() {
+        "new-window" => {
+            // Emit event to frontend to show repo picker
+            let _ = app.emit("menu:new-window", ());
+        }
+        "open-folder" => {
+            let _ = app.emit("menu:open-folder", ());
+        }
+        "close-tab" => {
+            let _ = app.emit("menu:close-tab", ());
+        }
+        "close-window" => {
+            // Get all webview windows and close the first one (main window)
+            // In Tauri 2.x, we don't have get_focused_window, so we emit to frontend
+            let _ = app.emit("menu:close-window", ());
+        }
+        _ => {}
+    }
+}
+
+// =============================================================================
 // Tauri App Setup
 // =============================================================================
 
@@ -398,6 +498,15 @@ pub fn run() {
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
             app.manage(watcher);
+
+            // Build and set the menu
+            let menu = build_menu(app.handle()).map_err(|e| e.to_string())?;
+            app.set_menu(menu).map_err(|e| e.to_string())?;
+
+            // Register menu event handler
+            app.on_menu_event(move |app, event| {
+                handle_menu_event(app, event);
+            });
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -447,6 +556,9 @@ pub fn run() {
             read_json_file,
             // Watcher commands
             watch_repo,
+            // Window commands
+            create_window,
+            get_window_label,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,0 +1,223 @@
+/**
+ * Tab State Store
+ *
+ * Manages multiple repository tabs within each window.
+ * Each tab maintains isolated state for its repository (diffs, comments, selection).
+ */
+
+import { watchRepo } from '../services/statusEvents';
+import type { DiffState } from './diffState.svelte';
+import type { CommentsState } from './comments.svelte';
+import type { DiffSelection } from './diffSelection.svelte';
+
+// Re-export types for convenience
+export type { DiffState, CommentsState, DiffSelection };
+
+/**
+ * State for a single tab
+ */
+export interface TabState {
+  /** Unique identifier (repo path) */
+  id: string;
+  /** Full path to repository */
+  repoPath: string;
+  /** Display name of repository */
+  repoName: string;
+
+  // Isolated state instances per tab
+  diffState: DiffState;
+  commentsState: CommentsState;
+  diffSelection: DiffSelection;
+}
+
+/**
+ * Window-level state (contains multiple tabs)
+ */
+interface WindowTabs {
+  /** All tabs in this window */
+  tabs: TabState[];
+  /** Index of currently active tab */
+  activeTabIndex: number;
+  /** Window label (for persistence) */
+  windowLabel: string;
+}
+
+// =============================================================================
+// Reactive State
+// =============================================================================
+
+/**
+ * Window state object.
+ * Use this directly in components - it's reactive!
+ */
+export const windowState = $state<WindowTabs>({
+  tabs: [],
+  activeTabIndex: 0,
+  windowLabel: 'main',
+});
+
+/**
+ * Get the currently active tab.
+ * Returns null if no tabs exist.
+ */
+export function getActiveTab(): TabState | null {
+  return windowState.tabs[windowState.activeTabIndex] ?? null;
+}
+
+// =============================================================================
+// Tab Management Functions
+// =============================================================================
+
+/**
+ * Add a new tab to the window.
+ * If the repo is already open, switches to that tab instead.
+ */
+export function addTab(
+  repoPath: string,
+  repoName: string,
+  createDiffState: () => DiffState,
+  createCommentsState: () => CommentsState,
+  createDiffSelection: () => DiffSelection
+): void {
+  // Check if tab already exists
+  const existingIndex = windowState.tabs.findIndex(t => t.id === repoPath);
+  if (existingIndex !== -1) {
+    // Switch to existing tab
+    windowState.activeTabIndex = existingIndex;
+    return;
+  }
+
+  // Create new tab with isolated state instances
+  // State is created at module top level, then assigned to tab object
+  const newDiffState = $state(createDiffState());
+  const newCommentsState = $state(createCommentsState());
+  const newDiffSelection = $state(createDiffSelection());
+
+  const tab: TabState = {
+    id: repoPath,
+    repoPath,
+    repoName,
+    diffState: newDiffState,
+    commentsState: newCommentsState,
+    diffSelection: newDiffSelection,
+  };
+
+  windowState.tabs.push(tab);
+  windowState.activeTabIndex = windowState.tabs.length - 1;
+
+  saveTabsToStorage();
+}
+
+/**
+ * Close a tab by ID.
+ * Closes the window if it's the last tab.
+ */
+export function closeTab(tabId: string): void {
+  const index = windowState.tabs.findIndex(t => t.id === tabId);
+  if (index === -1) return;
+
+  windowState.tabs.splice(index, 1);
+
+  // Adjust active index if needed
+  if (windowState.activeTabIndex >= windowState.tabs.length) {
+    windowState.activeTabIndex = Math.max(0, windowState.tabs.length - 1);
+  }
+
+  saveTabsToStorage();
+
+  // Close window if no tabs left (will be handled by caller)
+  if (windowState.tabs.length === 0) {
+    // Window close will be handled in App.svelte
+  }
+}
+
+/**
+ * Switch to a tab by index.
+ * Also switches the file watcher to the new tab's repo.
+ */
+export async function switchTab(index: number): Promise<void> {
+  if (index < 0 || index >= windowState.tabs.length) return;
+
+  windowState.activeTabIndex = index;
+
+  // Switch file watcher to new tab's repo
+  const tab = windowState.tabs[index];
+  if (tab) {
+    await watchRepo(tab.repoPath);
+  }
+
+  saveTabsToStorage();
+}
+
+/**
+ * Get the currently active tab's repo path.
+ */
+export function getActiveRepoPath(): string | null {
+  return activeTab?.repoPath ?? null;
+}
+
+// =============================================================================
+// Persistence
+// =============================================================================
+
+const STORAGE_KEY_PREFIX = 'staged-window-';
+
+/**
+ * Save tabs to localStorage.
+ */
+function saveTabsToStorage(): void {
+  const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
+  const data = {
+    tabs: windowState.tabs.map(t => ({
+      id: t.id,
+      repoPath: t.repoPath,
+      repoName: t.repoName,
+    })),
+    activeTabIndex: windowState.activeTabIndex,
+  };
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+/**
+ * Load tabs from localStorage.
+ * Tabs are recreated with fresh state instances.
+ */
+export function loadTabsFromStorage(
+  createDiffState: () => DiffState,
+  createCommentsState: () => CommentsState,
+  createDiffSelection: () => DiffSelection
+): void {
+  const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
+  const stored = localStorage.getItem(key);
+
+  if (stored) {
+    try {
+      const data = JSON.parse(stored);
+      // Create tabs with isolated state instances
+      windowState.tabs = data.tabs.map((t: any) => {
+        const newDiffState = $state(createDiffState());
+        const newCommentsState = $state(createCommentsState());
+        const newDiffSelection = $state(createDiffSelection());
+
+        return {
+          id: t.id,
+          repoPath: t.repoPath,
+          repoName: t.repoName,
+          diffState: newDiffState,
+          commentsState: newCommentsState,
+          diffSelection: newDiffSelection,
+        };
+      });
+      windowState.activeTabIndex = data.activeTabIndex;
+    } catch (e) {
+      console.error('Failed to load tabs from storage:', e);
+    }
+  }
+}
+
+/**
+ * Set the window label (called on app mount).
+ */
+export function setWindowLabel(label: string): void {
+  windowState.windowLabel = label;
+}
