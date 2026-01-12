@@ -182,6 +182,30 @@ async fn sync_review_to_github(
         .map_err(|e| e.to_string())
 }
 
+/// Check if the working directory has uncommitted changes.
+///
+/// Returns true if there are any staged or unstaged changes that would be lost
+/// by switching branches.
+#[tauri::command(rename_all = "camelCase")]
+fn has_uncommitted_changes(repo_path: Option<String>) -> Result<bool, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::has_uncommitted_changes(path).map_err(|e| e.to_string())
+}
+
+/// Checkout a PR branch, creating a local tracking branch like "pr-123".
+///
+/// Returns error if there are uncommitted changes.
+/// Returns the name of the created/updated branch (e.g., "pr-123").
+#[tauri::command(rename_all = "camelCase")]
+fn checkout_pr_branch(
+    repo_path: Option<String>,
+    pr_number: u64,
+    base_ref: String,
+) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::checkout_pr_branch(path, pr_number, &base_ref).map_err(|e| e.to_string())
+}
+
 // =============================================================================
 // Review Commands
 // =============================================================================
@@ -369,6 +393,8 @@ pub fn run() {
             fetch_pr,
             sync_review_to_github,
             invalidate_pr_cache,
+            has_uncommitted_changes,
+            checkout_pr_branch,
             // Review commands
             get_review,
             add_comment,

@@ -5,9 +5,11 @@
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
-  import { listRefs } from './lib/services/git';
+  import PRListView from './lib/PRListView.svelte';
+  import ErrorModal from './lib/ErrorModal.svelte';
+  import { listRefs, hasUncommittedChanges, checkoutPRBranch, fetchPR } from './lib/services/git';
   import { DiffSpec, inferRefType } from './lib/types';
-  import type { DiffSpec as DiffSpecType } from './lib/types';
+  import type { DiffSpec as DiffSpecType, PullRequest } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
   import {
     preferences,
@@ -15,6 +17,8 @@
     loadSavedSyntaxTheme,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
+  import { loadPRSettings } from './lib/stores/prSettings.svelte';
+  import { switchTab } from './lib/stores/viewState.svelte';
   import {
     diffSelection,
     selectPreset,
@@ -33,9 +37,10 @@
   } from './lib/stores/diffState.svelte';
   import { loadComments, setCurrentPath, clearComments } from './lib/stores/comments.svelte';
   import { repoState, initRepoState, setCurrentRepo } from './lib/stores/repoState.svelte';
+  import { viewState } from './lib/stores/viewState.svelte';
 
-  // UI State
-  let unsubscribeWatcher: Unsubscribe | null = null;
+  // UI State (note: watcher is handled by initWatcher/watchRepo, no unsubscribe needed)
+  let errorMessage = $state<string | null>(null);
 
   // Load files and comments for current spec
   async function loadAll() {
@@ -129,53 +134,85 @@
     return branchNames[0] ?? 'main';
   }
 
-  let currentDiff = $derived(getCurrentDiff());
+  // PR Checkout Flow
+  async function handlePRCheckout(event: CustomEvent<{ pr: PullRequest }>) {
+    const { pr } = event.detail;
 
-  // Show empty state when we have a repo, finished loading, no error, but no files
+    try {
+      // Check for uncommitted changes
+      const hasChanges = await hasUncommittedChanges(repoState.currentPath ?? undefined);
+      if (hasChanges) {
+        errorMessage = 'Cannot checkout PR: you have uncommitted changes. Commit or stash them first.';
+        return;
+      }
+
+      // Checkout PR
+      const branchName = await checkoutPRBranch(pr.number, pr.base_ref, repoState.currentPath ?? undefined);
+
+      // Switch to diff view and refresh
+      switchTab('diff');
+      await handleRepoChange();
+
+      console.log(`Checked out ${branchName}`);
+    } catch (e) {
+      errorMessage = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  async function handlePRView(event: CustomEvent<{ pr: PullRequest }>) {
+    const { pr } = event.detail;
+
+    try {
+      // Fetch PR and get DiffSpec
+      const spec = await fetchPR(pr.base_ref, pr.number, repoState.currentPath ?? undefined);
+      await handleCustomDiff(spec, `PR #${pr.number}`, pr.number);
+      switchTab('diff');
+    } catch (e) {
+      errorMessage = e instanceof Error ? e.message : String(e);
+    }
+  }
+
+  // Show empty state when we have a repo, finished loading, no error, but no diffs
   let showEmptyState = $derived(
-    repoState.currentPath && !diffState.loading && !diffState.error && diffState.files.length === 0
+    repoState.currentPath &&
+      !diffState.loading &&
+      !diffState.error &&
+      diffState.files.length === 0
   );
 
-  let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
-
   // Lifecycle
-  let unregisterPreferenceShortcuts: (() => void) | null = null;
-
   onMount(() => {
     loadSavedSize();
-    unregisterPreferenceShortcuts = registerPreferenceShortcuts();
+    loadPRSettings(); // Load PR settings from localStorage
+    registerPreferenceShortcuts();
 
     (async () => {
       await loadSavedSyntaxTheme();
 
-      // Initialize watcher listener once (handles all repos)
-      unsubscribeWatcher = await initWatcher(handleFilesChanged);
+      // Initialize repo state (loads recent repos, tries current directory)
+      const hasRepo = await initRepoState();
 
-      // Initialize repo state (resolves canonical path, adds to recent repos)
-      const repoPath = await initRepoState();
-
-      if (repoPath) {
-        watchRepo(repoPath);
+      if (hasRepo && repoState.currentPath) {
+        // Initialize watcher
+        watchRepo(repoState.currentPath);
 
         // Load refs for autocomplete and detect default branch
         try {
-          const refs = await listRefs(repoPath);
+          const refs = await listRefs(repoState.currentPath);
           const defaultBranch = detectDefaultBranch(refs);
           setDefaultBranch(defaultBranch);
-
-          await loadAll();
         } catch (e) {
-          // Initial load failed - not a git repo or other error
-          diffState.loading = false;
           console.error('Failed to load refs:', e);
         }
+
+        resetDiffSelection();
+        await loadAll();
       }
     })();
   });
 
   onDestroy(() => {
-    unregisterPreferenceShortcuts?.();
-    unsubscribeWatcher?.();
+    // Watcher cleanup is handled automatically by the watcher system
   });
 </script>
 
@@ -184,46 +221,53 @@
     onPresetSelect={handlePresetSelect}
     onCustomDiff={handleCustomDiff}
     onRepoChange={handleRepoChange}
-    onCommit={handleFilesChanged}
   />
 
-  <div class="app-container">
-    {#if showEmptyState}
-      <!-- Full-width empty state -->
-      <section class="main-content full-width">
-        <EmptyState />
-      </section>
-    {:else}
-      <section class="main-content">
-        {#if diffState.loading}
-          <div class="loading-state">
-            <p>Loading...</p>
-          </div>
-        {:else if diffState.error}
-          <div class="error-state">
-            <AlertCircle size={18} />
-            <p class="error-message">{diffState.error}</p>
-          </div>
-        {:else}
-          <DiffViewer
-            diff={currentDiff}
-            sizeBase={preferences.sizeBase}
-            syntaxThemeVersion={preferences.syntaxThemeVersion}
-            loading={diffState.loadingFile !== null}
+  {#if viewState.activeTab === 'diff'}
+    <div class="app-container">
+      {#if !repoState.currentPath || showEmptyState}
+        <!-- Full-width empty state -->
+        <section class="main-content full-width">
+          <EmptyState />
+        </section>
+      {:else}
+        <section class="main-content">
+          {#if diffState.loading}
+            <div class="loading-state">
+              <p>Loading...</p>
+            </div>
+          {:else if diffState.error}
+            <div class="error-state">
+              <AlertCircle size={24} />
+              <p>Error loading diff:</p>
+              <p class="error-message">{diffState.error}</p>
+            </div>
+          {:else}
+            <DiffViewer
+              diff={getCurrentDiff()}
+              sizeBase={preferences.sizeBase}
+              syntaxThemeVersion={preferences.syntaxThemeVersion}
+            />
+          {/if}
+        </section>
+        <aside class="sidebar">
+          <Sidebar
+            files={diffState.files}
+            onFileSelect={selectFile}
+            selectedFile={diffState.selectedFile}
           />
-        {/if}
-      </section>
-      <aside class="sidebar">
-        <Sidebar
-          files={diffState.files}
-          loading={diffState.loading}
-          onFileSelect={selectFile}
-          selectedFile={diffState.selectedFile}
-          {isWorkingTree}
-        />
-      </aside>
-    {/if}
-  </div>
+        </aside>
+      {/if}
+    </div>
+  {:else if viewState.activeTab === 'pull-requests'}
+    <div class="pr-view-container">
+      <PRListView on:checkout={handlePRCheckout} on:view={handlePRView} />
+    </div>
+  {/if}
+
+  {#if errorMessage}
+    <ErrorModal message={errorMessage} onClose={() => (errorMessage = null)} />
+  {/if}
 </main>
 
 <style>
@@ -267,6 +311,10 @@
     flex-direction: column;
   }
 
+  .full-width {
+    width: 100%;
+  }
+
   .loading-state {
     display: flex;
     align-items: center;
@@ -278,16 +326,26 @@
 
   .error-state {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 8px;
     height: 100%;
-    color: var(--text-muted);
+    color: var(--status-deleted);
+    font-size: var(--size-lg);
+    gap: 8px;
   }
 
   .error-message {
-    font-size: var(--size-md);
-    margin: 0;
+    font-family: monospace;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+  }
+
+  .pr-view-container {
+    flex: 1;
+    overflow: hidden;
+    padding: 0 8px 8px 8px;
+    display: flex;
+    flex-direction: column;
   }
 </style>

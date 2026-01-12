@@ -1,3 +1,4 @@
+mod checkout;
 mod cli;
 mod commit;
 mod diff;
@@ -5,6 +6,7 @@ pub mod github;
 mod refs;
 mod types;
 
+pub use checkout::{checkout_pr_branch, has_uncommitted_changes};
 pub use cli::GitError;
 pub use commit::commit;
 pub use diff::{get_file_diff, list_diff_files};
