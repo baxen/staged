@@ -5,10 +5,18 @@
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
+  import FileSearchModal from './lib/FileSearchModal.svelte';
   import { listRefs } from './lib/services/git';
   import { DiffSpec, inferRefType } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
+  import { referenceFileAsDiff } from './lib/diffUtils';
+  import {
+    addReferenceFile,
+    clearReferenceFiles,
+    getReferenceFile,
+    getReferenceFilePaths,
+  } from './lib/stores/referenceFiles.svelte';
   import {
     preferences,
     loadSavedSize,
@@ -36,6 +44,7 @@
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
+  let showFileSearch = $state(false);
 
   // Load files and comments for current spec
   async function loadAll() {
@@ -63,6 +72,7 @@
   // Preset selection
   async function handlePresetSelect(preset: DiffPreset) {
     resetState();
+    clearReferenceFiles();
     selectPreset(preset);
     await loadAll();
   }
@@ -70,6 +80,7 @@
   // Custom diff selection (from DiffSelectorModal or PRSelectorModal)
   async function handleCustomDiff(spec: DiffSpecType, label?: string, prNumber?: number) {
     resetState();
+    clearReferenceFiles();
     selectCustomDiff(spec, label, prNumber);
     await loadAll();
   }
@@ -78,6 +89,7 @@
   async function handleRepoChange() {
     resetState();
     clearComments();
+    clearReferenceFiles();
 
     if (repoState.currentPath) {
       watchRepo(repoState.currentPath);
@@ -129,7 +141,48 @@
     return branchNames[0] ?? 'main';
   }
 
-  let currentDiff = $derived(getCurrentDiff());
+  // Get current diff - check reference files first
+  let currentDiff = $derived.by(() => {
+    const selectedPath = diffState.selectedFile;
+    if (!selectedPath) return getCurrentDiff();
+
+    // Check if it's a reference file
+    const refFile = getReferenceFile(selectedPath);
+    if (refFile) {
+      return referenceFileAsDiff(refFile.path, refFile.content);
+    }
+
+    // Otherwise, get the regular diff
+    return getCurrentDiff();
+  });
+
+  // Handle file selection from file search modal
+  async function handleReferenceFileSelect(path: string) {
+    try {
+      // Determine which ref to use for loading the file
+      // Use the "head" ref of the current diff
+      const headRef = diffSelection.spec.head;
+      const refName = headRef.type === 'WorkingTree' ? 'HEAD' : headRef.value;
+      await addReferenceFile(refName, path, repoState.currentPath ?? undefined);
+      showFileSearch = false;
+      // Select the newly added file
+      selectFile(path);
+    } catch (e) {
+      console.error('Failed to add reference file:', e);
+      // Keep modal open so user sees the error
+    }
+  }
+
+  // Handle keyboard shortcuts for file search
+  function handleKeydown(event: KeyboardEvent) {
+    // Cmd+O (Mac) or Ctrl+O (Windows/Linux) to open file search
+    if ((event.metaKey || event.ctrlKey) && event.key === 'o') {
+      event.preventDefault();
+      if (repoState.currentPath && !diffState.error) {
+        showFileSearch = true;
+      }
+    }
+  }
 
   // Show empty state when we have a repo, finished loading, no error, but no files
   let showEmptyState = $derived(
@@ -144,6 +197,7 @@
   onMount(() => {
     loadSavedSize();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
+    window.addEventListener('keydown', handleKeydown);
 
     (async () => {
       await loadSavedSyntaxTheme();
@@ -175,6 +229,7 @@
 
   onDestroy(() => {
     unregisterPreferenceShortcuts?.();
+    window.removeEventListener('keydown', handleKeydown);
     unsubscribeWatcher?.();
   });
 </script>
@@ -220,11 +275,28 @@
           onFileSelect={selectFile}
           selectedFile={diffState.selectedFile}
           {isWorkingTree}
+          onAddReferenceFile={() => (showFileSearch = true)}
         />
       </aside>
     {/if}
   </div>
 </main>
+
+{#if showFileSearch}
+  {@const headRef = diffSelection.spec.head}
+  <FileSearchModal
+    refName={headRef.type === 'WorkingTree' ? 'HEAD' : headRef.value}
+    repoPath={repoState.currentPath ?? undefined}
+    existingPaths={[
+      ...diffState.files
+        .map((f) => f.after?.toString() ?? f.before?.toString() ?? '')
+        .filter(Boolean),
+      ...getReferenceFilePaths(),
+    ]}
+    onSelect={handleReferenceFileSelect}
+    onClose={() => (showFileSearch = false)}
+  />
+{/if}
 
 <style>
   :global(body) {

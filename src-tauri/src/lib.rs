@@ -8,7 +8,7 @@ mod themes;
 mod watcher;
 
 use git::{
-    DiffId, DiffSpec, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
+    DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
 };
 use review::{Comment, Edit, NewComment, NewEdit, Review};
@@ -36,6 +36,35 @@ fn make_diff_id(repo: &Path, spec: &DiffSpec) -> Result<DiffId, String> {
     };
 
     Ok(DiffId::new(resolve(&spec.base)?, resolve(&spec.head)?))
+}
+
+// =============================================================================
+// File Browsing Commands
+// =============================================================================
+
+/// Search for files matching a query in the repository.
+///
+/// Uses fuzzy matching - returns up to `limit` matches sorted by relevance.
+#[tauri::command(rename_all = "camelCase")]
+fn search_files(
+    repo_path: Option<String>,
+    ref_name: String,
+    query: String,
+    limit: Option<usize>,
+) -> Result<Vec<String>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::search_files(path, &ref_name, &query, limit.unwrap_or(20)).map_err(|e| e.to_string())
+}
+
+/// Get the content of a file at a specific ref.
+#[tauri::command(rename_all = "camelCase")]
+fn get_file_at_ref(
+    repo_path: Option<String>,
+    ref_name: String,
+    path: String,
+) -> Result<File, String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    git::get_file_at_ref(repo, &ref_name, &path).map_err(|e| e.to_string())
 }
 
 // =============================================================================
@@ -356,6 +385,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            // File browsing commands
+            search_files,
+            get_file_at_ref,
             // Git commands
             get_repo_root,
             list_refs,
