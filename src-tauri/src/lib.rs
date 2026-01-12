@@ -3,7 +3,6 @@
 //! This module provides the bridge between the frontend and the git/github modules.
 
 pub mod git;
-mod refresh;
 pub mod review;
 mod themes;
 mod watcher;
@@ -12,11 +11,10 @@ use git::{
     DiffId, DiffSpec, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
 };
-use refresh::RefreshController;
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use tauri::{Manager, State};
+use watcher::WatcherHandle;
 
 // =============================================================================
 // Helpers
@@ -324,31 +322,11 @@ fn read_json_file(path: String) -> Result<String, String> {
 // Watcher Commands
 // =============================================================================
 
-/// State container for the refresh controller.
-struct RefreshControllerState(Mutex<Option<RefreshController>>);
-
+/// Switch to watching a new repository.
+/// Fire-and-forget: returns immediately, actual setup happens on background thread.
 #[tauri::command(rename_all = "camelCase")]
-async fn start_watching(
-    repo_path: String,
-    state: State<'_, RefreshControllerState>,
-) -> Result<(), String> {
-    let controller = state.0.lock().unwrap();
-    if let Some(ref ctrl) = *controller {
-        ctrl.start(PathBuf::from(repo_path))
-    } else {
-        Err("Refresh controller not initialized".to_string())
-    }
-}
-
-#[tauri::command]
-fn stop_watching(state: State<RefreshControllerState>) -> Result<(), String> {
-    let controller = state.0.lock().unwrap();
-    if let Some(ref ctrl) = *controller {
-        ctrl.stop();
-        Ok(())
-    } else {
-        Err("Refresh controller not initialized".to_string())
-    }
+fn watch_repo(repo_path: String, watch_id: u64, state: State<WatcherHandle>) {
+    state.switch(PathBuf::from(repo_path), watch_id);
 }
 
 // =============================================================================
@@ -360,15 +338,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .manage(RefreshControllerState(Mutex::new(None)))
         .setup(|app| {
             // Initialize the review store with app data directory
             review::init_store(app.handle()).map_err(|e| e.0)?;
 
-            // Initialize the refresh controller with the app handle
-            let controller = RefreshController::new(app.handle().clone());
-            let state: State<RefreshControllerState> = app.state();
-            *state.0.lock().unwrap() = Some(controller);
+            // Initialize the watcher handle (spawns background thread)
+            let watcher = WatcherHandle::new(app.handle().clone());
+            app.manage(watcher);
 
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -412,8 +388,7 @@ pub fn run() {
             install_theme,
             read_json_file,
             // Watcher commands
-            start_watching,
-            stop_watching,
+            watch_repo,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

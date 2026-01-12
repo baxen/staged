@@ -8,12 +8,7 @@
   import { listRefs } from './lib/services/git';
   import { DiffSpec, inferRefType } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
-  import {
-    subscribeToFileChanges,
-    startWatching,
-    stopWatching,
-    type Unsubscribe,
-  } from './lib/services/statusEvents';
+  import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
   import {
     preferences,
     loadSavedSize,
@@ -40,7 +35,7 @@
   import { repoState, initRepoState, setCurrentRepo } from './lib/stores/repoState.svelte';
 
   // UI State
-  let unsubscribe: Unsubscribe | null = null;
+  let unsubscribeWatcher: Unsubscribe | null = null;
 
   // Load files and comments for current spec
   async function loadAll() {
@@ -81,15 +76,12 @@
 
   // Repo change - reload everything
   async function handleRepoChange() {
-    // Stop watching old repo
-    await stopWatching().catch(() => {});
-    unsubscribe?.();
-
-    // Reset state
     resetState();
     clearComments();
 
     if (repoState.currentPath) {
+      watchRepo(repoState.currentPath);
+
       // Load refs and detect default branch for new repo
       try {
         const refs = await listRefs(repoState.currentPath);
@@ -115,14 +107,6 @@
       // Reset diff selection to "Uncommitted" and load
       resetDiffSelection();
       await loadAll();
-
-      // Start watching new repo
-      try {
-        await startWatching(repoState.currentPath);
-        unsubscribe = await subscribeToFileChanges(handleFilesChanged);
-      } catch (e) {
-        console.error('Failed to start watcher:', e);
-      }
     }
   }
 
@@ -162,10 +146,15 @@
     (async () => {
       await loadSavedSyntaxTheme();
 
+      // Initialize watcher listener once (handles all repos)
+      unsubscribeWatcher = await initWatcher(handleFilesChanged);
+
       // Initialize repo state (resolves canonical path, adds to recent repos)
       const repoPath = await initRepoState();
 
       if (repoPath) {
+        watchRepo(repoPath);
+
         // Load refs for autocomplete and detect default branch
         try {
           const refs = await listRefs(repoPath);
@@ -173,14 +162,6 @@
           setDefaultBranch(defaultBranch);
 
           await loadAll();
-
-          // Start file watcher (only if refs loaded successfully)
-          try {
-            await startWatching(repoPath);
-            unsubscribe = await subscribeToFileChanges(handleFilesChanged);
-          } catch (e) {
-            console.error('Failed to start watcher:', e);
-          }
         } catch (e) {
           // Initial load failed - not a git repo or other error
           diffState.loading = false;
@@ -192,8 +173,7 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', handlePreferenceKeydown);
-    unsubscribe?.();
-    stopWatching().catch(() => {});
+    unsubscribeWatcher?.();
   });
 </script>
 
