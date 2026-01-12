@@ -292,6 +292,30 @@ fn clear_review(repo_path: Option<String>, spec: DiffSpec) -> Result<(), String>
     store.delete(&id).map_err(|e| e.0)
 }
 
+#[tauri::command(rename_all = "camelCase")]
+fn add_reference_file(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    path: String,
+) -> Result<(), String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(repo, &spec)?;
+    store.add_reference_file(&id, &path).map_err(|e| e.0)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn remove_reference_file(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    path: String,
+) -> Result<(), String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(repo, &spec)?;
+    store.remove_reference_file(&id, &path).map_err(|e| e.0)
+}
+
 // =============================================================================
 // Theme Commands
 // =============================================================================
@@ -411,6 +435,8 @@ pub fn run() {
             record_edit,
             export_review_markdown,
             clear_review,
+            add_reference_file,
+            remove_reference_file,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

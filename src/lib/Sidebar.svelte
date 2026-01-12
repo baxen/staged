@@ -29,7 +29,7 @@
   } from 'lucide-svelte';
   import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
-  import { referenceFilesState, removeReferenceFile } from './stores/referenceFiles.svelte';
+  import { referenceFilesState } from './stores/referenceFiles.svelte';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -60,6 +60,8 @@
     isWorkingTree?: boolean;
     /** Called when user wants to add a reference file */
     onAddReferenceFile?: () => void;
+    /** Called when user wants to remove a reference file */
+    onRemoveReferenceFile?: (path: string) => void;
   }
 
   let {
@@ -69,6 +71,7 @@
     selectedFile = null,
     isWorkingTree = true,
     onAddReferenceFile,
+    onRemoveReferenceFile,
   }: Props = $props();
 
   let collapsedDirs = $state(new Set<string>());
@@ -559,7 +562,7 @@
                   class="remove-btn"
                   onclick={(e) => {
                     e.stopPropagation();
-                    removeReferenceFile(refFile.path);
+                    onRemoveReferenceFile?.(refFile.path);
                   }}
                   onkeydown={(e) => e.key === 'Enter' && e.stopPropagation()}
                   title="Remove reference file"

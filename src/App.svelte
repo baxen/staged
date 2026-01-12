@@ -13,6 +13,8 @@
   import { referenceFileAsDiff } from './lib/diffUtils';
   import {
     addReferenceFile,
+    removeReferenceFile,
+    loadReferenceFiles,
     clearReferenceFiles,
     getReferenceFile,
     getReferenceFilePaths,
@@ -23,6 +25,7 @@
     loadSavedSyntaxTheme,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
+  import { registerShortcut } from './lib/services/keyboard';
   import {
     diffSelection,
     selectPreset,
@@ -39,7 +42,12 @@
     selectFile,
     resetState,
   } from './lib/stores/diffState.svelte';
-  import { loadComments, setCurrentPath, clearComments } from './lib/stores/comments.svelte';
+  import {
+    loadComments,
+    setCurrentPath,
+    clearComments,
+    setReferenceFilesLoader,
+  } from './lib/stores/comments.svelte';
   import { repoState, initRepoState, setCurrentRepo } from './lib/stores/repoState.svelte';
 
   // UI State
@@ -142,6 +150,11 @@
   }
 
   // Get current diff - check reference files first
+  // Check if current selection is a reference file
+  let isCurrentFileReference = $derived(
+    diffState.selectedFile !== null && getReferenceFile(diffState.selectedFile) !== undefined
+  );
+
   let currentDiff = $derived.by(() => {
     const selectedPath = diffState.selectedFile;
     if (!selectedPath) return getCurrentDiff();
@@ -163,7 +176,7 @@
       // Use the "head" ref of the current diff
       const headRef = diffSelection.spec.head;
       const refName = headRef.type === 'WorkingTree' ? 'HEAD' : headRef.value;
-      await addReferenceFile(refName, path, repoState.currentPath ?? undefined);
+      await addReferenceFile(refName, path, diffSelection.spec, repoState.currentPath ?? undefined);
       showFileSearch = false;
       // Select the newly added file
       selectFile(path);
@@ -173,15 +186,9 @@
     }
   }
 
-  // Handle keyboard shortcuts for file search
-  function handleKeydown(event: KeyboardEvent) {
-    // Cmd+O (Mac) or Ctrl+O (Windows/Linux) to open file search
-    if ((event.metaKey || event.ctrlKey) && event.key === 'o') {
-      event.preventDefault();
-      if (repoState.currentPath && !diffState.error) {
-        showFileSearch = true;
-      }
-    }
+  // Handle removing a reference file
+  function handleRemoveReferenceFile(path: string) {
+    removeReferenceFile(path, diffSelection.spec, repoState.currentPath ?? undefined);
   }
 
   // Show empty state when we have a repo, finished loading, no error, but no files
@@ -193,11 +200,28 @@
 
   // Lifecycle
   let unregisterPreferenceShortcuts: (() => void) | null = null;
+  let unregisterFileSearchShortcut: (() => void) | null = null;
 
   onMount(() => {
     loadSavedSize();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
-    window.addEventListener('keydown', handleKeydown);
+
+    // Register Cmd+O to open file search
+    unregisterFileSearchShortcut = registerShortcut({
+      id: 'open-file-search',
+      keys: ['o'],
+      modifiers: { meta: true },
+      description: 'Open file search',
+      category: 'files',
+      handler: () => {
+        if (repoState.currentPath && !diffState.error) {
+          showFileSearch = true;
+        }
+      },
+    });
+
+    // Register the reference files loader so comments store can trigger it
+    setReferenceFilesLoader(loadReferenceFiles);
 
     (async () => {
       await loadSavedSyntaxTheme();
@@ -229,7 +253,7 @@
 
   onDestroy(() => {
     unregisterPreferenceShortcuts?.();
-    window.removeEventListener('keydown', handleKeydown);
+    unregisterFileSearchShortcut?.();
     unsubscribeWatcher?.();
   });
 </script>
@@ -265,6 +289,7 @@
             sizeBase={preferences.sizeBase}
             syntaxThemeVersion={preferences.syntaxThemeVersion}
             loading={diffState.loadingFile !== null}
+            isReferenceFile={isCurrentFileReference}
           />
         {/if}
       </section>
@@ -276,6 +301,7 @@
           selectedFile={diffState.selectedFile}
           {isWorkingTree}
           onAddReferenceFile={() => (showFileSearch = true)}
+          onRemoveReferenceFile={handleRemoveReferenceFile}
         />
       </aside>
     {/if}

@@ -5,11 +5,13 @@
  * These are files from the repository that weren't changed in the diff
  * but the user wants to view/comment on during the review.
  *
- * Reference files are session-scoped - they're cleared when the diff spec changes.
+ * Reference file paths are persisted in the review DB, but content is
+ * fetched fresh when needed (to avoid storing large file contents).
  */
 
-import type { File, FileContent } from '../types';
+import type { FileContent, DiffSpec } from '../types';
 import { getFileAtRef } from '../services/files';
+import { addReferenceFilePath, removeReferenceFilePath } from '../services/review';
 
 // =============================================================================
 // State
@@ -23,7 +25,7 @@ export interface ReferenceFile {
 }
 
 interface ReferenceFilesState {
-  /** Pinned reference files */
+  /** Pinned reference files with loaded content */
   files: ReferenceFile[];
   /** Loading state for file fetching */
   loading: boolean;
@@ -68,14 +70,17 @@ export function getReferenceFilePaths(): string[] {
 
 /**
  * Add a reference file by loading it from the repository.
+ * Also persists the path to the review DB.
  *
  * @param refName - The git ref to load the file from (e.g., HEAD, branch name, SHA)
  * @param path - The file path in the repository
+ * @param spec - The current diff spec (for persistence)
  * @param repoPath - Optional repository path
  */
 export async function addReferenceFile(
   refName: string,
   path: string,
+  spec: DiffSpec,
   repoPath?: string
 ): Promise<void> {
   // Don't add duplicates
@@ -87,11 +92,15 @@ export async function addReferenceFile(
   referenceFilesState.error = null;
 
   try {
+    // Load file content
     const file = await getFileAtRef(refName, path, repoPath);
     referenceFilesState.files = [
       ...referenceFilesState.files,
       { path: file.path, content: file.content },
     ];
+
+    // Persist the path to the review DB
+    await addReferenceFilePath(spec, path, repoPath);
   } catch (e) {
     referenceFilesState.error = e instanceof Error ? e.message : String(e);
     throw e; // Re-throw so caller can handle
@@ -102,9 +111,71 @@ export async function addReferenceFile(
 
 /**
  * Remove a reference file.
+ * Also removes the path from the review DB.
+ *
+ * @param path - The file path to remove
+ * @param spec - The current diff spec (for persistence)
+ * @param repoPath - Optional repository path
  */
-export function removeReferenceFile(path: string): void {
+export async function removeReferenceFile(
+  path: string,
+  spec: DiffSpec,
+  repoPath?: string
+): Promise<void> {
   referenceFilesState.files = referenceFilesState.files.filter((f) => f.path !== path);
+
+  // Remove from the review DB (fire and forget, don't block UI)
+  removeReferenceFilePath(spec, path, repoPath).catch((e) => {
+    console.error('Failed to remove reference file from DB:', e);
+  });
+}
+
+/**
+ * Load reference files from persisted paths.
+ * Called when loading a review to restore previously added reference files.
+ *
+ * @param paths - The persisted reference file paths
+ * @param refName - The git ref to load files from
+ * @param repoPath - Optional repository path
+ */
+export async function loadReferenceFiles(
+  paths: string[],
+  refName: string,
+  repoPath?: string
+): Promise<void> {
+  if (paths.length === 0) {
+    referenceFilesState.files = [];
+    return;
+  }
+
+  referenceFilesState.loading = true;
+  referenceFilesState.error = null;
+
+  try {
+    // Load all files in parallel
+    const results = await Promise.allSettled(
+      paths.map(async (path) => {
+        const file = await getFileAtRef(refName, path, repoPath);
+        return { path: file.path, content: file.content };
+      })
+    );
+
+    // Collect successfully loaded files
+    const loadedFiles: ReferenceFile[] = [];
+    for (const result of results) {
+      if (result.status === 'fulfilled') {
+        loadedFiles.push(result.value);
+      } else {
+        console.warn('Failed to load reference file:', result.reason);
+      }
+    }
+
+    referenceFilesState.files = loadedFiles;
+  } catch (e) {
+    referenceFilesState.error = e instanceof Error ? e.message : String(e);
+  } finally {
+    referenceFilesState.loading = false;
+  }
 }
 
 /**
