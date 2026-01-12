@@ -3,6 +3,7 @@
   import {
     ChevronDown,
     Palette,
+    Keyboard,
     MessageSquare,
     Copy,
     Check,
@@ -21,6 +22,7 @@
   import CommitModal from './CommitModal.svelte';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
   import GitHubSyncModal from './GitHubSyncModal.svelte';
+  import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import { DiffSpec } from './types';
   import type { DiffSpec as DiffSpecType } from './types';
   import {
@@ -42,6 +44,7 @@
     removeFromRecent,
     type RepoEntry,
   } from './stores/repoState.svelte';
+  import { registerShortcut } from './services/keyboard';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
@@ -62,6 +65,7 @@
   let showCommitModal = $state(false);
   let showThemeModal = $state(false);
   let showSyncModal = $state(false);
+  let showShortcutsModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
@@ -180,27 +184,22 @@
     }
   }
 
-  // Keyboard shortcut handler for copy comments
-  function handleKeydown(event: KeyboardEvent) {
-    // Skip if focus is in an input or textarea (e.g., comment dialog is open)
-    const target = event.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
-      return;
-    }
-
-    // 'c' to copy all comments
-    if (event.key === 'c' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-      if (commentsState.comments.length > 0) {
-        event.preventDefault();
-        handleCopyComments();
-      }
-    }
-  }
-
+  // Register keyboard shortcuts
   onMount(() => {
-    document.addEventListener('keydown', handleKeydown);
+    const unregister = registerShortcut({
+      id: 'copy-comments',
+      keys: ['c'],
+      description: 'Copy all comments',
+      category: 'comments',
+      handler: () => {
+        if (commentsState.comments.length > 0) {
+          handleCopyComments();
+        }
+      },
+    });
+
     return () => {
-      document.removeEventListener('keydown', handleKeydown);
+      unregister();
     };
   });
 </script>
@@ -347,6 +346,21 @@
 
   <!-- Right section: Settings -->
   <div class="section section-right">
+    <div class="shortcuts-picker">
+      <button
+        class="icon-btn shortcuts-btn"
+        onclick={() => (showShortcutsModal = !showShortcutsModal)}
+        class:open={showShortcutsModal}
+        title="Keyboard shortcuts"
+      >
+        <Keyboard size={14} />
+      </button>
+
+      {#if showShortcutsModal}
+        <KeyboardShortcutsModal onClose={() => (showShortcutsModal = false)} />
+      {/if}
+    </div>
+
     <div class="theme-picker">
       <button
         class="icon-btn theme-btn"
@@ -734,6 +748,23 @@
 
   .icon-btn.sync-btn:hover {
     color: var(--ui-accent);
+  }
+
+  /* Shortcuts picker */
+  .shortcuts-picker {
+    position: relative;
+  }
+
+  .shortcuts-btn {
+    padding: 5px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+  }
+
+  .shortcuts-btn:hover,
+  .shortcuts-btn.open {
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   /* Theme picker */

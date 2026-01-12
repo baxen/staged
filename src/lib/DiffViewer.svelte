@@ -43,7 +43,7 @@
     isBinaryDiff,
     getTextLines,
   } from './diffUtils';
-  import { setupKeyboardNav } from './diffKeyboard';
+  import { setupDiffKeyboardNav } from './diffKeyboard';
   import { diffSelection } from './stores/diffSelection.svelte';
   import { diffState, clearScrollTarget } from './stores/diffState.svelte';
   import { DiffSpec } from './types';
@@ -1133,8 +1133,13 @@
       highlighterReady = true;
     });
 
-    const cleanupKeyboardNav = setupKeyboardNav({
-      getScrollTarget: () => afterPane,
+    const cleanupKeyboardNav = setupDiffKeyboardNav({
+      getChangedAlignments: () => changedAlignments,
+      scrollToRow: (row, side) => scrollController.scrollToRow(row, side),
+      scrollBy: (deltaY) => scrollController.scrollBy('after', deltaY),
+      getCurrentScrollY: () => scrollController.afterScrollY,
+      getLineHeight: () => scrollController.getDimensions('after').lineHeight,
+      getViewportHeight: () => scrollController.getDimensions('after').viewportHeight,
     });
 
     document.addEventListener('copy', handleCopy);

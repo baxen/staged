@@ -13,7 +13,7 @@
     preferences,
     loadSavedSize,
     loadSavedSyntaxTheme,
-    handlePreferenceKeydown,
+    registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
   import {
     diffSelection,
@@ -139,9 +139,11 @@
   let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
 
   // Lifecycle
+  let unregisterPreferenceShortcuts: (() => void) | null = null;
+
   onMount(() => {
     loadSavedSize();
-    window.addEventListener('keydown', handlePreferenceKeydown);
+    unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     (async () => {
       await loadSavedSyntaxTheme();
@@ -172,7 +174,7 @@
   });
 
   onDestroy(() => {
-    window.removeEventListener('keydown', handlePreferenceKeydown);
+    unregisterPreferenceShortcuts?.();
     unsubscribeWatcher?.();
   });
 </script>

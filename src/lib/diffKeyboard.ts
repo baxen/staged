@@ -1,45 +1,180 @@
 /**
  * Diff Keyboard Navigation
  *
- * Keyboard shortcuts for scrolling the diff viewer.
+ * Registers keyboard shortcuts for navigating the diff viewer:
+ * - J/Down: Jump to next diff hunk
+ * - K/Up: Jump to previous diff hunk
+ * - Ctrl+N: Scroll down
+ * - Ctrl+P: Scroll up
  */
 
-export interface KeyboardNavConfig {
-  scrollAmount: number; // pixels per keypress
-  getScrollTarget: () => HTMLElement | null;
+import type { Alignment } from './types';
+import { registerShortcuts, type Shortcut } from './services/keyboard';
+
+export interface DiffNavConfig {
+  scrollAmount: number; // pixels per keypress for smooth scroll
+  getChangedAlignments: () => Array<{ alignment: Alignment; index: number }>;
+  scrollToRow: (row: number, side: 'before' | 'after') => void;
+  scrollBy: (deltaY: number) => void;
+  getCurrentScrollY: () => number;
+  getLineHeight: () => number;
+  getViewportHeight: () => number;
 }
 
-const DEFAULT_CONFIG: KeyboardNavConfig = {
+const DEFAULT_CONFIG: DiffNavConfig = {
   scrollAmount: 60, // ~3 lines
-  getScrollTarget: () => null,
+  getChangedAlignments: () => [],
+  scrollToRow: () => {},
+  scrollBy: () => {},
+  getCurrentScrollY: () => 0,
+  getLineHeight: () => 20,
+  getViewportHeight: () => 400,
 };
 
 /**
- * Set up keyboard navigation handlers.
- * Returns a cleanup function.
+ * Find the index of the current hunk based on scroll position.
+ * Returns the index of the hunk that's currently visible (or just passed).
  */
-export function setupKeyboardNav(config: Partial<KeyboardNavConfig> = {}): () => void {
-  const cfg = { ...DEFAULT_CONFIG, ...config };
+function findCurrentHunkIndex(config: DiffNavConfig): number {
+  const alignments = config.getChangedAlignments();
+  if (alignments.length === 0) return -1;
 
-  function handleKeydown(e: KeyboardEvent) {
-    const target = cfg.getScrollTarget();
-    if (!target) return;
+  const scrollY = config.getCurrentScrollY();
+  const lineHeight = config.getLineHeight();
+  const viewportHeight = config.getViewportHeight();
 
-    if (e.ctrlKey && (e.key === 'p' || e.key === 'P')) {
-      e.preventDefault();
-      target.scrollTop -= cfg.scrollAmount;
-    } else if (e.ctrlKey && (e.key === 'n' || e.key === 'N')) {
-      e.preventDefault();
-      target.scrollTop += cfg.scrollAmount;
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-      const eventTarget = e.target as HTMLElement;
-      if (eventTarget.tagName === 'INPUT' || eventTarget.tagName === 'TEXTAREA') return;
+  // Consider a hunk "current" if its start is within the top third of the viewport
+  const anchorY = scrollY + viewportHeight / 3;
+  const anchorRow = Math.floor(anchorY / lineHeight);
 
-      e.preventDefault();
-      target.scrollTop += e.key === 'ArrowUp' ? -cfg.scrollAmount : cfg.scrollAmount;
+  // Find the last hunk whose start is at or before the anchor
+  let currentIndex = -1;
+  for (let i = 0; i < alignments.length; i++) {
+    const hunkStart = alignments[i].alignment.after.start;
+    if (hunkStart <= anchorRow) {
+      currentIndex = i;
+    } else {
+      break;
     }
   }
 
-  window.addEventListener('keydown', handleKeydown);
-  return () => window.removeEventListener('keydown', handleKeydown);
+  return currentIndex;
+}
+
+/**
+ * Navigate to the next diff hunk.
+ */
+function goToNextHunk(config: DiffNavConfig): boolean {
+  const alignments = config.getChangedAlignments();
+  if (alignments.length === 0) return false;
+
+  const currentIndex = findCurrentHunkIndex(config);
+  const nextIndex = currentIndex + 1;
+
+  if (nextIndex < alignments.length) {
+    const nextHunk = alignments[nextIndex].alignment;
+    config.scrollToRow(nextHunk.after.start, 'after');
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Navigate to the previous diff hunk.
+ */
+function goToPreviousHunk(config: DiffNavConfig): boolean {
+  const alignments = config.getChangedAlignments();
+  if (alignments.length === 0) return false;
+
+  const currentIndex = findCurrentHunkIndex(config);
+
+  // If we're past the first hunk, go to current or previous
+  // We need to check if we're at the very start of the current hunk
+  if (currentIndex >= 0) {
+    const currentHunk = alignments[currentIndex].alignment;
+    const scrollY = config.getCurrentScrollY();
+    const lineHeight = config.getLineHeight();
+    const viewportHeight = config.getViewportHeight();
+    const anchorY = scrollY + viewportHeight / 3;
+    const anchorRow = Math.floor(anchorY / lineHeight);
+
+    // If we're more than 2 lines into the current hunk, go to its start
+    if (anchorRow > currentHunk.after.start + 2) {
+      config.scrollToRow(currentHunk.after.start, 'after');
+      return true;
+    }
+
+    // Otherwise go to previous hunk
+    if (currentIndex > 0) {
+      const prevHunk = alignments[currentIndex - 1].alignment;
+      config.scrollToRow(prevHunk.after.start, 'after');
+      return true;
+    }
+  }
+
+  // If at or before first hunk, go to first hunk
+  if (alignments.length > 0) {
+    config.scrollToRow(alignments[0].alignment.after.start, 'after');
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Set up diff navigation keyboard shortcuts.
+ * Returns a cleanup function.
+ */
+export function setupDiffKeyboardNav(config: Partial<DiffNavConfig> = {}): () => void {
+  const cfg = { ...DEFAULT_CONFIG, ...config };
+
+  const shortcuts: Shortcut[] = [
+    {
+      id: 'diff-next-hunk-j',
+      keys: ['j'],
+      description: 'Next diff hunk',
+      category: 'navigation',
+      handler: () => goToNextHunk(cfg),
+    },
+    {
+      id: 'diff-next-hunk-down',
+      keys: ['ArrowDown'],
+      description: 'Next diff hunk',
+      category: 'navigation',
+      handler: () => goToNextHunk(cfg),
+    },
+    {
+      id: 'diff-prev-hunk-k',
+      keys: ['k'],
+      description: 'Previous diff hunk',
+      category: 'navigation',
+      handler: () => goToPreviousHunk(cfg),
+    },
+    {
+      id: 'diff-prev-hunk-up',
+      keys: ['ArrowUp'],
+      description: 'Previous diff hunk',
+      category: 'navigation',
+      handler: () => goToPreviousHunk(cfg),
+    },
+    {
+      id: 'diff-scroll-down',
+      keys: ['n'],
+      modifiers: { ctrl: true },
+      description: 'Scroll down',
+      category: 'navigation',
+      handler: () => cfg.scrollBy(cfg.scrollAmount),
+    },
+    {
+      id: 'diff-scroll-up',
+      keys: ['p'],
+      modifiers: { ctrl: true },
+      description: 'Scroll up',
+      category: 'navigation',
+      handler: () => cfg.scrollBy(-cfg.scrollAmount),
+    },
+  ];
+
+  return registerShortcuts(shortcuts);
 }

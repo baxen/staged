@@ -7,7 +7,7 @@
   Review state comes from the shared commentsState store (single source of truth).
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import {
     MessageSquare,
     CircleFadingArrowUp,
@@ -25,6 +25,7 @@
     FolderTree,
   } from 'lucide-svelte';
   import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
+  import { registerShortcuts } from './services/keyboard';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -244,31 +245,68 @@
     return singleLine.slice(0, maxLength).trim() + '...';
   }
 
-  /**
-   * Handle CMD+C to copy selected file path to clipboard.
-   */
-  function handleKeydown(event: KeyboardEvent) {
-    // CMD+C (Mac) or Ctrl+C (Windows/Linux) to copy selected file path
-    if ((event.metaKey || event.ctrlKey) && event.key === 'c') {
-      // Only handle if there's a selected file and no text selection
-      const selection = window.getSelection();
-      const hasTextSelection = selection && selection.toString().length > 0;
-
-      if (selectedFile && !hasTextSelection) {
-        event.preventDefault();
-        navigator.clipboard.writeText(selectedFile).catch((err) => {
-          console.error('Failed to copy file path:', err);
-        });
-      }
-    }
+  // Get flat list of file paths in display order
+  function getFilePaths(): string[] {
+    return files.map((f) => getFilePath(f));
   }
 
-  onMount(() => {
-    window.addEventListener('keydown', handleKeydown);
-  });
+  // Navigate to next file
+  function goToNextFile(): void {
+    const paths = getFilePaths();
+    if (paths.length === 0) return;
 
-  onDestroy(() => {
-    window.removeEventListener('keydown', handleKeydown);
+    const currentIndex = selectedFile ? paths.indexOf(selectedFile) : -1;
+    const nextIndex = currentIndex < paths.length - 1 ? currentIndex + 1 : 0;
+    onFileSelect?.(paths[nextIndex]);
+  }
+
+  // Navigate to previous file
+  function goToPrevFile(): void {
+    const paths = getFilePaths();
+    if (paths.length === 0) return;
+
+    const currentIndex = selectedFile ? paths.indexOf(selectedFile) : 0;
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : paths.length - 1;
+    onFileSelect?.(paths[prevIndex]);
+  }
+
+  // Register keyboard shortcuts
+
+  onMount(() => {
+    const unregister = registerShortcuts([
+      {
+        id: 'copy-file-path',
+        keys: ['c'],
+        modifiers: { meta: true, shift: true },
+        description: 'Copy file path',
+        category: 'files',
+        handler: () => {
+          if (selectedFile) {
+            navigator.clipboard.writeText(selectedFile).catch((err) => {
+              console.error('Failed to copy file path:', err);
+            });
+          }
+        },
+      },
+      {
+        id: 'next-file',
+        keys: [']'],
+        modifiers: { meta: true },
+        description: 'Next file',
+        category: 'files',
+        handler: goToNextFile,
+      },
+      {
+        id: 'prev-file',
+        keys: ['['],
+        modifiers: { meta: true },
+        description: 'Previous file',
+        category: 'files',
+        handler: goToPrevFile,
+      },
+    ]);
+
+    return () => unregister();
   });
 </script>
 
