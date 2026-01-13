@@ -396,6 +396,60 @@ fn get_window_label(window: tauri::Window) -> String {
 }
 
 // =============================================================================
+// Plugin Commands
+// =============================================================================
+
+/// Universal plugin command dispatcher
+///
+/// Routes commands to plugins at runtime. This is the single Tauri command
+/// that enables all plugin functionality.
+#[tauri::command(rename_all = "camelCase")]
+async fn plugin_invoke(
+    plugin_name: String,
+    command_name: String,
+    payload: String,
+    state: State<'_, PluginManager>,
+) -> Result<String, String> {
+    log::debug!(
+        "Invoking plugin command: {}:{}",
+        plugin_name,
+        command_name
+    );
+
+    state.invoke_command(&plugin_name, &command_name, &payload)
+}
+
+/// List all available plugin commands
+#[tauri::command]
+fn list_plugin_commands(state: State<'_, PluginManager>) -> Result<Vec<String>, String> {
+    state.list_commands()
+}
+
+/// Get plugin manifests for frontend
+#[tauri::command]
+fn list_plugins(state: State<'_, PluginManager>) -> Vec<serde_json::Value> {
+    state
+        .plugin_names()
+        .iter()
+        .filter_map(|name| {
+            state.get_manifest(name).map(|manifest| {
+                serde_json::json!({
+                    "name": manifest.plugin.name,
+                    "version": manifest.plugin.version,
+                    "description": manifest.plugin.description,
+                    "frontend": manifest.frontend.as_ref().map(|f| {
+                        serde_json::json!({
+                            "script": f.script,
+                            "style": f.style,
+                        })
+                    })
+                })
+            })
+        })
+        .collect()
+}
+
+// =============================================================================
 // Menu System
 // =============================================================================
 
@@ -471,9 +525,16 @@ pub fn run() {
                         match plugin_manager.load_plugin(plugin_dir, manifest) {
                             Ok(_) => {
                                 log::info!("Loaded plugin: {}", plugin_name);
+
                                 // Initialize the plugin
                                 if let Err(e) = plugin_manager.initialize_plugin(&plugin_name, app.handle()) {
                                     log::error!("Failed to initialize plugin {}: {}", plugin_name, e);
+                                    continue;
+                                }
+
+                                // Register plugin commands
+                                if let Err(e) = plugin_manager.register_plugin_commands(&plugin_name) {
+                                    log::error!("Failed to register commands for plugin {}: {}", plugin_name, e);
                                 }
                             }
                             Err(e) => {
@@ -549,6 +610,10 @@ pub fn run() {
             watch_repo,
             // Window commands
             get_window_label,
+            // Plugin commands
+            plugin_invoke,
+            list_plugin_commands,
+            list_plugins,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

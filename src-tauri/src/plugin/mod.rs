@@ -5,8 +5,10 @@
 //! binaries (.dylib/.so/.dll) with TOML manifests.
 
 pub mod api;
+pub mod commands;
 
 use api::*;
+use commands::{PluginCommandRegistry, CommandRegistrarImpl};
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -103,6 +105,7 @@ struct LoadedPlugin {
 pub struct PluginManager {
     plugins: HashMap<String, LoadedPlugin>,
     plugins_dir: PathBuf,
+    command_registry: PluginCommandRegistry,
 }
 
 impl PluginManager {
@@ -124,6 +127,7 @@ impl PluginManager {
         Ok(Self {
             plugins: HashMap::new(),
             plugins_dir,
+            command_registry: PluginCommandRegistry::new(),
         })
     }
 
@@ -354,6 +358,43 @@ impl PluginManager {
     /// Get a plugin's manifest
     pub fn get_manifest(&self, plugin_name: &str) -> Option<&PluginManifest> {
         self.plugins.get(plugin_name).map(|p| &p.manifest)
+    }
+
+    /// Register commands for a plugin
+    pub fn register_plugin_commands(&mut self, plugin_name: &str) -> Result<(), String> {
+        let plugin = self.plugins.get(plugin_name)
+            .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
+
+        log::info!("Registering commands for plugin {}", plugin_name);
+
+        // Create a registrar for this plugin
+        let mut registrar_impl = self.command_registry.create_registrar(plugin_name.to_string());
+        let mut registrar = registrar_impl.as_c_struct();
+
+        // Call the plugin's register_commands function
+        let result = (plugin.vtable.register_commands)(&mut registrar as *mut _);
+
+        if result != 0 {
+            return Err(format!("Plugin command registration failed with code {}", result));
+        }
+
+        log::info!("Successfully registered commands for plugin {}", plugin_name);
+        Ok(())
+    }
+
+    /// Invoke a plugin command
+    pub fn invoke_command(
+        &self,
+        plugin_name: &str,
+        command_name: &str,
+        payload: &str,
+    ) -> Result<String, String> {
+        self.command_registry.invoke_command(plugin_name, command_name, payload)
+    }
+
+    /// Get all registered commands
+    pub fn list_commands(&self) -> Result<Vec<String>, String> {
+        self.command_registry.list_commands()
     }
 
     /// Shutdown all plugins
