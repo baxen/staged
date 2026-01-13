@@ -345,7 +345,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: calc(var(--size-sm) - 1px);
   }
 
@@ -380,7 +380,7 @@
     display: inline-block;
     padding: 2px 5px;
     margin: 0 4px;
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: calc(var(--size-xs) - 1px);
     background: var(--bg-chrome);
     border: 1px solid var(--border-subtle);

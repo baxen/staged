@@ -41,6 +41,7 @@
     loadSavedSyntaxTheme,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
+  import { initFonts } from './lib/stores/fonts.svelte';
   import { registerShortcut } from './lib/services/keyboard';
   import {
     diffSelection,
@@ -432,6 +433,7 @@
 
   onMount(() => {
     loadSavedSize();
+    initFonts(); // Load saved font preferences and discover system fonts
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     // Register Cmd+O to open file search
@@ -578,7 +580,7 @@
   :global(body) {
     margin: 0;
     padding: 0;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+    font-family: var(--font-family);
     background-color: var(--bg-chrome);
     color: var(--text-primary);
   }

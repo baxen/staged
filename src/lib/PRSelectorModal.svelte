@@ -375,7 +375,7 @@
   }
 
   .setup-hint code {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-xs);
     color: var(--ui-warning);
   }
@@ -405,7 +405,7 @@
   }
 
   .setup-steps code {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-xs);
     background: var(--bg-hover);
     padding: 2px 6px;
@@ -530,7 +530,7 @@
   }
 
   .pr-number {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
     font-size: var(--size-sm);
     font-weight: 600;
     color: var(--ui-accent);
@@ -567,7 +567,7 @@
   }
 
   .pr-refs {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-family: var(--font-mono);
   }
 
   .no-results {
