@@ -449,6 +449,42 @@ fn list_plugins(state: State<'_, PluginManager>) -> Vec<serde_json::Value> {
         .collect()
 }
 
+/// Get a plugin asset file URL
+///
+/// Serves plugin frontend assets (JS/CSS) from the plugin directory.
+/// Returns a file:// URL that the frontend can use to load the asset.
+#[tauri::command(rename_all = "camelCase")]
+fn get_plugin_asset(
+    plugin_name: String,
+    asset_path: String,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+
+    // Get plugin directory
+    let plugins_dir = dirs::config_dir()
+        .ok_or_else(|| "Could not determine config directory".to_string())?
+        .join("staged")
+        .join("plugins")
+        .join(&plugin_name);
+
+    // Construct full asset path
+    let asset_full_path = plugins_dir.join(&asset_path);
+
+    // Security: Ensure the asset path doesn't escape the plugin directory
+    if !asset_full_path.starts_with(&plugins_dir) {
+        return Err("Invalid asset path: path traversal detected".to_string());
+    }
+
+    // Check if file exists
+    if !asset_full_path.exists() {
+        return Err(format!("Asset not found: {}", asset_path));
+    }
+
+    // Return file:// URL
+    let url = format!("file://{}", asset_full_path.to_string_lossy());
+    Ok(url)
+}
+
 // =============================================================================
 // Menu System
 // =============================================================================
@@ -614,6 +650,7 @@ pub fn run() {
             plugin_invoke,
             list_plugin_commands,
             list_plugins,
+            get_plugin_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

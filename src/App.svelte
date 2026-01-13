@@ -71,6 +71,7 @@
     setCurrentRepo,
     openRepoPicker,
   } from './lib/stores/repoState.svelte';
+  import { pluginSystem } from './lib/services/plugins';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -78,6 +79,9 @@
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
+  let pluginModalVisible = $state(false);
+  let pluginModalComponent: any = $state(null);
+  let pluginModalProps = $state({});
 
   // Load files and comments for current spec
   async function loadAll() {
@@ -454,6 +458,20 @@
     (async () => {
       await loadSavedSyntaxTheme();
 
+      // Initialize plugin system
+      try {
+        await pluginSystem.initialize();
+
+        // Subscribe to plugin modal state changes
+        pluginSystem.onModalStateChange((state) => {
+          pluginModalVisible = state.visible;
+          pluginModalComponent = state.component;
+          pluginModalProps = state.props;
+        });
+      } catch (e) {
+        console.error('Failed to initialize plugin system:', e);
+      }
+
       // Get window label and initialize tab state
       const label = await getWindowLabel();
       setWindowLabel(label);
@@ -574,6 +592,14 @@
   />
 {/if}
 
+{#if pluginModalVisible && pluginModalComponent}
+  <div class="plugin-modal-backdrop" onclick={() => pluginSystem.closeModal()}>
+    <div class="plugin-modal-container" onclick={(e) => e.stopPropagation()}>
+      <svelte:component this={pluginModalComponent} {...pluginModalProps} />
+    </div>
+  </div>
+{/if}
+
 <style>
   :global(body) {
     margin: 0;
@@ -637,5 +663,27 @@
   .error-message {
     font-size: var(--size-md);
     margin: 0;
+  }
+
+  .plugin-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .plugin-modal-container {
+    max-width: 90vw;
+    max-height: 90vh;
+    overflow: auto;
+    background-color: var(--bg-chrome);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
   }
 </style>
