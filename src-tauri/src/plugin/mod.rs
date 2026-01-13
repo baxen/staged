@@ -8,11 +8,13 @@ pub mod api;
 pub mod commands;
 pub mod events;
 pub mod menus;
+pub mod permissions;
 
 use api::*;
 use commands::{PluginCommandRegistry, CommandRegistrarImpl};
 use events::{EventDispatcher, EventSubscriberImpl};
 use menus::{MenuRegistry, MenuRegistrarImpl};
+use permissions::PermissionChecker;
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -115,6 +117,7 @@ pub struct PluginManager {
     command_registry: PluginCommandRegistry,
     event_dispatcher: EventDispatcher,
     menu_registry: MenuRegistry,
+    permission_checker: PermissionChecker,
 }
 
 impl PluginManager {
@@ -139,6 +142,7 @@ impl PluginManager {
             command_registry: PluginCommandRegistry::new(),
             event_dispatcher: EventDispatcher::new(),
             menu_registry: MenuRegistry::new(),
+            permission_checker: PermissionChecker::new(),
         })
     }
 
@@ -204,8 +208,14 @@ impl PluginManager {
             return Err(format!("Plugin {} is already loaded", plugin_name));
         }
 
+        // Validate permissions
+        self.permission_checker.validate_manifest(&manifest)?;
+
         // Validate compatibility
         self.validate_compatibility(&manifest)?;
+
+        // Register permissions
+        self.permission_checker.register_plugin(manifest.clone());
 
         // Construct full path to binary
         let lib_path = plugin_dir.join(&manifest.binary.path);
