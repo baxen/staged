@@ -6,6 +6,7 @@ pub mod git;
 pub mod review;
 mod themes;
 mod watcher;
+mod plugin;
 
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
+use plugin::PluginManager;
 
 // =============================================================================
 // Helpers
@@ -455,6 +457,38 @@ pub fn run() {
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
             app.manage(watcher);
+
+            // Initialize plugin system
+            let mut plugin_manager = PluginManager::new()
+                .map_err(|e| format!("Failed to create plugin manager: {}", e))?;
+
+            // Discover and load plugins
+            match plugin_manager.discover_plugins() {
+                Ok(discovered) => {
+                    log::info!("Discovered {} plugin(s)", discovered.len());
+                    for (plugin_dir, manifest) in discovered {
+                        let plugin_name = manifest.plugin.name.clone();
+                        match plugin_manager.load_plugin(plugin_dir, manifest) {
+                            Ok(_) => {
+                                log::info!("Loaded plugin: {}", plugin_name);
+                                // Initialize the plugin
+                                if let Err(e) = plugin_manager.initialize_plugin(&plugin_name, app.handle()) {
+                                    log::error!("Failed to initialize plugin {}: {}", plugin_name, e);
+                                }
+                            }
+                            Err(e) => {
+                                log::error!("Failed to load plugin {}: {}", plugin_name, e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to discover plugins: {}", e);
+                }
+            }
+
+            // Store plugin manager as managed state
+            app.manage(plugin_manager);
 
             // Build and set the menu
             let menu = build_menu(app.handle()).map_err(|e| e.to_string())?;
