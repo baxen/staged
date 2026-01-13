@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
-use plugin::PluginManager;
+use plugin::{PluginManager, PluginEvent};
 
 // =============================================================================
 // Helpers
@@ -130,10 +130,20 @@ fn commit(
     repo_path: Option<String>,
     paths: Vec<String>,
     message: String,
+    plugin_manager: State<'_, PluginManager>,
 ) -> Result<String, String> {
     let path = get_repo_path(repo_path.as_deref());
-    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    git::commit(path, &paths, &message).map_err(|e| e.to_string())
+    let paths_vec: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let sha = git::commit(path, &paths_vec, &message).map_err(|e| e.to_string())?;
+
+    // Emit commit event to plugins
+    plugin_manager.emit_event(&PluginEvent::Commit {
+        sha: sha.clone(),
+        message: message.clone(),
+        repo_path: path.to_string_lossy().to_string(),
+    });
+
+    Ok(sha)
 }
 
 // =============================================================================
@@ -288,11 +298,23 @@ fn export_review_markdown(repo_path: Option<String>, spec: DiffSpec) -> Result<S
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn clear_review(repo_path: Option<String>, spec: DiffSpec) -> Result<(), String> {
+fn clear_review(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    plugin_manager: State<'_, PluginManager>,
+) -> Result<(), String> {
     let path = get_repo_path(repo_path.as_deref());
     let store = review::get_store().map_err(|e| e.0)?;
     let id = make_diff_id(path, &spec)?;
-    store.delete(&id).map_err(|e| e.0)
+    store.delete(&id).map_err(|e| e.0)?;
+
+    // Emit review completed event to plugins
+    plugin_manager.emit_event(&PluginEvent::ReviewCompleted {
+        diff_id: format!("{}..{}", id.before, id.after),
+        repo_path: path.to_string_lossy().to_string(),
+    });
+
+    Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -572,12 +594,25 @@ pub fn run() {
                                 if let Err(e) = plugin_manager.register_plugin_commands(&plugin_name) {
                                     log::error!("Failed to register commands for plugin {}: {}", plugin_name, e);
                                 }
+
+                                // Register plugin menus
+                                if let Err(e) = plugin_manager.register_plugin_menus(&plugin_name) {
+                                    log::error!("Failed to register menus for plugin {}: {}", plugin_name, e);
+                                }
+
+                                // Subscribe plugin to events
+                                if let Err(e) = plugin_manager.subscribe_plugin_events(&plugin_name) {
+                                    log::error!("Failed to subscribe plugin {} to events: {}", plugin_name, e);
+                                }
                             }
                             Err(e) => {
                                 log::error!("Failed to load plugin {}: {}", plugin_name, e);
                             }
                         }
                     }
+
+                    // Emit startup event after all plugins initialized
+                    plugin_manager.emit_event(&PluginEvent::Startup);
                 }
                 Err(e) => {
                     log::error!("Failed to discover plugins: {}", e);

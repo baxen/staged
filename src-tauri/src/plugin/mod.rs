@@ -6,15 +6,22 @@
 
 pub mod api;
 pub mod commands;
+pub mod events;
+pub mod menus;
 
 use api::*;
 use commands::{PluginCommandRegistry, CommandRegistrarImpl};
+use events::{EventDispatcher, EventSubscriberImpl};
+use menus::{MenuRegistry, MenuRegistrarImpl};
 use libloading::{Library, Symbol};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::ffi::CString;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
+
+// Re-export for use in lib.rs
+pub use events::PluginEvent;
 
 /// Plugin manifest structure (loaded from plugin.toml)
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -106,6 +113,8 @@ pub struct PluginManager {
     plugins: HashMap<String, LoadedPlugin>,
     plugins_dir: PathBuf,
     command_registry: PluginCommandRegistry,
+    event_dispatcher: EventDispatcher,
+    menu_registry: MenuRegistry,
 }
 
 impl PluginManager {
@@ -128,6 +137,8 @@ impl PluginManager {
             plugins: HashMap::new(),
             plugins_dir,
             command_registry: PluginCommandRegistry::new(),
+            event_dispatcher: EventDispatcher::new(),
+            menu_registry: MenuRegistry::new(),
         })
     }
 
@@ -397,8 +408,61 @@ impl PluginManager {
         self.command_registry.list_commands()
     }
 
+    /// Register menu items for a plugin
+    pub fn register_plugin_menus(&mut self, plugin_name: &str) -> Result<(), String> {
+        let plugin = self.plugins.get(plugin_name)
+            .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
+
+        log::info!("Registering menus for plugin {}", plugin_name);
+
+        let mut registrar_impl = self.menu_registry.create_registrar(plugin_name.to_string());
+        let mut registrar = registrar_impl.as_c_struct();
+
+        let result = (plugin.vtable.register_menus)(&mut registrar as *mut _);
+
+        if result != 0 {
+            return Err(format!("Plugin menu registration failed with code {}", result));
+        }
+
+        log::info!("Successfully registered menus for plugin {}", plugin_name);
+        Ok(())
+    }
+
+    /// Subscribe plugin to events
+    pub fn subscribe_plugin_events(&mut self, plugin_name: &str) -> Result<(), String> {
+        let plugin = self.plugins.get(plugin_name)
+            .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
+
+        log::info!("Subscribing {} to events", plugin_name);
+
+        let mut subscriber_impl = self.event_dispatcher.create_subscriber(plugin_name.to_string());
+        let mut subscriber = subscriber_impl.as_c_struct();
+
+        let result = (plugin.vtable.subscribe_events)(&mut subscriber as *mut _);
+
+        if result != 0 {
+            return Err(format!("Plugin event subscription failed with code {}", result));
+        }
+
+        log::info!("Successfully subscribed {} to events", plugin_name);
+        Ok(())
+    }
+
+    /// Emit an event to all subscribed plugins
+    pub fn emit_event(&self, event: &PluginEvent) {
+        self.event_dispatcher.emit(event);
+    }
+
+    /// Get all registered menu items
+    pub fn get_menu_items(&self) -> Result<Vec<menus::PluginMenuItem>, String> {
+        self.menu_registry.get_items()
+    }
+
     /// Shutdown all plugins
     pub fn shutdown_all(&mut self) {
+        // Emit shutdown event
+        self.emit_event(&PluginEvent::Shutdown);
+
         for (name, plugin) in &self.plugins {
             log::info!("Shutting down plugin {}", name);
             let result = (plugin.vtable.shutdown)();
