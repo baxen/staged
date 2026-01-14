@@ -139,9 +139,16 @@
 
       const promptText = `Review the following code changes and address the comments:\n\n${markdown}`;
 
-      // Open the Builder Bot plugin modal with pre-filled comments
+      // Prepare PR context if available
+      const prContext = diffSelection.prNumber ? {
+        prNumber: diffSelection.prNumber,
+        repoPath: repoPath,
+      } : undefined;
+
+      // Open the Builder Bot plugin modal with pre-filled comments and PR context
       pluginSystem.showModal('builder-bot:main', {
         initialPrompt: promptText,
+        prContext,
       });
     } catch (e) {
       console.error('Failed to create task from comments:', e);
