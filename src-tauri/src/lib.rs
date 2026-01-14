@@ -6,6 +6,7 @@ pub mod git;
 pub mod review;
 mod themes;
 mod watcher;
+mod plugin;
 
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
@@ -16,6 +17,7 @@ use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
+use plugin::{PluginManager, PluginEvent};
 
 // =============================================================================
 // Helpers
@@ -128,10 +130,20 @@ fn commit(
     repo_path: Option<String>,
     paths: Vec<String>,
     message: String,
+    plugin_manager: State<'_, PluginManager>,
 ) -> Result<String, String> {
     let path = get_repo_path(repo_path.as_deref());
-    let paths: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
-    git::commit(path, &paths, &message).map_err(|e| e.to_string())
+    let paths_vec: Vec<PathBuf> = paths.into_iter().map(PathBuf::from).collect();
+    let sha = git::commit(path, &paths_vec, &message).map_err(|e| e.to_string())?;
+
+    // Emit commit event to plugins
+    plugin_manager.emit_event(&PluginEvent::Commit {
+        sha: sha.clone(),
+        message: message.clone(),
+        repo_path: path.to_string_lossy().to_string(),
+    });
+
+    Ok(sha)
 }
 
 // =============================================================================
@@ -286,11 +298,23 @@ fn export_review_markdown(repo_path: Option<String>, spec: DiffSpec) -> Result<S
 }
 
 #[tauri::command(rename_all = "camelCase")]
-fn clear_review(repo_path: Option<String>, spec: DiffSpec) -> Result<(), String> {
+fn clear_review(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    plugin_manager: State<'_, PluginManager>,
+) -> Result<(), String> {
     let path = get_repo_path(repo_path.as_deref());
     let store = review::get_store().map_err(|e| e.0)?;
     let id = make_diff_id(path, &spec)?;
-    store.delete(&id).map_err(|e| e.0)
+    store.delete(&id).map_err(|e| e.0)?;
+
+    // Emit review completed event to plugins
+    plugin_manager.emit_event(&PluginEvent::ReviewCompleted {
+        diff_id: format!("{}..{}", id.before, id.after),
+        repo_path: path.to_string_lossy().to_string(),
+    });
+
+    Ok(())
 }
 
 #[tauri::command(rename_all = "camelCase")]
@@ -394,6 +418,137 @@ fn get_window_label(window: tauri::Window) -> String {
 }
 
 // =============================================================================
+// Plugin Commands
+// =============================================================================
+
+/// Universal plugin command dispatcher
+///
+/// Routes commands to plugins at runtime. This is the single Tauri command
+/// that enables all plugin functionality.
+#[tauri::command(rename_all = "camelCase")]
+async fn plugin_invoke(
+    plugin_name: String,
+    command_name: String,
+    payload: String,
+    state: State<'_, PluginManager>,
+) -> Result<String, String> {
+    log::debug!(
+        "Invoking plugin command: {}:{}",
+        plugin_name,
+        command_name
+    );
+
+    state.invoke_command(&plugin_name, &command_name, &payload)
+}
+
+/// List all available plugin commands
+#[tauri::command]
+fn list_plugin_commands(state: State<'_, PluginManager>) -> Result<Vec<String>, String> {
+    state.list_commands()
+}
+
+/// Get plugin manifests for frontend
+#[tauri::command]
+fn list_plugins(state: State<'_, PluginManager>) -> Vec<serde_json::Value> {
+    state
+        .plugin_names()
+        .iter()
+        .filter_map(|name| {
+            state.get_manifest(name).map(|manifest| {
+                serde_json::json!({
+                    "name": manifest.plugin.name,
+                    "version": manifest.plugin.version,
+                    "description": manifest.plugin.description,
+                    "author": manifest.plugin.author,
+                    "license": manifest.plugin.license,
+                    "frontend": manifest.frontend.as_ref().map(|f| {
+                        serde_json::json!({
+                            "script": f.script,
+                            "style": f.style,
+                        })
+                    })
+                })
+            })
+        })
+        .collect()
+}
+
+/// Get a plugin asset file URL
+///
+/// Serves plugin frontend assets (JS/CSS) from the plugin directory.
+/// Returns a file:// URL that the frontend can use to load the asset.
+#[tauri::command(rename_all = "camelCase")]
+fn get_plugin_asset(
+    plugin_name: String,
+    asset_path: String,
+) -> Result<String, String> {
+    use std::path::PathBuf;
+
+    // Get plugin directory
+    let plugins_dir = dirs::config_dir()
+        .ok_or_else(|| "Could not determine config directory".to_string())?
+        .join("staged")
+        .join("plugins")
+        .join(&plugin_name);
+
+    // Construct full asset path
+    let asset_full_path = plugins_dir.join(&asset_path);
+
+    // Security: Ensure the asset path doesn't escape the plugin directory
+    if !asset_full_path.starts_with(&plugins_dir) {
+        return Err("Invalid asset path: path traversal detected".to_string());
+    }
+
+    // Check if file exists
+    if !asset_full_path.exists() {
+        return Err(format!("Asset not found: {}", asset_path));
+    }
+
+    // Read file content and return as data URL
+    let content = std::fs::read(&asset_full_path)
+        .map_err(|e| format!("Failed to read asset: {}", e))?;
+
+    // Determine MIME type based on extension
+    let mime_type = if asset_path.ends_with(".js") {
+        "application/javascript"
+    } else if asset_path.ends_with(".css") {
+        "text/css"
+    } else {
+        "application/octet-stream"
+    };
+
+    // Return as data URL
+    let base64 = base64_encode(&content);
+    Ok(format!("data:{};base64,{}", mime_type, base64))
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+
+    for chunk in data.chunks(3) {
+        let b1 = chunk[0];
+        let b2 = chunk.get(1).copied().unwrap_or(0);
+        let b3 = chunk.get(2).copied().unwrap_or(0);
+
+        result.push(CHARS[(b1 >> 2) as usize] as char);
+        result.push(CHARS[(((b1 & 0x03) << 4) | (b2 >> 4)) as usize] as char);
+        result.push(if chunk.len() > 1 {
+            CHARS[(((b2 & 0x0f) << 2) | (b3 >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        result.push(if chunk.len() > 2 {
+            CHARS[(b3 & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+
+    result
+}
+
+// =============================================================================
 // Menu System
 // =============================================================================
 
@@ -416,10 +571,23 @@ fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> 
                 true,
                 Some("CmdOrCtrl+Shift+W"),
             )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "plugin-settings", "Plugin Settings...", true, Some("CmdOrCtrl+,"))?,
+        ],
+    )?;
+
+    let tools_menu = Submenu::with_items(
+        app,
+        "Tools",
+        true,
+        &[
+            &MenuItem::with_id(app, "builder-bot", "Builder Bot...", true, Some("CmdOrCtrl+Shift+B"))?,
+            &MenuItem::with_id(app, "test-plugin", "Test Plugin...", true, Some("CmdOrCtrl+Shift+T"))?,
         ],
     )?;
 
     menu.append(&file_menu)?;
+    menu.append(&tools_menu)?;
     Ok(menu)
 }
 
@@ -434,6 +602,15 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
         }
         "close-window" => {
             let _ = app.emit("menu:close-window", ());
+        }
+        "plugin-settings" => {
+            let _ = app.emit("menu:plugin-settings", ());
+        }
+        "builder-bot" => {
+            let _ = app.emit("menu:builder-bot", ());
+        }
+        "test-plugin" => {
+            let _ = app.emit("menu:test-plugin", ());
         }
         _ => {}
     }
@@ -455,6 +632,65 @@ pub fn run() {
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
             app.manage(watcher);
+
+            // Initialize plugin system
+            let mut plugin_manager = PluginManager::new()
+                .map_err(|e| format!("Failed to create plugin manager: {}", e))?;
+
+            // Discover and load plugins
+            println!("[Plugin System] Starting plugin discovery...");
+            match plugin_manager.discover_plugins() {
+                Ok(discovered) => {
+                    println!("[Plugin System] Discovered {} plugin(s)", discovered.len());
+                    for (plugin_dir, manifest) in discovered {
+                        let plugin_name = manifest.plugin.name.clone();
+                        println!("[Plugin System] Loading plugin: {}", plugin_name);
+                        match plugin_manager.load_plugin(plugin_dir, manifest) {
+                            Ok(_) => {
+                                println!("[Plugin System] ✓ Loaded plugin: {}", plugin_name);
+
+                                // Initialize the plugin
+                                println!("[Plugin System] Initializing plugin: {}", plugin_name);
+                                if let Err(e) = plugin_manager.initialize_plugin(&plugin_name, app.handle()) {
+                                    eprintln!("[Plugin System] ✗ Failed to initialize plugin {}: {}", plugin_name, e);
+                                    continue;
+                                }
+                                println!("[Plugin System] ✓ Initialized plugin: {}", plugin_name);
+
+                                // Register plugin commands
+                                if let Err(e) = plugin_manager.register_plugin_commands(&plugin_name) {
+                                    eprintln!("[Plugin System] ✗ Failed to register commands for plugin {}: {}", plugin_name, e);
+                                } else {
+                                    println!("[Plugin System] ✓ Registered commands for plugin: {}", plugin_name);
+                                }
+
+                                // Register plugin menus
+                                if let Err(e) = plugin_manager.register_plugin_menus(&plugin_name) {
+                                    eprintln!("[Plugin System] ✗ Failed to register menus for plugin {}: {}", plugin_name, e);
+                                }
+
+                                // Subscribe plugin to events
+                                if let Err(e) = plugin_manager.subscribe_plugin_events(&plugin_name) {
+                                    eprintln!("[Plugin System] ✗ Failed to subscribe plugin {} to events: {}", plugin_name, e);
+                                }
+                            }
+                            Err(e) => {
+                                eprintln!("[Plugin System] ✗ Failed to load plugin {}: {}", plugin_name, e);
+                            }
+                        }
+                    }
+
+                    // Emit startup event after all plugins initialized
+                    plugin_manager.emit_event(&PluginEvent::Startup);
+                    println!("[Plugin System] Plugin system initialized, startup event emitted");
+                }
+                Err(e) => {
+                    eprintln!("[Plugin System] ✗ Failed to discover plugins: {}", e);
+                }
+            }
+
+            // Store plugin manager as managed state
+            app.manage(plugin_manager);
 
             // Build and set the menu
             let menu = build_menu(app.handle()).map_err(|e| e.to_string())?;
@@ -515,6 +751,11 @@ pub fn run() {
             watch_repo,
             // Window commands
             get_window_label,
+            // Plugin commands
+            plugin_invoke,
+            list_plugin_commands,
+            list_plugins,
+            get_plugin_asset,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

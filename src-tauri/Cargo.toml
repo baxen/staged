@@ -46,6 +46,11 @@ reqwest = { version = "0.13.1", features = ["json"] }
 tokio = { version = "1.49.0", features = ["sync"] }
 open = "5"
 
+# Plugin system
+libloading = "0.8"
+toml = "0.8"
+glob = "0.3"
+
 [[bin]]
 name = "debug_diff"
 path = "src/bin/debug_diff.rs"
