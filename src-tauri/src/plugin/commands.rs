@@ -179,9 +179,23 @@ pub struct CommandRegistrarImpl {
     plugin_name: String,
 }
 
+// Thread-local storage for the current registrar
+thread_local! {
+    static CURRENT_REGISTRAR: std::cell::RefCell<Option<Arc<Mutex<HashMap<String, RegisteredCommand>>>>> = std::cell::RefCell::new(None);
+    static CURRENT_PLUGIN_NAME: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(None);
+}
+
 impl CommandRegistrarImpl {
     /// Get the C-compatible CommandRegistrar structure
     pub fn as_c_struct(&mut self) -> CommandRegistrar {
+        // Set this registrar as the current one for this thread
+        CURRENT_REGISTRAR.with(|r| {
+            *r.borrow_mut() = Some(self.registry.clone());
+        });
+        CURRENT_PLUGIN_NAME.with(|n| {
+            *n.borrow_mut() = Some(self.plugin_name.clone());
+        });
+
         CommandRegistrar {
             register_fn: Self::register_fn_impl,
         }
@@ -189,21 +203,72 @@ impl CommandRegistrarImpl {
 
     /// C-compatible registration function
     extern "C" fn register_fn_impl(
-        _name: *const c_char,
-        _handler: CommandHandler,
-        _context: *const c_void,
+        name: *const c_char,
+        handler: CommandHandler,
+        context: *const c_void,
     ) -> c_int {
-        // This function is called from plugin code, so we need to extract
-        // the registrar instance from TLS (thread-local storage)
-        // For now, we'll use a simpler approach with a global registry
+        unsafe {
+            // Extract command name from C string
+            let command_name = match CStr::from_ptr(name).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    log::error!("Invalid command name (not UTF-8)");
+                    return -1;
+                }
+            };
 
-        // Note: In a real implementation, we'd need to pass the registrar
-        // instance through context or use TLS. For this POC, we'll handle
-        // this in the PluginManager's register_commands_for_plugin method.
+            // Get the current registrar from TLS
+            let result = CURRENT_REGISTRAR.with(|r| {
+                let registry_opt = r.borrow();
+                let registry = match registry_opt.as_ref() {
+                    Some(reg) => reg,
+                    None => {
+                        log::error!("No registrar set in TLS");
+                        return Err(-1);
+                    }
+                };
 
-        // Return success for now - actual registration happens in
-        // register_commands_for_plugin
-        0
+                CURRENT_PLUGIN_NAME.with(|n| {
+                    let plugin_name_opt = n.borrow();
+                    let plugin_name = match plugin_name_opt.as_ref() {
+                        Some(name) => name,
+                        None => {
+                            log::error!("No plugin name set in TLS");
+                            return Err(-1);
+                        }
+                    };
+
+                    let full_name = format!("{}:{}", plugin_name, command_name);
+
+                    let mut commands = match registry.lock() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            log::error!("Failed to lock command registry: {}", e);
+                            return Err(-1);
+                        }
+                    };
+
+                    if commands.contains_key(&full_name) {
+                        log::warn!("Command {} already registered", full_name);
+                        return Err(-1);
+                    }
+
+                    commands.insert(
+                        full_name.clone(),
+                        RegisteredCommand {
+                            plugin_name: plugin_name.clone(),
+                            handler,
+                            context,
+                        },
+                    );
+
+                    log::info!("Registered plugin command: {}", full_name);
+                    Ok(0)
+                })
+            });
+
+            result.unwrap_or(-1)
+        }
     }
 
     /// Register a command (called from Rust side)

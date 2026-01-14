@@ -6,6 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { writable } from 'svelte/store';
 import type { DiffSpec } from '../types';
 
 /**
@@ -77,12 +78,13 @@ interface ModalState {
 class PluginSystem {
   private plugins = new Map<string, PluginManifest>();
   private modals = new Map<string, any>();
-  private modalState: ModalState = {
+
+  // Use a Svelte store for modal state
+  public modalStateStore = writable<ModalState>({
     component: null,
     props: {},
     visible: false,
-  };
-  private modalStateCallbacks: Array<(state: ModalState) => void> = [];
+  });
 
   /**
    * Initialize the plugin system
@@ -152,13 +154,25 @@ class PluginSystem {
       },
 
       getCurrentRepo: async () => {
-        // TODO: Get from global state
-        return null;
+        // Import repoState dynamically to avoid circular dependencies
+        try {
+          const { repoState } = await import('../stores/repoState.svelte');
+          return repoState.currentPath || null;
+        } catch (e) {
+          console.error('Failed to get current repo:', e);
+          return null;
+        }
       },
 
       getCurrentDiff: async () => {
-        // TODO: Get from global state
-        return null;
+        // Import diffSelection dynamically to avoid circular dependencies
+        try {
+          const { diffSelection } = await import('../stores/diffSelection.svelte');
+          return diffSelection.spec || null;
+        } catch (e) {
+          console.error('Failed to get current diff:', e);
+          return null;
+        }
       },
 
       showModal: (id: string, props?: any) => {
@@ -250,65 +264,45 @@ class PluginSystem {
     const component = this.modals.get(modalId);
     if (!component) {
       console.error(`Modal not found: ${modalId}`);
+      console.error('Available modals:', Array.from(this.modals.keys()));
       return;
     }
 
-    this.modalState = {
-      component,
-      props: props || {},
-      visible: true,
-    };
+    // Extract plugin name from modalId (format: "pluginName:modalId")
+    const pluginName = modalId.split(':')[0];
 
-    this.notifyModalStateChange();
+    // Create plugin API for this modal
+    const pluginAPI = this.createPluginAPI(pluginName);
+
+    const mergedProps = { ...props, api: pluginAPI };
+
+    // Use requestAnimationFrame + setTimeout to ensure we're completely
+    // outside the current execution context and any pending effects
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        this.modalStateStore.set({
+          component,
+          props: mergedProps,
+          visible: true,
+        });
+      }, 0);
+    });
   }
 
   /**
    * Close the current modal
    */
   closeModal(): void {
-    this.modalState = {
-      component: null,
-      props: {},
-      visible: false,
-    };
-
-    this.notifyModalStateChange();
-  }
-
-  /**
-   * Get current modal state
-   */
-  getModalState(): ModalState {
-    return { ...this.modalState };
-  }
-
-  /**
-   * Subscribe to modal state changes
-   */
-  onModalStateChange(callback: (state: ModalState) => void): () => void {
-    this.modalStateCallbacks.push(callback);
-
-    // Return unsubscribe function
-    return () => {
-      const index = this.modalStateCallbacks.indexOf(callback);
-      if (index > -1) {
-        this.modalStateCallbacks.splice(index, 1);
-      }
-    };
-  }
-
-  /**
-   * Notify all subscribers of modal state change
-   */
-  private notifyModalStateChange(): void {
-    const state = this.getModalState();
-    for (const callback of this.modalStateCallbacks) {
-      try {
-        callback(state);
-      } catch (e) {
-        console.error('Modal state callback error:', e);
-      }
-    }
+    // Defer the store update to avoid effect_orphan error
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        this.modalStateStore.set({
+          component: null,
+          props: {},
+          visible: false,
+        });
+      }, 0);
+    });
   }
 
   /**
@@ -321,3 +315,6 @@ class PluginSystem {
 
 // Global singleton instance
 export const pluginSystem = new PluginSystem();
+
+// Expose globally for Plugin Settings and debugging
+(window as any).pluginSystem = pluginSystem;

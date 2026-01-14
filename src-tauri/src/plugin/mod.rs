@@ -29,7 +29,7 @@ pub use events::PluginEvent;
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PluginManifest {
     pub plugin: PluginInfo,
-    pub binary: BinaryInfo,
+    pub binary: Option<BinaryInfo>,
     pub compatibility: CompatibilityInfo,
     #[serde(default)]
     pub permissions: PluginPermissions,
@@ -105,8 +105,8 @@ enum PluginState {
 struct LoadedPlugin {
     manifest: PluginManifest,
     #[allow(dead_code)] // Keep library alive while plugin is loaded
-    library: Library,
-    vtable: &'static PluginVTable,
+    library: Option<Library>,
+    vtable: Option<&'static PluginVTable>,
     state: PluginState,
 }
 
@@ -150,6 +150,8 @@ impl PluginManager {
     pub fn discover_plugins(&self) -> Result<Vec<(PathBuf, PluginManifest)>, String> {
         let mut manifests = Vec::new();
 
+        println!("[Plugin Discovery] Scanning directory: {:?}", self.plugins_dir);
+
         let entries = std::fs::read_dir(&self.plugins_dir)
             .map_err(|e| format!("Failed to read plugins directory: {}", e))?;
 
@@ -157,28 +159,33 @@ impl PluginManager {
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
-                    log::warn!("Failed to read plugin directory entry: {}", e);
+                    eprintln!("[Plugin Discovery] Failed to read plugin directory entry: {}", e);
                     continue;
                 }
             };
 
             let path = entry.path();
+            println!("[Plugin Discovery] Checking: {:?}", path);
+
             if !path.is_dir() {
+                println!("[Plugin Discovery] Skipping (not a directory): {:?}", path);
                 continue;
             }
 
             let manifest_path = path.join("plugin.toml");
             if !manifest_path.exists() {
+                println!("[Plugin Discovery] Skipping (no plugin.toml): {:?}", path);
                 continue;
             }
 
+            println!("[Plugin Discovery] Found manifest at: {:?}", manifest_path);
             match Self::load_manifest(&manifest_path) {
                 Ok(manifest) => {
-                    log::info!("Discovered plugin: {}", manifest.plugin.name);
+                    println!("[Plugin Discovery] ✓ Loaded manifest for: {}", manifest.plugin.name);
                     manifests.push((path, manifest));
                 }
                 Err(e) => {
-                    log::warn!("Failed to load manifest at {:?}: {}", manifest_path, e);
+                    eprintln!("[Plugin Discovery] ✗ Failed to load manifest at {:?}: {}", manifest_path, e);
                 }
             }
         }
@@ -217,47 +224,55 @@ impl PluginManager {
         // Register permissions
         self.permission_checker.register_plugin(manifest.clone());
 
-        // Construct full path to binary
-        let lib_path = plugin_dir.join(&manifest.binary.path);
-        if !lib_path.exists() {
-            return Err(format!(
-                "Plugin binary not found at {:?}",
-                lib_path
-            ));
-        }
+        // Load binary if present (optional for frontend-only plugins)
+        let (library, vtable) = if let Some(ref binary_info) = manifest.binary {
+            // Construct full path to binary
+            let lib_path = plugin_dir.join(&binary_info.path);
+            if !lib_path.exists() {
+                return Err(format!(
+                    "Plugin binary not found at {:?}",
+                    lib_path
+                ));
+            }
 
-        log::info!("Loading plugin {} from {:?}", plugin_name, lib_path);
+            log::info!("Loading plugin {} from {:?}", plugin_name, lib_path);
 
-        // Load the dynamic library
-        let library = unsafe {
-            Library::new(&lib_path)
-                .map_err(|e| format!("Failed to load plugin library: {}", e))?
+            // Load the dynamic library
+            let lib = unsafe {
+                Library::new(&lib_path)
+                    .map_err(|e| format!("Failed to load plugin library: {}", e))?
+            };
+
+            // Get the plugin entry point
+            let entry: Symbol<PluginEntryFn> = unsafe {
+                lib
+                    .get(b"staged_plugin_entry")
+                    .map_err(|e| format!("Plugin missing entry point 'staged_plugin_entry': {}", e))?
+            };
+
+            // Call entry point to get VTable
+            let vtable_ptr = entry();
+            if vtable_ptr.is_null() {
+                return Err("Plugin entry point returned null VTable".to_string());
+            }
+
+            let vt = unsafe { &*vtable_ptr };
+
+            // Verify API version
+            if vt.api_version != PLUGIN_API_VERSION {
+                return Err(format!(
+                    "Plugin API version mismatch: expected 0x{:06X}, got 0x{:06X}",
+                    PLUGIN_API_VERSION, vt.api_version
+                ));
+            }
+
+            log::info!("Plugin {} loaded successfully", plugin_name);
+
+            (Some(lib), Some(vt))
+        } else {
+            log::info!("Plugin {} is frontend-only (no binary)", plugin_name);
+            (None, None)
         };
-
-        // Get the plugin entry point
-        let entry: Symbol<PluginEntryFn> = unsafe {
-            library
-                .get(b"staged_plugin_entry")
-                .map_err(|e| format!("Plugin missing entry point 'staged_plugin_entry': {}", e))?
-        };
-
-        // Call entry point to get VTable
-        let vtable_ptr = entry();
-        if vtable_ptr.is_null() {
-            return Err("Plugin entry point returned null VTable".to_string());
-        }
-
-        let vtable = unsafe { &*vtable_ptr };
-
-        // Verify API version
-        if vtable.api_version != PLUGIN_API_VERSION {
-            return Err(format!(
-                "Plugin API version mismatch: expected 0x{:06X}, got 0x{:06X}",
-                PLUGIN_API_VERSION, vtable.api_version
-            ));
-        }
-
-        log::info!("Plugin {} loaded successfully", plugin_name);
 
         // Store the loaded plugin
         self.plugins.insert(
@@ -288,6 +303,16 @@ impl PluginManager {
         let plugin = self.plugins.get_mut(plugin_name)
             .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
 
+        // Skip initialization if no vtable (frontend-only plugin)
+        let vtable = match &plugin.vtable {
+            Some(vt) => vt,
+            None => {
+                log::info!("Plugin {} is frontend-only, skipping binary initialization", plugin_name);
+                plugin.state = PluginState::Loaded;
+                return Ok(());
+            }
+        };
+
         let config_json = serde_json::to_string(&plugin.manifest.config)
             .map_err(|e| format!("Failed to serialize config: {}", e))?;
         let config_cstr = CString::new(config_json)
@@ -302,7 +327,7 @@ impl PluginManager {
 
         // Call init
         log::info!("Initializing plugin {}", plugin_name);
-        let result = (plugin.vtable.init)(&context);
+        let result = (vtable.init)(&context);
 
         if result != 0 {
             let error_msg = format!("Plugin init failed with code {}", result);
@@ -386,6 +411,15 @@ impl PluginManager {
         let plugin = self.plugins.get(plugin_name)
             .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
 
+        // Skip if no vtable (frontend-only plugin)
+        let vtable = match &plugin.vtable {
+            Some(vt) => vt,
+            None => {
+                log::info!("Plugin {} is frontend-only, skipping command registration", plugin_name);
+                return Ok(());
+            }
+        };
+
         log::info!("Registering commands for plugin {}", plugin_name);
 
         // Create a registrar for this plugin
@@ -393,7 +427,7 @@ impl PluginManager {
         let mut registrar = registrar_impl.as_c_struct();
 
         // Call the plugin's register_commands function
-        let result = (plugin.vtable.register_commands)(&mut registrar as *mut _);
+        let result = (vtable.register_commands)(&mut registrar as *mut _);
 
         if result != 0 {
             return Err(format!("Plugin command registration failed with code {}", result));
@@ -423,12 +457,21 @@ impl PluginManager {
         let plugin = self.plugins.get(plugin_name)
             .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
 
+        // Skip if no vtable (frontend-only plugin)
+        let vtable = match &plugin.vtable {
+            Some(vt) => vt,
+            None => {
+                log::info!("Plugin {} is frontend-only, skipping menu registration", plugin_name);
+                return Ok(());
+            }
+        };
+
         log::info!("Registering menus for plugin {}", plugin_name);
 
         let mut registrar_impl = self.menu_registry.create_registrar(plugin_name.to_string());
         let mut registrar = registrar_impl.as_c_struct();
 
-        let result = (plugin.vtable.register_menus)(&mut registrar as *mut _);
+        let result = (vtable.register_menus)(&mut registrar as *mut _);
 
         if result != 0 {
             return Err(format!("Plugin menu registration failed with code {}", result));
@@ -443,12 +486,21 @@ impl PluginManager {
         let plugin = self.plugins.get(plugin_name)
             .ok_or_else(|| format!("Plugin {} not found", plugin_name))?;
 
+        // Skip if no vtable (frontend-only plugin)
+        let vtable = match &plugin.vtable {
+            Some(vt) => vt,
+            None => {
+                log::info!("Plugin {} is frontend-only, skipping event subscription", plugin_name);
+                return Ok(());
+            }
+        };
+
         log::info!("Subscribing {} to events", plugin_name);
 
         let mut subscriber_impl = self.event_dispatcher.create_subscriber(plugin_name.to_string());
         let mut subscriber = subscriber_impl.as_c_struct();
 
-        let result = (plugin.vtable.subscribe_events)(&mut subscriber as *mut _);
+        let result = (vtable.subscribe_events)(&mut subscriber as *mut _);
 
         if result != 0 {
             return Err(format!("Plugin event subscription failed with code {}", result));
@@ -475,9 +527,15 @@ impl PluginManager {
 
         for (name, plugin) in &self.plugins {
             log::info!("Shutting down plugin {}", name);
-            let result = (plugin.vtable.shutdown)();
-            if result != 0 {
-                log::warn!("Plugin {} shutdown failed with code {}", name, result);
+
+            // Skip if no vtable (frontend-only plugin)
+            if let Some(vtable) = &plugin.vtable {
+                let result = (vtable.shutdown)();
+                if result != 0 {
+                    log::warn!("Plugin {} shutdown failed with code {}", name, result);
+                }
+            } else {
+                log::info!("Plugin {} is frontend-only, skipping binary shutdown", name);
             }
         }
     }
@@ -530,7 +588,8 @@ mod tests {
 
         let manifest: PluginManifest = toml::from_str(toml_str).unwrap();
         assert_eq!(manifest.plugin.name, "test-plugin");
-        assert_eq!(manifest.binary.path, "libtest.dylib");
+        assert!(manifest.binary.is_some());
+        assert_eq!(manifest.binary.unwrap().path, "libtest.dylib");
         assert_eq!(manifest.compatibility.api_version, "0.1.0");
         assert_eq!(manifest.permissions.fs_read, vec!["$REPO/**"]);
     }

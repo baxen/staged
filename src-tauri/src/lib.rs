@@ -459,6 +459,8 @@ fn list_plugins(state: State<'_, PluginManager>) -> Vec<serde_json::Value> {
                     "name": manifest.plugin.name,
                     "version": manifest.plugin.version,
                     "description": manifest.plugin.description,
+                    "author": manifest.plugin.author,
+                    "license": manifest.plugin.license,
                     "frontend": manifest.frontend.as_ref().map(|f| {
                         serde_json::json!({
                             "script": f.script,
@@ -502,9 +504,48 @@ fn get_plugin_asset(
         return Err(format!("Asset not found: {}", asset_path));
     }
 
-    // Return file:// URL
-    let url = format!("file://{}", asset_full_path.to_string_lossy());
-    Ok(url)
+    // Read file content and return as data URL
+    let content = std::fs::read(&asset_full_path)
+        .map_err(|e| format!("Failed to read asset: {}", e))?;
+
+    // Determine MIME type based on extension
+    let mime_type = if asset_path.ends_with(".js") {
+        "application/javascript"
+    } else if asset_path.ends_with(".css") {
+        "text/css"
+    } else {
+        "application/octet-stream"
+    };
+
+    // Return as data URL
+    let base64 = base64_encode(&content);
+    Ok(format!("data:{};base64,{}", mime_type, base64))
+}
+
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+
+    for chunk in data.chunks(3) {
+        let b1 = chunk[0];
+        let b2 = chunk.get(1).copied().unwrap_or(0);
+        let b3 = chunk.get(2).copied().unwrap_or(0);
+
+        result.push(CHARS[(b1 >> 2) as usize] as char);
+        result.push(CHARS[(((b1 & 0x03) << 4) | (b2 >> 4)) as usize] as char);
+        result.push(if chunk.len() > 1 {
+            CHARS[(((b2 & 0x0f) << 2) | (b3 >> 6)) as usize] as char
+        } else {
+            '='
+        });
+        result.push(if chunk.len() > 2 {
+            CHARS[(b3 & 0x3f) as usize] as char
+        } else {
+            '='
+        });
+    }
+
+    result
 }
 
 // =============================================================================
@@ -530,10 +571,23 @@ fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> 
                 true,
                 Some("CmdOrCtrl+Shift+W"),
             )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(app, "plugin-settings", "Plugin Settings...", true, Some("CmdOrCtrl+,"))?,
+        ],
+    )?;
+
+    let tools_menu = Submenu::with_items(
+        app,
+        "Tools",
+        true,
+        &[
+            &MenuItem::with_id(app, "builder-bot", "Builder Bot...", true, Some("CmdOrCtrl+Shift+B"))?,
+            &MenuItem::with_id(app, "test-plugin", "Test Plugin...", true, Some("CmdOrCtrl+Shift+T"))?,
         ],
     )?;
 
     menu.append(&file_menu)?;
+    menu.append(&tools_menu)?;
     Ok(menu)
 }
 
@@ -548,6 +602,15 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
         }
         "close-window" => {
             let _ = app.emit("menu:close-window", ());
+        }
+        "plugin-settings" => {
+            let _ = app.emit("menu:plugin-settings", ());
+        }
+        "builder-bot" => {
+            let _ = app.emit("menu:builder-bot", ());
+        }
+        "test-plugin" => {
+            let _ = app.emit("menu:test-plugin", ());
         }
         _ => {}
     }
@@ -575,47 +638,54 @@ pub fn run() {
                 .map_err(|e| format!("Failed to create plugin manager: {}", e))?;
 
             // Discover and load plugins
+            println!("[Plugin System] Starting plugin discovery...");
             match plugin_manager.discover_plugins() {
                 Ok(discovered) => {
-                    log::info!("Discovered {} plugin(s)", discovered.len());
+                    println!("[Plugin System] Discovered {} plugin(s)", discovered.len());
                     for (plugin_dir, manifest) in discovered {
                         let plugin_name = manifest.plugin.name.clone();
+                        println!("[Plugin System] Loading plugin: {}", plugin_name);
                         match plugin_manager.load_plugin(plugin_dir, manifest) {
                             Ok(_) => {
-                                log::info!("Loaded plugin: {}", plugin_name);
+                                println!("[Plugin System] ✓ Loaded plugin: {}", plugin_name);
 
                                 // Initialize the plugin
+                                println!("[Plugin System] Initializing plugin: {}", plugin_name);
                                 if let Err(e) = plugin_manager.initialize_plugin(&plugin_name, app.handle()) {
-                                    log::error!("Failed to initialize plugin {}: {}", plugin_name, e);
+                                    eprintln!("[Plugin System] ✗ Failed to initialize plugin {}: {}", plugin_name, e);
                                     continue;
                                 }
+                                println!("[Plugin System] ✓ Initialized plugin: {}", plugin_name);
 
                                 // Register plugin commands
                                 if let Err(e) = plugin_manager.register_plugin_commands(&plugin_name) {
-                                    log::error!("Failed to register commands for plugin {}: {}", plugin_name, e);
+                                    eprintln!("[Plugin System] ✗ Failed to register commands for plugin {}: {}", plugin_name, e);
+                                } else {
+                                    println!("[Plugin System] ✓ Registered commands for plugin: {}", plugin_name);
                                 }
 
                                 // Register plugin menus
                                 if let Err(e) = plugin_manager.register_plugin_menus(&plugin_name) {
-                                    log::error!("Failed to register menus for plugin {}: {}", plugin_name, e);
+                                    eprintln!("[Plugin System] ✗ Failed to register menus for plugin {}: {}", plugin_name, e);
                                 }
 
                                 // Subscribe plugin to events
                                 if let Err(e) = plugin_manager.subscribe_plugin_events(&plugin_name) {
-                                    log::error!("Failed to subscribe plugin {} to events: {}", plugin_name, e);
+                                    eprintln!("[Plugin System] ✗ Failed to subscribe plugin {} to events: {}", plugin_name, e);
                                 }
                             }
                             Err(e) => {
-                                log::error!("Failed to load plugin {}: {}", plugin_name, e);
+                                eprintln!("[Plugin System] ✗ Failed to load plugin {}: {}", plugin_name, e);
                             }
                         }
                     }
 
                     // Emit startup event after all plugins initialized
                     plugin_manager.emit_event(&PluginEvent::Startup);
+                    println!("[Plugin System] Plugin system initialized, startup event emitted");
                 }
                 Err(e) => {
-                    log::error!("Failed to discover plugins: {}", e);
+                    eprintln!("[Plugin System] ✗ Failed to discover plugins: {}", e);
                 }
             }
 

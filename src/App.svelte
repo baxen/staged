@@ -72,16 +72,24 @@
     openRepoPicker,
   } from './lib/stores/repoState.svelte';
   import { pluginSystem } from './lib/services/plugins';
+  import PluginSettings from './lib/PluginSettings.svelte';
+  import PluginModalWrapper from './lib/PluginModalWrapper.svelte';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
+  let showPluginSettings = $state(false);
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
-  let pluginModalVisible = $state(false);
-  let pluginModalComponent: any = $state(null);
-  let pluginModalProps = $state({});
+  let unsubscribeMenuPluginSettings: Unsubscribe | null = null;
+  let unsubscribeMenuBuilderBot: Unsubscribe | null = null;
+  let unsubscribeMenuTestPlugin: Unsubscribe | null = null;
+  let unregisterBuilderBotShortcut: (() => void) | null = null;
+  let unregisterTestPluginShortcut: (() => void) | null = null;
+
+  // Use the plugin system's store directly - this is properly reactive
+  const pluginModalState = pluginSystem.modalStateStore;
 
   // Load files and comments for current spec
   async function loadAll() {
@@ -455,19 +463,42 @@
     // Register the reference files loader so comments store can trigger it
     setReferenceFilesLoader(loadReferenceFiles);
 
+    // Register Builder Bot keyboard shortcut (do this synchronously in onMount)
+    unregisterBuilderBotShortcut = registerShortcut({
+      id: 'builder-bot',
+      keys: ['b'],
+      modifiers: { meta: true, shift: true },
+      description: 'Open Builder Bot',
+      category: 'view',
+      handler: () => {
+        const ps = (window as any).pluginSystem;
+        if (ps) {
+          ps.showModal('builder-bot:main');
+        }
+      },
+    });
+
+    // Register Test Plugin keyboard shortcut
+    unregisterTestPluginShortcut = registerShortcut({
+      id: 'test-plugin',
+      keys: ['t'],
+      modifiers: { meta: true, shift: true },
+      description: 'Open Test Plugin',
+      category: 'view',
+      handler: () => {
+        const ps = (window as any).pluginSystem;
+        if (ps) {
+          ps.showModal('test-plugin:main');
+        }
+      },
+    });
+
     (async () => {
       await loadSavedSyntaxTheme();
 
       // Initialize plugin system
       try {
         await pluginSystem.initialize();
-
-        // Subscribe to plugin modal state changes
-        pluginSystem.onModalStateChange((state) => {
-          pluginModalVisible = state.visible;
-          pluginModalComponent = state.component;
-          pluginModalProps = state.props;
-        });
       } catch (e) {
         console.error('Failed to initialize plugin system:', e);
       }
@@ -486,6 +517,23 @@
       unsubscribeMenuOpenFolder = await listen('menu:open-folder', handleMenuOpenFolder);
       unsubscribeMenuCloseTab = await listen('menu:close-tab', handleMenuCloseTab);
       unsubscribeMenuCloseWindow = await listen('menu:close-window', handleMenuCloseWindow);
+      unsubscribeMenuPluginSettings = await listen('menu:plugin-settings', () => {
+        showPluginSettings = true;
+      });
+      unsubscribeMenuBuilderBot = await listen('menu:builder-bot', () => {
+        // Open Builder Bot modal
+        const ps = (window as any).pluginSystem;
+        if (ps) {
+          ps.showModal('builder-bot:main');
+        }
+      });
+      unsubscribeMenuTestPlugin = await listen('menu:test-plugin', () => {
+        // Open Test Plugin modal
+        const ps = (window as any).pluginSystem;
+        if (ps) {
+          ps.showModal('test-plugin:main');
+        }
+      });
 
       // Initialize repo state (resolves canonical path, adds to recent repos)
       const repoPath = await initRepoState();
@@ -515,10 +563,15 @@
   onDestroy(() => {
     unregisterPreferenceShortcuts?.();
     unregisterFileSearchShortcut?.();
+    unregisterBuilderBotShortcut?.();
+    unregisterTestPluginShortcut?.();
     unsubscribeWatcher?.();
     unsubscribeMenuOpenFolder?.();
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();
+    unsubscribeMenuPluginSettings?.();
+    unsubscribeMenuBuilderBot?.();
+    unsubscribeMenuTestPlugin?.();
   });
 </script>
 
@@ -592,10 +645,19 @@
   />
 {/if}
 
-{#if pluginModalVisible && pluginModalComponent}
+{#if $pluginModalState.visible && $pluginModalState.component}
   <div class="plugin-modal-backdrop" onclick={() => pluginSystem.closeModal()}>
     <div class="plugin-modal-container" onclick={(e) => e.stopPropagation()}>
-      <svelte:component this={pluginModalComponent} {...pluginModalProps} />
+      <PluginModalWrapper component={$pluginModalState.component} props={$pluginModalState.props} />
+    </div>
+  </div>
+{/if}
+
+{#if showPluginSettings}
+  <div class="plugin-modal-backdrop" onclick={() => (showPluginSettings = false)}>
+    <div class="plugin-modal-container" onclick={(e) => e.stopPropagation()}>
+      <button class="close-button" onclick={() => (showPluginSettings = false)}>×</button>
+      <PluginSettings />
     </div>
   </div>
 {/if}
@@ -679,11 +741,35 @@
   }
 
   .plugin-modal-container {
+    position: relative;
     max-width: 90vw;
     max-height: 90vh;
     overflow: auto;
     background-color: var(--bg-chrome);
     border-radius: 8px;
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.3);
+  }
+
+  .close-button {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary);
+    font-size: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    z-index: 10;
+  }
+
+  .close-button:hover {
+    background-color: rgba(255, 255, 255, 0.2);
   }
 </style>

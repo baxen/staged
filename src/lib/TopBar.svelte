@@ -16,6 +16,7 @@
     GitPullRequest,
     GitCommitHorizontal,
     Upload,
+    Zap,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
@@ -45,6 +46,8 @@
     type RepoEntry,
   } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
+  import { pluginSystem } from './services/plugins';
+  import { exportReviewMarkdown } from './services/review';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
@@ -69,6 +72,9 @@
 
   // Copy feedback
   let copiedFeedback = $state(false);
+
+  // Check if Builder Bot plugin is available
+  let hasBuilderBotPlugin = $state(false);
 
   // Check if we're viewing working directory changes (can show commit button)
   let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
@@ -117,6 +123,28 @@
       setTimeout(() => {
         copiedFeedback = false;
       }, 1500);
+    }
+  }
+
+  async function handleCreateTask() {
+    if (!commentsState.currentSpec) {
+      console.error('Cannot create task: no diff selected');
+      return;
+    }
+
+    try {
+      // Get the markdown export of all comments
+      const repoPath = commentsState.currentRepoPath ?? undefined;
+      const markdown = await exportReviewMarkdown(commentsState.currentSpec, repoPath);
+
+      const promptText = `Review the following code changes and address the comments:\n\n${markdown}`;
+
+      // Open the Builder Bot plugin modal with pre-filled comments
+      pluginSystem.showModal('builder-bot:main', {
+        initialPrompt: promptText,
+      });
+    } catch (e) {
+      console.error('Failed to create task from comments:', e);
     }
   }
 
@@ -186,6 +214,10 @@
 
   // Register keyboard shortcuts
   onMount(() => {
+    // Check if Builder Bot plugin is available
+    const plugins = pluginSystem.getPlugins();
+    hasBuilderBotPlugin = plugins.some(p => p.name === 'builder-bot');
+
     const unregisterCopy = registerShortcut({
       id: 'copy-comments',
       keys: ['c'],
@@ -349,6 +381,15 @@
             <Copy size={12} />
           {/if}
         </button>
+        {#if hasBuilderBotPlugin}
+          <button
+            class="icon-btn create-task-btn"
+            onclick={handleCreateTask}
+            title="Create task from comments"
+          >
+            <Zap size={12} />
+          </button>
+        {/if}
         <button class="icon-btn delete-btn" onclick={deleteAllComments} title="Delete all comments">
           <Trash2 size={12} />
         </button>
