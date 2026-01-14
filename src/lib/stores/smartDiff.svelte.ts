@@ -44,8 +44,8 @@ export const smartDiffState = {
     const filePath = file.after?.path ?? file.before?.path;
     if (!filePath) return null;
 
-    const beforeLines = file.before?.content.type === 'text' ? file.before.content.lines : [];
-    const afterLines = file.after?.content.type === 'text' ? file.after.content.lines : [];
+    const beforeLines = file.before?.content.type === 'Text' ? file.before.content.lines : [];
+    const afterLines = file.after?.content.type === 'Text' ? file.after.content.lines : [];
 
     const changedAlignments = file.alignments.filter((a) => a.changed);
     let beforeContent: string[] = [];

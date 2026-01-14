@@ -7,7 +7,7 @@
   Review state comes from the shared commentsState store (single source of truth).
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount } from 'svelte';
   import {
     MessageSquare,
     CircleFadingArrowUp,
@@ -23,10 +23,14 @@
     Folder,
     List,
     FolderTree,
+    Eye,
+    X,
+    Plus,
   } from 'lucide-svelte';
   import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
-  import type { FileDiff } from './types';
-  import { getFilePath } from './diffUtils';
+  import { registerShortcuts } from './services/keyboard';
+  import { referenceFilesState } from './stores/referenceFiles.svelte';
+  import type { FileDiffSummary } from './types';
 
   interface FileEntry {
     path: string;
@@ -44,42 +48,58 @@
   }
 
   interface Props {
+    /** File summaries from list_diff_files */
+    files: FileDiffSummary[];
+    /** Whether the file list is loading */
+    loading?: boolean;
     /** Called when user selects a file to view, optionally scrolling to a line */
     onFileSelect?: (path: string, scrollToLine?: number) => void;
     /** Currently selected file path */
     selectedFile?: string | null;
-    /** Base ref for the diff (controlled by parent) */
-    diffBase?: string;
-    /** Head ref for the diff (controlled by parent) */
-    diffHead?: string;
+    /** Whether we're viewing the working tree */
+    isWorkingTree?: boolean;
+    /** Called when user wants to add a reference file */
+    onAddReferenceFile?: () => void;
+    /** Called when user wants to remove a reference file */
+    onRemoveReferenceFile?: (path: string) => void;
   }
 
-  let { onFileSelect, selectedFile = null, diffBase = 'HEAD', diffHead = '@' }: Props = $props();
+  let {
+    files,
+    loading = false,
+    onFileSelect,
+    selectedFile = null,
+    isWorkingTree = true,
+    onAddReferenceFile,
+    onRemoveReferenceFile,
+  }: Props = $props();
 
-  let diffs: FileDiff[] = $state([]);
-  let loading = $state(true);
   let collapsedDirs = $state(new Set<string>());
-  let treeView = $state(true);
-
-  // Is this viewing the working tree?
-  let isWorkingTree = $derived(diffHead === '@');
+  let treeView = $state(false);
 
   /**
-   * Determine file status from a FileDiff.
+   * Get the primary path for a file summary.
    */
-  function getFileStatus(diff: FileDiff): 'added' | 'deleted' | 'modified' | 'renamed' {
-    if (diff.before === null) return 'added';
-    if (diff.after === null) return 'deleted';
-    if (diff.before.path !== diff.after.path) return 'renamed';
+  function getFilePath(summary: FileDiffSummary): string {
+    return summary.after ?? summary.before ?? '';
+  }
+
+  /**
+   * Determine file status from a FileDiffSummary.
+   */
+  function getFileStatus(summary: FileDiffSummary): 'added' | 'deleted' | 'modified' | 'renamed' {
+    if (summary.before === null) return 'added';
+    if (summary.after === null) return 'deleted';
+    if (summary.before !== summary.after) return 'renamed';
     return 'modified';
   }
 
   /**
-   * Build file list from diffs with review state.
+   * Build file list from summaries with review state.
    * Uses commentsState for both comment counts and reviewed status (reactive).
    */
   function buildFileList(
-    fileDiffs: FileDiff[],
+    fileSummaries: FileDiffSummary[],
     reviewedPaths: string[],
     comments: typeof commentsState.comments
   ): FileEntry[] {
@@ -91,11 +111,11 @@
       commentCounts.set(comment.path, (commentCounts.get(comment.path) || 0) + 1);
     }
 
-    return fileDiffs.map((diff) => {
-      const path = getFilePath(diff) || '';
+    return fileSummaries.map((summary) => {
+      const path = getFilePath(summary);
       return {
         path,
-        status: getFileStatus(diff),
+        status: getFileStatus(summary),
         isReviewed: reviewedSet.has(path),
         commentCount: commentCounts.get(path) || 0,
       };
@@ -105,10 +125,10 @@
   /**
    * Build a tree structure from a flat list of files.
    */
-  function buildTree(files: FileEntry[]): TreeNode[] {
+  function buildTree(fileEntries: FileEntry[]): TreeNode[] {
     const root: TreeNode[] = [];
 
-    for (const file of files) {
+    for (const file of fileEntries) {
       const parts = file.path.split('/');
       let currentLevel = root;
 
@@ -175,18 +195,12 @@
     });
   }
 
-  /**
-   * Set diffs from external source (App.svelte).
-   */
-  export function setDiffs(newDiffs: FileDiff[]) {
-    diffs = newDiffs;
-    loading = false;
-  }
-
   // Use commentsState for both comments and reviewed paths (single source of truth)
-  let files = $derived(buildFileList(diffs, commentsState.reviewedPaths, commentsState.comments));
-  let needsReview = $derived(files.filter((f) => !f.isReviewed));
-  let reviewed = $derived(files.filter((f) => f.isReviewed));
+  let fileEntries = $derived(
+    buildFileList(files, commentsState.reviewedPaths, commentsState.comments)
+  );
+  let needsReview = $derived(fileEntries.filter((f) => !f.isReviewed));
+  let reviewed = $derived(fileEntries.filter((f) => f.isReviewed));
 
   // Build trees for each section
   let needsReviewTree = $derived(compactTree(buildTree(needsReview)));
@@ -241,31 +255,68 @@
     return singleLine.slice(0, maxLength).trim() + '...';
   }
 
-  /**
-   * Handle CMD+C to copy selected file path to clipboard.
-   */
-  function handleKeydown(event: KeyboardEvent) {
-    // CMD+C (Mac) or Ctrl+C (Windows/Linux) to copy selected file path
-    if ((event.metaKey || event.ctrlKey) && event.key === 'c') {
-      // Only handle if there's a selected file and no text selection
-      const selection = window.getSelection();
-      const hasTextSelection = selection && selection.toString().length > 0;
-
-      if (selectedFile && !hasTextSelection) {
-        event.preventDefault();
-        navigator.clipboard.writeText(selectedFile).catch((err) => {
-          console.error('Failed to copy file path:', err);
-        });
-      }
-    }
+  // Get flat list of file paths in display order
+  function getFilePaths(): string[] {
+    return files.map((f) => getFilePath(f));
   }
 
-  onMount(() => {
-    window.addEventListener('keydown', handleKeydown);
-  });
+  // Navigate to next file
+  function goToNextFile(): void {
+    const paths = getFilePaths();
+    if (paths.length === 0) return;
 
-  onDestroy(() => {
-    window.removeEventListener('keydown', handleKeydown);
+    const currentIndex = selectedFile ? paths.indexOf(selectedFile) : -1;
+    const nextIndex = currentIndex < paths.length - 1 ? currentIndex + 1 : 0;
+    onFileSelect?.(paths[nextIndex]);
+  }
+
+  // Navigate to previous file
+  function goToPrevFile(): void {
+    const paths = getFilePaths();
+    if (paths.length === 0) return;
+
+    const currentIndex = selectedFile ? paths.indexOf(selectedFile) : 0;
+    const prevIndex = currentIndex > 0 ? currentIndex - 1 : paths.length - 1;
+    onFileSelect?.(paths[prevIndex]);
+  }
+
+  // Register keyboard shortcuts
+
+  onMount(() => {
+    const unregister = registerShortcuts([
+      {
+        id: 'copy-file-path',
+        keys: ['c'],
+        modifiers: { meta: true, shift: true },
+        description: 'Copy file path',
+        category: 'files',
+        handler: () => {
+          if (selectedFile) {
+            navigator.clipboard.writeText(selectedFile).catch((err) => {
+              console.error('Failed to copy file path:', err);
+            });
+          }
+        },
+      },
+      {
+        id: 'next-file',
+        keys: [']'],
+        modifiers: { meta: true },
+        description: 'Next file',
+        category: 'files',
+        handler: goToNextFile,
+      },
+      {
+        id: 'prev-file',
+        keys: ['['],
+        modifiers: { meta: true },
+        description: 'Previous file',
+        category: 'files',
+        handler: goToPrevFile,
+      },
+    ]);
+
+    return () => unregister();
   });
 </script>
 
@@ -405,7 +456,9 @@
 
 <div class="sidebar-content">
   {#if loading}
-    <div class="loading">Loading...</div>
+    <div class="loading-state">
+      <p>Loading...</p>
+    </div>
   {:else if files.length === 0}
     <div class="empty-state">
       <p>No changes</p>
@@ -475,6 +528,53 @@
         </ul>
       {/if}
 
+      <!-- Reference Files section -->
+      <div class="section-header">
+        <button
+          class="add-file-btn"
+          onclick={() => onAddReferenceFile?.()}
+          title="Add reference file (Cmd+O)"
+        >
+          <Plus size={12} />
+        </button>
+        <div class="section-divider">
+          <span class="divider-label">REFERENCE ({referenceFilesState.files.length})</span>
+        </div>
+      </div>
+      {#if referenceFilesState.files.length > 0}
+        <ul class="tree-section reference-section">
+          {#each referenceFilesState.files as refFile (refFile.path)}
+            <li class="tree-item-wrapper">
+              <div
+                class="tree-item file-item reference-item"
+                class:selected={selectedFile === refFile.path}
+                style="padding-left: 8px"
+                role="button"
+                tabindex="0"
+                onclick={() => onFileSelect?.(refFile.path)}
+                onkeydown={(e) => e.key === 'Enter' && onFileSelect?.(refFile.path)}
+              >
+                <span class="reference-icon">
+                  <Eye size={16} />
+                </span>
+                <span class="file-name">{refFile.path}</span>
+                <button
+                  class="remove-btn"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    onRemoveReferenceFile?.(refFile.path);
+                  }}
+                  onkeydown={(e) => e.key === 'Enter' && e.stopPropagation()}
+                  title="Remove reference file"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+
       <!-- Comments section -->
       <div class="section-header comments-header">
         <div class="section-divider">
@@ -485,8 +585,6 @@
         <ul class="tree-section comments-section">
           {@render commentList()}
         </ul>
-      {:else}
-        <div class="comments-empty">No comments yet</div>
       {/if}
     </div>
   {/if}
@@ -500,7 +598,7 @@
     overflow: hidden;
   }
 
-  .loading,
+  .loading-state,
   .empty-state {
     padding: 20px 16px;
     text-align: center;
@@ -801,6 +899,83 @@
   }
 
   .comments-empty {
+    padding: 12px;
+    text-align: center;
+    font-size: var(--size-xs);
+    color: var(--text-faint);
+  }
+
+  /* Reference files section */
+  .add-file-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .add-file-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-muted);
+  }
+
+  .add-file-btn:focus-visible {
+    outline: 2px solid var(--text-accent);
+    outline-offset: -2px;
+  }
+
+  .reference-section {
+    opacity: 0.85;
+  }
+
+  .reference-item {
+    position: relative;
+  }
+
+  .reference-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  .remove-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 0.1s,
+      background-color 0.1s,
+      color 0.1s;
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .reference-item:hover .remove-btn {
+    opacity: 1;
+  }
+
+  .remove-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .reference-empty {
     padding: 12px;
     text-align: center;
     font-size: var(--size-xs);

@@ -248,39 +248,39 @@ export async function loadSavedSyntaxTheme(): Promise<void> {
 // Keyboard Shortcuts
 // =============================================================================
 
+import { registerShortcuts, type Shortcut } from '../services/keyboard';
+
 /**
- * Handle preference-related keyboard shortcuts.
- * Returns true if the event was handled.
+ * Register preference-related keyboard shortcuts.
+ * Returns a cleanup function.
  */
-export function handlePreferenceKeydown(event: KeyboardEvent): boolean {
-  // Cmd/Ctrl + Shift + = (plus) to increase size
-  // Cmd/Ctrl + Shift + - (minus) to decrease size
-  // Cmd/Ctrl + Shift + 0 to reset size
-  if ((event.metaKey || event.ctrlKey) && event.shiftKey) {
-    if (event.key === '=' || event.key === '+') {
-      event.preventDefault();
-      increaseSize();
-      return true;
-    } else if (event.key === '-' || event.key === '_') {
-      event.preventDefault();
-      decreaseSize();
-      return true;
-    } else if (event.key === '0') {
-      event.preventDefault();
-      resetSize();
-      return true;
-    }
-  }
+export function registerPreferenceShortcuts(): () => void {
+  const shortcuts: Shortcut[] = [
+    {
+      id: 'pref-increase-size',
+      keys: ['=', '+'],
+      modifiers: { meta: true },
+      description: 'Increase text size',
+      category: 'view',
+      handler: increaseSize,
+    },
+    {
+      id: 'pref-decrease-size',
+      keys: ['-'],
+      modifiers: { meta: true },
+      description: 'Decrease text size',
+      category: 'view',
+      handler: decreaseSize,
+    },
+    {
+      id: 'pref-reset-size',
+      keys: ['0'],
+      modifiers: { meta: true },
+      description: 'Reset text size',
+      category: 'view',
+      handler: resetSize,
+    },
+  ];
 
-  // T to cycle syntax themes (when not in input)
-  if (event.key === 't' && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
-    const target = event.target as HTMLElement;
-    if (target.tagName !== 'INPUT' && target.tagName !== 'TEXTAREA') {
-      event.preventDefault();
-      cycleSyntaxTheme();
-      return true;
-    }
-  }
-
-  return false;
+  return registerShortcuts(shortcuts);
 }

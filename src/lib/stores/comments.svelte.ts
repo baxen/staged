@@ -7,7 +7,7 @@
  * rather than making their own API calls.
  */
 
-import type { Comment, Span, NewComment } from '../types';
+import type { Comment, Span, NewComment, DiffSpec } from '../types';
 import {
   getReview,
   addComment as apiAddComment,
@@ -20,31 +20,56 @@ import {
 import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 // =============================================================================
-// State
+// Type Definitions
 // =============================================================================
 
-interface CommentsState {
+/**
+ * Comments state type for factory pattern.
+ */
+export interface CommentsState {
   /** All comments for the current diff */
   comments: Comment[];
   /** Paths that have been marked as reviewed */
   reviewedPaths: string[];
   /** Currently selected file path (for filtering) */
   currentPath: string | null;
-  /** Diff refs for API calls */
-  diffBase: string | null;
-  diffHead: string | null;
+  /** Current diff spec for API calls */
+  currentSpec: DiffSpec | null;
+  /** Current repo path for API calls */
+  currentRepoPath: string | null;
   /** Loading state */
   loading: boolean;
 }
 
-export const commentsState: CommentsState = $state({
-  comments: [],
-  reviewedPaths: [],
-  currentPath: null,
-  diffBase: null,
-  diffHead: null,
-  loading: false,
-});
+// =============================================================================
+// Factory Function
+// =============================================================================
+
+/**
+ * Create a new isolated comments state instance.
+ * Used by the tab system to create per-tab state.
+ * Returns a plain object - caller should wrap with $state() if needed.
+ */
+export function createCommentsState(): CommentsState {
+  return {
+    comments: [],
+    reviewedPaths: [],
+    currentPath: null,
+    currentSpec: null,
+    currentRepoPath: null,
+    loading: false,
+  };
+}
+
+// =============================================================================
+// Reactive State (Singleton)
+// =============================================================================
+
+/**
+ * Module-level singleton state (for backwards compatibility).
+ * Will be replaced by activeTab.commentsState in Phase 4.
+ */
+export const commentsState = $state(createCommentsState());
 
 // =============================================================================
 // Derived
@@ -116,15 +141,41 @@ export function getTotalCommentCount(): number {
  * Load review data (comments and reviewed paths) for a diff.
  * This is the single API call for all review data.
  */
-export async function loadComments(base: string, head: string): Promise<void> {
+/**
+ * Callback to load reference files after review is loaded.
+ * Set by App.svelte to avoid circular imports.
+ */
+let onReferenceFilesLoaded:
+  | ((paths: string[], refName: string, repoPath?: string) => Promise<void>)
+  | null = null;
+
+/**
+ * Register a callback to load reference files when a review is loaded.
+ */
+export function setReferenceFilesLoader(
+  loader: (paths: string[], refName: string, repoPath?: string) => Promise<void>
+): void {
+  onReferenceFilesLoaded = loader;
+}
+
+export async function loadComments(spec: DiffSpec, repoPath?: string): Promise<void> {
   commentsState.loading = true;
-  commentsState.diffBase = base;
-  commentsState.diffHead = head;
+  commentsState.currentSpec = spec;
+  commentsState.currentRepoPath = repoPath ?? null;
 
   try {
-    const review = await getReview(base, head);
+    const review = await getReview(spec, repoPath);
     commentsState.comments = review.comments;
     commentsState.reviewedPaths = review.reviewed;
+
+    // Load reference files if any were persisted
+    if (review.reference_files.length > 0 && onReferenceFilesLoaded) {
+      const refName = spec.head.type === 'WorkingTree' ? 'HEAD' : spec.head.value;
+      // Don't await - let it load in background
+      onReferenceFilesLoaded(review.reference_files, refName, repoPath ?? undefined).catch((e) => {
+        console.error('Failed to load reference files:', e);
+      });
+    }
   } catch (e) {
     console.error('Failed to load review:', e);
     commentsState.comments = [];
@@ -145,19 +196,20 @@ export function isPathReviewed(path: string): boolean {
  * Toggle the reviewed status of a file.
  */
 export async function toggleReviewed(path: string): Promise<boolean> {
-  if (!commentsState.diffBase || !commentsState.diffHead) {
+  if (!commentsState.currentSpec) {
     console.error('Cannot toggle reviewed: no diff selected');
     return false;
   }
 
   const isCurrentlyReviewed = isPathReviewed(path);
+  const repoPath = commentsState.currentRepoPath ?? undefined;
 
   try {
     if (isCurrentlyReviewed) {
-      await apiUnmarkReviewed(commentsState.diffBase, commentsState.diffHead, path);
+      await apiUnmarkReviewed(commentsState.currentSpec, path, repoPath);
       commentsState.reviewedPaths = commentsState.reviewedPaths.filter((p) => p !== path);
     } else {
-      await apiMarkReviewed(commentsState.diffBase, commentsState.diffHead, path);
+      await apiMarkReviewed(commentsState.currentSpec, path, repoPath);
       commentsState.reviewedPaths = [...commentsState.reviewedPaths, path];
     }
     return true;
@@ -182,14 +234,15 @@ export async function addComment(
   span: Span,
   content: string
 ): Promise<Comment | null> {
-  if (!commentsState.diffBase || !commentsState.diffHead) {
+  if (!commentsState.currentSpec) {
     console.error('Cannot add comment: no diff selected');
     return null;
   }
 
   try {
     const newComment: NewComment = { path, span, content };
-    const comment = await apiAddComment(commentsState.diffBase, commentsState.diffHead, newComment);
+    const repoPath = commentsState.currentRepoPath ?? undefined;
+    const comment = await apiAddComment(commentsState.currentSpec, newComment, repoPath);
     commentsState.comments = [...commentsState.comments, comment];
     return comment;
   } catch (e) {
@@ -242,8 +295,8 @@ export async function deleteAllComments(): Promise<boolean> {
   } catch (e) {
     console.error('Failed to delete all comments:', e);
     // Reload to get accurate state
-    if (commentsState.diffBase && commentsState.diffHead) {
-      await loadComments(commentsState.diffBase, commentsState.diffHead);
+    if (commentsState.currentSpec) {
+      await loadComments(commentsState.currentSpec);
     }
     return false;
   }
@@ -253,13 +306,14 @@ export async function deleteAllComments(): Promise<boolean> {
  * Export all comments as markdown and copy to clipboard.
  */
 export async function copyCommentsToClipboard(): Promise<boolean> {
-  if (!commentsState.diffBase || !commentsState.diffHead) {
+  if (!commentsState.currentSpec) {
     console.error('Cannot export: no diff selected');
     return false;
   }
 
   try {
-    const markdown = await exportReviewMarkdown(commentsState.diffBase, commentsState.diffHead);
+    const repoPath = commentsState.currentRepoPath ?? undefined;
+    const markdown = await exportReviewMarkdown(commentsState.currentSpec, repoPath);
     await writeText(markdown);
     return true;
   } catch (e) {
@@ -275,7 +329,7 @@ export function clearComments(): void {
   commentsState.comments = [];
   commentsState.reviewedPaths = [];
   commentsState.currentPath = null;
-  commentsState.diffBase = null;
-  commentsState.diffHead = null;
+  commentsState.currentSpec = null;
+  commentsState.currentRepoPath = null;
   commentsState.loading = false;
 }

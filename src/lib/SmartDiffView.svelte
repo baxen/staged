@@ -47,7 +47,7 @@
 
   // Extract changed lines for code view
   let beforeLines = $derived.by(() => {
-    if (!diff?.before?.content || diff.before.content.type !== 'text') return [];
+    if (!diff?.before?.content || diff.before.content.type !== 'Text') return [];
     const lines = diff.before.content.lines;
     const changed = diff.alignments.filter((a) => a.changed);
     let result: { lineNum: number; text: string }[] = [];
@@ -60,7 +60,7 @@
   });
 
   let afterLines = $derived.by(() => {
-    if (!diff?.after?.content || diff.after.content.type !== 'text') return [];
+    if (!diff?.after?.content || diff.after.content.type !== 'Text') return [];
     const lines = diff.after.content.lines;
     const changed = diff.alignments.filter((a) => a.changed);
     let result: { lineNum: number; text: string }[] = [];

@@ -4,7 +4,7 @@
  * Pure helper functions for diff display.
  */
 
-import type { FileDiff, Alignment } from './types';
+import type { FileDiff, Alignment, FileContent } from './types';
 
 /**
  * Get display path from a FileDiff, handling renames.
@@ -81,8 +81,8 @@ export function getLanguageFromDiff<T>(
  * Check if a diff represents a binary file.
  */
 export function isBinaryDiff(diff: FileDiff): boolean {
-  const beforeBinary = diff.before?.content.type === 'binary';
-  const afterBinary = diff.after?.content.type === 'binary';
+  const beforeBinary = diff.before?.content.type === 'Binary';
+  const afterBinary = diff.after?.content.type === 'Binary';
   return beforeBinary || afterBinary;
 }
 
@@ -91,6 +91,27 @@ export function isBinaryDiff(diff: FileDiff): boolean {
  */
 export function getTextLines(diff: FileDiff, side: 'before' | 'after'): string[] {
   const file = side === 'before' ? diff.before : diff.after;
-  if (!file || file.content.type === 'binary') return [];
+  if (!file || file.content.type === 'Binary') return [];
   return file.content.lines;
+}
+
+/**
+ * Convert a reference file to a FileDiff for display.
+ *
+ * Reference files are displayed like new files (before: null) but with
+ * changed: false to indicate no actual diff highlighting.
+ */
+export function referenceFileAsDiff(path: string, content: FileContent): FileDiff {
+  const lineCount = content.type === 'Text' ? content.lines.length : 0;
+  return {
+    before: null,
+    after: { path, content },
+    alignments: [
+      {
+        before: { start: 0, end: 0 },
+        after: { start: 0, end: lineCount },
+        changed: false, // No change highlighting for reference files
+      },
+    ],
+  };
 }

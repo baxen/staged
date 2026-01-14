@@ -2,43 +2,93 @@
  * Diff Selection Store
  *
  * Manages the current diff specification (base..head) and presets.
- * Handles SHA resolution for tooltip display.
  *
  * Rebuildable: This module owns diff selection state. The rest of the app
  * imports the reactive state directly - no subscriptions needed.
  */
 
-import { resolveRef } from '../services/git';
-import type { DiffSpec } from '../types';
+import { DiffSpec } from '../types';
 
 // =============================================================================
-// Constants
+// Type Definitions
+// =============================================================================
+
+/** Preset diff specifications */
+export interface DiffPreset {
+  spec: DiffSpec;
+  label: string;
+}
+
+/**
+ * Diff selection state type for factory pattern.
+ */
+export interface DiffSelection {
+  /** Current diff specification */
+  spec: DiffSpec;
+  /** Label for current selection (preset name or custom) */
+  label: string;
+  /** PR number if this diff is for a GitHub PR */
+  prNumber: number | undefined;
+}
+
+/**
+ * Preset store type.
+ */
+export interface PresetStore {
+  presets: DiffPreset[];
+}
+
+// =============================================================================
+// Factory Functions
 // =============================================================================
 
 /**
- * Special ref representing the working tree (uncommitted changes on disk).
- * Must match the backend constant in git.rs.
+ * Create default presets.
  */
-export const WORKDIR = 'WORKDIR';
+function createDefaultPresets(): DiffPreset[] {
+  return [
+    { spec: DiffSpec.uncommitted(), label: 'Uncommitted' },
+    { spec: DiffSpec.uncommitted(), label: 'Branch Changes' }, // Base updated on init
+    { spec: DiffSpec.lastCommit(), label: 'Last Commit' },
+  ];
+}
+
+/**
+ * Create a new preset store instance.
+ * Returns a plain object - caller should wrap with $state() if needed.
+ */
+export function createPresetStore(): PresetStore {
+  return {
+    presets: createDefaultPresets(),
+  };
+}
+
+/**
+ * Create a new isolated diff selection state instance.
+ * Used by the tab system to create per-tab state.
+ * Returns a plain object - caller should wrap with $state() if needed.
+ */
+export function createDiffSelection(): DiffSelection {
+  const presets = createDefaultPresets();
+  return {
+    spec: presets[0].spec,
+    label: presets[0].label,
+    prNumber: undefined,
+  };
+}
 
 // =============================================================================
-// Presets
+// Reactive State (Singleton)
 // =============================================================================
 
 /**
  * Preset store - wrapped in object because Svelte doesn't allow exporting
  * reassignable $state. Access via `presetStore.presets`.
  */
-export const presetStore = $state({
-  presets: [
-    { base: 'HEAD', head: WORKDIR, label: 'Uncommitted' },
-    { base: 'main', head: WORKDIR, label: 'Branch Changes', useMergeBase: true },
-    { base: 'HEAD~1', head: 'HEAD', label: 'Last Commit' },
-  ] as DiffSpec[],
-});
+export const presetStore = $state(createPresetStore());
 
 /** Convenience getter for presets */
-export function getPresets(): readonly DiffSpec[] {
+export function getPresets(): readonly DiffPreset[] {
   return presetStore.presets;
 }
 
@@ -47,62 +97,43 @@ export function getPresets(): readonly DiffSpec[] {
  * Called during app initialization.
  */
 export function setDefaultBranch(branch: string): void {
-  presetStore.presets = presetStore.presets.map((preset) =>
-    preset.label === 'Branch Changes' ? { ...preset, base: branch } : preset
-  );
+  presetStore.presets = presetStore.presets.map((preset) => {
+    if (preset.label === 'Branch Changes') {
+      return {
+        ...preset,
+        spec: {
+          base: { type: 'Rev', value: branch },
+          head: { type: 'WorkingTree' },
+        },
+      };
+    }
+    return preset;
+  });
 }
-
-// =============================================================================
-// Reactive State
-// =============================================================================
 
 /**
  * Diff selection state object.
  * Use this directly in components - it's reactive!
- *
- * Note: We use an object wrapper because Svelte doesn't allow exporting
- * reassignable $state. By mutating properties instead, reactivity works
- * across module boundaries.
+ * Will be replaced by activeTab.diffSelection in Phase 4.
  */
-export const diffSelection = $state({
-  /** Current diff specification */
-  spec: presetStore.presets[0] as DiffSpec,
-  /** Resolved SHA for base ref (for tooltip display) */
-  resolvedBaseSha: null as string | null,
-  /** Resolved SHA for head ref (for tooltip display) */
-  resolvedHeadSha: null as string | null,
-});
+export const diffSelection = $state(createDiffSelection());
 
 // =============================================================================
-// Derived State (as getters - Svelte doesn't allow exporting $derived)
+// Derived State (as getters)
 // =============================================================================
 
 /** Whether current spec matches a preset */
 export function isPreset(): boolean {
   return presetStore.presets.some(
     (p) =>
-      p.base === diffSelection.spec.base &&
-      p.head === diffSelection.spec.head &&
-      p.label === diffSelection.spec.label
+      DiffSpec.display(p.spec) === DiffSpec.display(diffSelection.spec) &&
+      p.label === diffSelection.label
   );
 }
 
 /** Display label - preset name or "base..head" */
 export function getDisplayLabel(): string {
-  return isPreset()
-    ? diffSelection.spec.label
-    : `${diffSelection.spec.base}..${diffSelection.spec.head}`;
-}
-
-/** Tooltip showing resolved SHAs */
-export function getTooltipText(): string {
-  const basePart = diffSelection.resolvedBaseSha
-    ? `${diffSelection.spec.base} (${diffSelection.resolvedBaseSha})`
-    : diffSelection.spec.base;
-  const headPart = diffSelection.resolvedHeadSha
-    ? `${diffSelection.spec.head} (${diffSelection.resolvedHeadSha})`
-    : diffSelection.spec.head;
-  return `${basePart} → ${headPart}`;
+  return diffSelection.label;
 }
 
 // =============================================================================
@@ -110,53 +141,28 @@ export function getTooltipText(): string {
 // =============================================================================
 
 /**
- * Update resolved SHAs for the current diff spec.
+ * Select a preset.
  */
-async function updateResolvedShas(): Promise<void> {
-  try {
-    diffSelection.resolvedBaseSha = await resolveRef(diffSelection.spec.base);
-    diffSelection.resolvedHeadSha = await resolveRef(diffSelection.spec.head);
-  } catch {
-    diffSelection.resolvedBaseSha = null;
-    diffSelection.resolvedHeadSha = null;
-  }
+export function selectPreset(preset: DiffPreset): void {
+  diffSelection.spec = preset.spec;
+  diffSelection.label = preset.label;
 }
 
 /**
- * Select a diff specification.
- * Resolves SHAs - reactivity handles the rest.
+ * Select a custom diff specification.
  */
-export async function selectDiffSpec(spec: DiffSpec): Promise<void> {
+export function selectCustomDiff(spec: DiffSpec, label?: string, prNumber?: number): void {
   diffSelection.spec = spec;
-  await updateResolvedShas();
-}
-
-/**
- * Select a diff by base and head refs (creates a custom spec).
- */
-export async function selectCustomDiff(base: string, head: string, label?: string): Promise<void> {
-  await selectDiffSpec({
-    base,
-    head,
-    label: label ?? `${base}..${head}`,
-  });
-}
-
-/**
- * Initialize the diff selection (resolve initial SHAs).
- * Call once on app startup.
- */
-export async function initDiffSelection(): Promise<void> {
-  await updateResolvedShas();
+  diffSelection.label = label ?? DiffSpec.display(spec);
+  diffSelection.prNumber = prNumber;
 }
 
 /**
  * Reset diff selection to "Uncommitted" (first preset).
  * Call when switching repositories.
  */
-export async function resetDiffSelection(): Promise<void> {
-  diffSelection.spec = presetStore.presets[0];
-  diffSelection.resolvedBaseSha = null;
-  diffSelection.resolvedHeadSha = null;
-  await updateResolvedShas();
+export function resetDiffSelection(): void {
+  diffSelection.spec = presetStore.presets[0].spec;
+  diffSelection.label = presetStore.presets[0].label;
+  diffSelection.prNumber = undefined;
 }

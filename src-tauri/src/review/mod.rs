@@ -2,6 +2,9 @@
 //!
 //! Reviews are stored separately from git, keyed by DiffId.
 
+mod ai_describe;
+pub use ai_describe::{describe_hunk, HunkDescription};
+
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -9,7 +12,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
-use super::types::{DiffId, Span};
+use crate::git::{DiffId, Span};
 
 // =============================================================================
 // Types
@@ -25,6 +28,8 @@ pub struct Review {
     pub comments: Vec<Comment>,
     /// Edits made during review (stored as diffs)
     pub edits: Vec<Edit>,
+    /// Paths of reference files (files outside the diff that were viewed)
+    pub reference_files: Vec<String>,
 }
 
 impl Review {
@@ -34,6 +39,7 @@ impl Review {
             reviewed: Vec::new(),
             comments: Vec::new(),
             edits: Vec::new(),
+            reference_files: Vec::new(),
         }
     }
 }
@@ -187,21 +193,15 @@ impl ReviewStore {
     fn init_schema(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
 
-        // Drop legacy comments table and recreate with clean schema
         conn.execute_batch(
             r#"
-            DROP TABLE IF EXISTS comments;
-            DROP TABLE IF EXISTS reviewed_files;
-            DROP TABLE IF EXISTS edits;
-            DROP TABLE IF EXISTS reviews;
-
-            CREATE TABLE reviews (
+            CREATE TABLE IF NOT EXISTS reviews (
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
                 PRIMARY KEY (before_ref, after_ref)
             );
 
-            CREATE TABLE reviewed_files (
+            CREATE TABLE IF NOT EXISTS reviewed_files (
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
                 path TEXT NOT NULL,
@@ -209,7 +209,7 @@ impl ReviewStore {
                 FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
             );
 
-            CREATE TABLE comments (
+            CREATE TABLE IF NOT EXISTS comments (
                 id TEXT PRIMARY KEY,
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
@@ -220,12 +220,20 @@ impl ReviewStore {
                 FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
             );
 
-            CREATE TABLE edits (
+            CREATE TABLE IF NOT EXISTS edits (
                 id TEXT PRIMARY KEY,
                 before_ref TEXT NOT NULL,
                 after_ref TEXT NOT NULL,
                 path TEXT NOT NULL,
                 diff TEXT NOT NULL,
+                FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS reference_files (
+                before_ref TEXT NOT NULL,
+                after_ref TEXT NOT NULL,
+                path TEXT NOT NULL,
+                PRIMARY KEY (before_ref, after_ref, path),
                 FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
             );
 
@@ -305,11 +313,19 @@ impl ReviewStore {
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
+        // Load reference files
+        let mut stmt = conn
+            .prepare("SELECT path FROM reference_files WHERE before_ref = ?1 AND after_ref = ?2")?;
+        let reference_files: Vec<String> = stmt
+            .query_map(params![&id.before, &id.after], |row| row.get(0))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
         Ok(Review {
             id: id.clone(),
             reviewed,
             comments,
             edits,
+            reference_files,
         })
     }
 
@@ -386,6 +402,27 @@ impl ReviewStore {
     pub fn delete_edit(&self, edit_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM edits WHERE id = ?1", params![edit_id])?;
+        Ok(())
+    }
+
+    /// Add a reference file path.
+    pub fn add_reference_file(&self, id: &DiffId, path: &str) -> Result<()> {
+        self.get_or_create(id)?;
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR IGNORE INTO reference_files (before_ref, after_ref, path) VALUES (?1, ?2, ?3)",
+            params![&id.before, &id.after, path],
+        )?;
+        Ok(())
+    }
+
+    /// Remove a reference file path.
+    pub fn remove_reference_file(&self, id: &DiffId, path: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM reference_files WHERE before_ref = ?1 AND after_ref = ?2 AND path = ?3",
+            params![&id.before, &id.after, path],
+        )?;
         Ok(())
     }
 

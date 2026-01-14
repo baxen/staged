@@ -1,43 +1,39 @@
+<!--
+  DiffSelectorModal.svelte - Custom diff range picker
+  
+  Allows selecting arbitrary base..head refs with autocomplete.
+-->
 <script lang="ts">
   import { GitBranch, Tag, Diamond, X, AlertCircle } from 'lucide-svelte';
-  import { getRefs, resolveRef } from './services/git';
-  import type { GitRef } from './types';
-  import { WORKDIR } from './stores/diffSelection.svelte';
+  import { listRefs, resolveRef } from './services/git';
+  import { inferRefType, DiffSpec } from './types';
 
   interface Props {
     initialBase: string;
     initialHead: string;
-    onSubmit: (base: string, head: string) => void;
+    onSubmit: (spec: DiffSpec) => void;
     onClose: () => void;
   }
 
   let { initialBase, initialHead, onSubmit, onClose }: Props = $props();
 
-  // Use a function to capture initial values properly
-  let baseInput = $state('');
-  let headInput = $state('');
-
-  // Initialize from props on first render
-  $effect(() => {
-    // Only set once when component mounts
-    if (baseInput === '' && headInput === '') {
-      baseInput = initialBase;
-      headInput = initialHead;
-    }
-  });
-
+  // svelte-ignore state_referenced_locally
+  let baseInput = $state(initialBase);
+  // svelte-ignore state_referenced_locally
+  let headInput = $state(initialHead);
   let error = $state<string | null>(null);
   let validating = $state(false);
 
   // Autocomplete state
-  let allRefs = $state<GitRef[]>([]);
+  let allRefs = $state<string[]>([]);
   let activeInput = $state<'base' | 'head' | null>(null);
   let selectedIndex = $state(0);
 
   // Load refs on mount
   $effect(() => {
-    getRefs().then((refs) => {
-      allRefs = refs;
+    listRefs().then((refs) => {
+      // Add special refs that aren't in for-each-ref output
+      allRefs = ['HEAD', '@', ...refs];
     });
   });
 
@@ -51,18 +47,18 @@
   let filteredRefs = $derived.by(() => {
     if (!activeInput) return [];
     const query = (activeInput === 'base' ? baseInput : headInput).toLowerCase();
-    return allRefs.filter((r) => {
-      // WORKDIR can only be used as head
-      if (activeInput === 'base' && r.name === WORKDIR) return false;
-      return r.name.toLowerCase().includes(query);
+    return allRefs.filter((ref) => {
+      // @ (working tree) can only be used as head
+      if (activeInput === 'base' && ref === '@') return false;
+      return ref.toLowerCase().includes(query);
     });
   });
 
-  function selectSuggestion(ref: GitRef) {
+  function selectSuggestion(ref: string) {
     if (activeInput === 'base') {
-      baseInput = ref.name;
+      baseInput = ref;
     } else if (activeInput === 'head') {
-      headInput = ref.name;
+      headInput = ref;
     }
     selectedIndex = 0;
     activeInput = null;
@@ -101,29 +97,39 @@
     validating = true;
 
     try {
-      // Validate: WORKDIR can only be used as head
-      if (baseInput === WORKDIR) {
-        error = 'Working directory can only be used as the "after" state';
+      // Validate: @ can only be used as head
+      if (baseInput === '@') {
+        error = 'Working tree (@) can only be used as the "after" state';
         validating = false;
         return;
       }
 
-      // Validate refs exist
-      const baseSha = await resolveRef(baseInput);
-      const headSha = await resolveRef(headInput);
-
-      if (!baseSha) {
+      // Validate refs exist (@ is always valid for head)
+      try {
+        await resolveRef(baseInput);
+      } catch {
         error = `Cannot resolve: ${baseInput}`;
         validating = false;
         return;
       }
-      if (!headSha) {
-        error = `Cannot resolve: ${headInput}`;
-        validating = false;
-        return;
+
+      if (headInput !== '@') {
+        try {
+          await resolveRef(headInput);
+        } catch {
+          error = `Cannot resolve: ${headInput}`;
+          validating = false;
+          return;
+        }
       }
 
-      onSubmit(baseInput, headInput);
+      // Build the DiffSpec
+      const spec: DiffSpec = {
+        base: { type: 'Rev', value: baseInput },
+        head: headInput === '@' ? { type: 'WorkingTree' } : { type: 'Rev', value: headInput },
+      };
+
+      onSubmit(spec);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -135,6 +141,13 @@
     if (event.target === event.currentTarget) {
       onClose();
     }
+  }
+
+  function getRefIcon(ref: string) {
+    const refType = inferRefType(ref);
+    if (refType === 'tag') return Tag;
+    if (refType === 'special') return Diamond;
+    return GitBranch;
   }
 </script>
 
@@ -183,19 +196,14 @@
           {#if activeInput === 'base' && filteredRefs.length > 0}
             <div class="suggestions">
               {#each filteredRefs.slice(0, 8) as ref, i}
+                {@const Icon = getRefIcon(ref)}
                 <button
                   class="suggestion"
                   class:selected={i === selectedIndex}
                   onmousedown={() => selectSuggestion(ref)}
                 >
-                  {#if ref.ref_type === 'branch'}
-                    <GitBranch size={12} />
-                  {:else if ref.ref_type === 'tag'}
-                    <Tag size={12} />
-                  {:else}
-                    <Diamond size={12} />
-                  {/if}
-                  <span>{ref.name}</span>
+                  <Icon size={12} />
+                  <span>{ref}</span>
                 </button>
               {/each}
             </div>
@@ -212,7 +220,7 @@
             type="text"
             class="ref-input"
             bind:value={headInput}
-            placeholder="e.g., HEAD, feature-branch, WORKDIR"
+            placeholder="e.g., HEAD, feature-branch, @"
             onfocus={() => {
               activeInput = 'head';
               selectedIndex = 0;
@@ -224,25 +232,20 @@
           {#if activeInput === 'head' && filteredRefs.length > 0}
             <div class="suggestions">
               {#each filteredRefs.slice(0, 8) as ref, i}
+                {@const Icon = getRefIcon(ref)}
                 <button
                   class="suggestion"
                   class:selected={i === selectedIndex}
                   onmousedown={() => selectSuggestion(ref)}
                 >
-                  {#if ref.ref_type === 'branch'}
-                    <GitBranch size={12} />
-                  {:else if ref.ref_type === 'tag'}
-                    <Tag size={12} />
-                  {:else}
-                    <Diamond size={12} />
-                  {/if}
-                  <span>{ref.name}</span>
+                  <Icon size={12} />
+                  <span>{ref}</span>
                 </button>
               {/each}
             </div>
           {/if}
         </div>
-        <span class="hint">The ending point (use WORKDIR for uncommitted changes)</span>
+        <span class="hint">The ending point (use @ for uncommitted changes)</span>
       </div>
 
       {#if error}

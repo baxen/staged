@@ -1,11 +1,12 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { X, AlertCircle, RefreshCw, GitPullRequest, ExternalLink } from 'lucide-svelte';
-  import { checkGitHubAuth, listPullRequests, fetchPRBranch } from './services/git';
-  import type { PullRequest, GitHubAuthStatus } from './types';
+  import { checkGitHubAuth, listPullRequests, fetchPR, invalidatePRCache } from './services/git';
+  import type { PullRequest, GitHubAuthStatus, DiffSpec } from './types';
 
   interface Props {
     repoPath: string | null;
-    onSubmit: (base: string, head: string, label: string) => void;
+    onSubmit: (spec: DiffSpec, label: string, prNumber: number) => Promise<void>;
     onClose: () => void;
   }
 
@@ -18,7 +19,7 @@
   let error = $state<string | null>(null);
   let searchQuery = $state('');
   let selectedIndex = $state(0);
-  let fetching = $state(false);
+  let fetchingStatus = $state<'idle' | 'fetching' | 'loading'>('idle');
 
   // Filtered PRs based on search
   let filteredPRs = $derived.by(() => {
@@ -34,10 +35,10 @@
 
   // Load auth status and PRs on mount
   $effect(() => {
-    loadPRs(false);
+    loadPRs();
   });
 
-  async function loadPRs(forceRefresh: boolean) {
+  async function loadPRs() {
     loading = true;
     error = null;
 
@@ -51,7 +52,7 @@
       }
 
       // Fetch PRs using the provided repo path
-      pullRequests = await listPullRequests(repoPath ?? undefined, forceRefresh);
+      pullRequests = await listPullRequests(repoPath ?? undefined);
       selectedIndex = 0;
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -60,25 +61,28 @@
     }
   }
 
-  function handleRefresh() {
-    loadPRs(true);
+  async function handleRefresh() {
+    await invalidatePRCache(repoPath ?? undefined);
+    loadPRs();
   }
 
   async function selectPR(pr: PullRequest) {
     // Fetch the PR using GitHub's PR refs (works for both same-repo and fork PRs)
-    // This returns both the merge-base SHA and head SHA for stable identification
-    fetching = true;
+    // This returns a DiffSpec with concrete SHAs
+    fetchingStatus = 'fetching';
     error = null;
+    // Allow Svelte to render the loading state before starting async work
+    await tick();
 
     try {
-      const result = await fetchPRBranch(pr.base_ref, pr.number, repoPath ?? undefined);
-      // Use merge-base as the base ref so we show only the PR's changes,
-      // not changes that happened on the base branch since the PR was created
-      // Use the head SHA directly (not the ref) for stable review storage
-      onSubmit(result.merge_base, result.head_sha, `PR #${pr.number}`);
+      const spec = await fetchPR(pr.base_ref, pr.number, repoPath ?? undefined);
+      // Now load the diff files
+      fetchingStatus = 'loading';
+      await onSubmit(spec, `PR #${pr.number}`, pr.number);
+      onClose();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
-      fetching = false;
+      fetchingStatus = 'idle';
     }
   }
 
@@ -86,7 +90,7 @@
     if (event.key === 'Escape') {
       onClose();
       event.preventDefault();
-    } else if (event.key === 'Enter' && filteredPRs.length > 0 && !fetching) {
+    } else if (event.key === 'Enter' && filteredPRs.length > 0 && fetchingStatus === 'idle') {
       selectPR(filteredPRs[selectedIndex]);
       event.preventDefault();
     } else if (event.key === 'ArrowDown') {
@@ -108,14 +112,6 @@
     if (event.target === event.currentTarget) {
       onClose();
     }
-  }
-
-  function formatLineChanges(additions: number, deletions: number): string {
-    if (additions === 0 && deletions === 0) return '';
-    const parts = [];
-    if (additions > 0) parts.push(`+${additions}`);
-    if (deletions > 0) parts.push(`-${deletions}`);
-    return parts.join(' ');
   }
 </script>
 
@@ -151,10 +147,10 @@
           <RefreshCw size={24} class="spinner" />
           <span>Loading pull requests...</span>
         </div>
-      {:else if fetching}
+      {:else if fetchingStatus !== 'idle'}
         <div class="loading-state">
           <RefreshCw size={24} class="spinner" />
-          <span>Fetching branch...</span>
+          <span>{fetchingStatus === 'fetching' ? 'Fetching PR...' : 'Loading diff...'}</span>
         </div>
       {:else if !authStatus?.authenticated}
         <div class="auth-required">
@@ -195,7 +191,7 @@
         <div class="error-state">
           <AlertCircle size={24} />
           <span>{error}</span>
-          <button class="retry-btn" onclick={() => loadPRs(true)}>Try Again</button>
+          <button class="retry-btn" onclick={() => loadPRs()}>Try Again</button>
         </div>
       {:else if pullRequests.length === 0}
         <div class="empty-state">
@@ -232,9 +228,6 @@
               <div class="pr-meta">
                 <span class="pr-author">@{pr.author}</span>
                 <span class="pr-refs">{pr.base_ref} ← {pr.head_ref}</span>
-                {#if pr.additions > 0 || pr.deletions > 0}
-                  <span class="pr-changes">{formatLineChanges(pr.additions, pr.deletions)}</span>
-                {/if}
               </div>
             </button>
           {/each}
@@ -575,11 +568,6 @@
 
   .pr-refs {
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-  }
-
-  .pr-changes {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    color: var(--text-faint);
   }
 
   .no-results {

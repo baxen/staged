@@ -93,6 +93,9 @@ export function createScrollController() {
   let beforeDims: PaneDimensions = { viewportHeight: 0, contentHeight: 0, lineHeight: 20 };
   let afterDims: PaneDimensions = { viewportHeight: 0, contentHeight: 0, lineHeight: 20 };
 
+  // Track current file to detect file changes vs content refreshes
+  let currentFilePath: string | null = null;
+
   // Current scroll positions
   let beforeScrollY = $state(0);
   let afterScrollY = $state(0);
@@ -171,12 +174,25 @@ export function createScrollController() {
 
     /**
      * Update alignments when diff content changes.
+     * Only resets scroll when file changes, not on content refresh.
+     *
+     * @param newAlignments - The new alignments
+     * @param filePath - Optional file path to track file identity
      */
-    setAlignments(newAlignments: Alignment[]) {
+    setAlignments(newAlignments: Alignment[], filePath?: string | null) {
       alignments = newAlignments;
-      // Reset scroll positions when content changes
-      beforeScrollY = 0;
-      afterScrollY = 0;
+
+      // Only reset scroll when switching to a different file
+      const fileChanged = filePath !== undefined && filePath !== currentFilePath;
+      if (fileChanged) {
+        currentFilePath = filePath ?? null;
+        beforeScrollY = 0;
+        afterScrollY = 0;
+      } else {
+        // Content refresh - clamp scroll to new bounds but preserve position
+        beforeScrollY = clampScroll(beforeScrollY, beforeDims);
+        afterScrollY = clampScroll(afterScrollY, afterDims);
+      }
     },
 
     /**
