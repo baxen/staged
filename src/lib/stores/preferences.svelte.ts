@@ -38,11 +38,9 @@ const SIZE_DEFAULT = 13;
 const SIZE_STORAGE_KEY = 'staged-size-base';
 const SYNTAX_THEME_STORAGE_KEY = 'staged-syntax-theme';
 const SIDEBAR_POSITION_STORAGE_KEY = 'staged-sidebar-position';
-const PR_BASE_BRANCH_STORAGE_KEY = 'staged-pr-base-branch';
 const KEYBOARD_BINDINGS_STORAGE_KEY = 'staged-keyboard-bindings';
 const DEFAULT_SYNTAX_THEME: SyntaxThemeName = 'laserwave';
 const DEFAULT_SIDEBAR_POSITION: SidebarPosition = 'right';
-const DEFAULT_PR_BASE_BRANCH = 'origin/main';
 
 export type SidebarPosition = 'left' | 'right';
 
@@ -74,8 +72,6 @@ export const preferences = $state({
   syntaxThemeVersion: 0,
   /** Sidebar position (left or right) */
   sidebarPosition: DEFAULT_SIDEBAR_POSITION as SidebarPosition,
-  /** Base branch for PR-style diff */
-  prBaseBranch: DEFAULT_PR_BASE_BRANCH,
 });
 
 // =============================================================================
@@ -292,28 +288,6 @@ export function loadSavedSidebarPosition(): void {
   const saved = localStorage.getItem(SIDEBAR_POSITION_STORAGE_KEY);
   if (saved === 'left' || saved === 'right') {
     preferences.sidebarPosition = saved;
-  }
-}
-
-// =============================================================================
-// PR Base Branch Actions
-// =============================================================================
-
-/**
- * Set PR base branch.
- */
-export function setPRBaseBranch(branch: string): void {
-  preferences.prBaseBranch = branch;
-  localStorage.setItem(PR_BASE_BRANCH_STORAGE_KEY, branch);
-}
-
-/**
- * Load saved PR base branch.
- */
-export function loadSavedPRBaseBranch(): void {
-  const saved = localStorage.getItem(PR_BASE_BRANCH_STORAGE_KEY);
-  if (saved) {
-    preferences.prBaseBranch = saved;
   }
 }
 

@@ -40,7 +40,6 @@
     loadSavedSize,
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
-    loadSavedPRBaseBranch,
     getCustomKeyboardBindings,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
@@ -52,6 +51,7 @@
     selectCustomDiff,
     resetDiffSelection,
     setDefaultBranch,
+    getDefaultBranch,
     type DiffPreset,
   } from './lib/stores/diffSelection.svelte';
   import {
@@ -114,11 +114,11 @@
     resetState();
     clearReferenceFiles();
 
-    // Handle vs Merge Base preset specially - compute merge-base
-    if (preset.label === 'vs Merge Base') {
+    // Branch Changes uses merge-base for cleaner diffs
+    if (preset.label === 'Branch Changes') {
       try {
         const mergeBaseSha = await getMergeBase(
-          preferences.prBaseBranch,
+          getDefaultBranch(),
           'HEAD',
           repoState.currentPath ?? undefined
         );
@@ -126,7 +126,7 @@
           base: { type: 'Rev', value: mergeBaseSha },
           head: { type: 'WorkingTree' },
         };
-        selectCustomDiff(spec, 'vs Merge Base');
+        selectCustomDiff(spec, preset.label);
       } catch (e) {
         console.error('Failed to compute merge-base:', e);
         diffState.error = `Failed to compute merge base: ${e}`;
@@ -460,7 +460,6 @@
   onMount(() => {
     loadSavedSize();
     loadSavedSidebarPosition();
-    loadSavedPRBaseBranch();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     // Apply custom keyboard bindings after a short delay to let shortcuts register

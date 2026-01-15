@@ -3,8 +3,7 @@
 
   Sections:
   1. Layout - Sidebar position toggle
-  2. Diff - PR base branch configuration
-  3. Keyboard - Shortcut customization
+  2. Keyboard - Shortcut customization
 -->
 <script lang="ts">
   import {
@@ -12,14 +11,12 @@
     Settings,
     PanelLeft,
     PanelRight,
-    GitBranch,
     Keyboard,
     RotateCcw,
   } from 'lucide-svelte';
   import {
     preferences,
     toggleSidebarPosition,
-    setPRBaseBranch,
     saveCustomKeyboardBinding,
     removeCustomKeyboardBinding,
     resetAllKeyboardBindings,
@@ -44,11 +41,8 @@
   let { onClose }: Props = $props();
 
   // Active tab
-  type Tab = 'layout' | 'diff' | 'keyboard';
+  type Tab = 'layout' | 'keyboard';
   let activeTab = $state<Tab>('layout');
-
-  // PR base branch input
-  let prBaseBranchInput = $state(preferences.prBaseBranch);
 
   // Keyboard rebinding state
   let editingShortcutId = $state<string | null>(null);
@@ -243,12 +237,6 @@
     }
   }
 
-  function handlePRBaseBranchSave() {
-    const trimmed = prBaseBranchInput.trim();
-    if (trimmed) {
-      setPRBaseBranch(trimmed);
-    }
-  }
 </script>
 
 <svelte:window onkeydown={editingShortcutId ? handleKeyCapture : handleKeydown} />
@@ -286,14 +274,6 @@
         </button>
         <button
           class="tab"
-          class:active={activeTab === 'diff'}
-          onclick={() => (activeTab = 'diff')}
-        >
-          <GitBranch size={14} />
-          Diff
-        </button>
-        <button
-          class="tab"
           class:active={activeTab === 'keyboard'}
           onclick={() => (activeTab = 'keyboard')}
         >
@@ -327,30 +307,6 @@
                 <PanelRight size={14} />
                 Right
               </button>
-            </div>
-          </div>
-        </div>
-      {/if}
-
-      <!-- Diff Tab -->
-      {#if activeTab === 'diff'}
-        <div class="tab-content">
-          <div class="setting-row vertical">
-            <div class="setting-info">
-              <div class="setting-label">Merge Base Branch</div>
-              <div class="setting-description">
-                Base branch for "vs Merge Base" diff. Uses merge-base to show only your branch's
-                changes.
-              </div>
-            </div>
-            <div class="input-group">
-              <input
-                type="text"
-                bind:value={prBaseBranchInput}
-                placeholder="origin/main"
-                onblur={handlePRBaseBranchSave}
-                onkeydown={(e) => e.key === 'Enter' && handlePRBaseBranchSave()}
-              />
             </div>
           </div>
         </div>
@@ -552,12 +508,6 @@
     gap: 20px;
   }
 
-  .setting-row.vertical {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
   .setting-info {
     flex: 1;
   }
@@ -606,30 +556,6 @@
     background: var(--bg-chrome);
     color: var(--text-primary);
     box-shadow: var(--shadow-subtle);
-  }
-
-  .input-group input {
-    width: 100%;
-    padding: 10px 12px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-muted);
-    border-radius: 6px;
-    color: var(--text-primary);
-    font-size: var(--size-sm);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    transition:
-      border-color 0.1s,
-      background-color 0.1s;
-  }
-
-  .input-group input::placeholder {
-    color: var(--text-faint);
-  }
-
-  .input-group input:focus {
-    outline: none;
-    border-color: var(--border-emphasis);
-    background-color: var(--bg-hover);
   }
 
   /* Keyboard Tab */
