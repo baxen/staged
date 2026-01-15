@@ -519,7 +519,6 @@
   <TopBar
     onPresetSelect={handlePresetSelect}
     onCustomDiff={handleCustomDiff}
-    onRepoChange={handleRepoChange}
     onCommit={() => {
       const tab = getActiveTab();
       if (tab) handleFilesChanged(tab.repoPath);

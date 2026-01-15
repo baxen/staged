@@ -102,7 +102,6 @@
     position: relative;
     display: flex;
     gap: 2px;
-    flex: 1;
     overflow-x: auto;
     scrollbar-width: none; /* Firefox */
   }
@@ -167,6 +166,26 @@
     max-width: 200px;
   }
 
+  /* Separator between tabs */
+  .tab::after {
+    content: '';
+    position: absolute;
+    right: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1px;
+    height: 16px;
+    background: var(--border-subtle);
+    transition: opacity 0.1s;
+  }
+
+  /* Hide separator for active tab, its neighbors, and last tab */
+  .tab.active::after,
+  .tab:has(+ .tab.active)::after,
+  .tab:last-child::after {
+    opacity: 0;
+  }
+
   .tab.active {
     color: var(--text-primary);
     filter: invert(0);
@@ -202,16 +221,30 @@
   }
 
   .new-tab-btn {
+    position: relative;
     display: flex;
     align-items: center;
     padding: 6px;
     background: transparent;
     margin-bottom: 3px;
+    margin-left: 4px;
     border: none;
     border-radius: 6px;
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.1s;
+  }
+
+  /* Separator before new tab button */
+  .new-tab-btn::before {
+    content: '';
+    position: absolute;
+    left: -5px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 1px;
+    height: 16px;
+    background: var(--border-subtle);
   }
 
   .new-tab-btn:hover {
