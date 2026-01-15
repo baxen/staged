@@ -6,14 +6,7 @@
   2. Keyboard - Shortcut customization
 -->
 <script lang="ts">
-  import {
-    X,
-    Settings,
-    PanelLeft,
-    PanelRight,
-    Keyboard,
-    RotateCcw,
-  } from 'lucide-svelte';
+  import { X, Settings, PanelLeft, PanelRight, Keyboard, RotateCcw } from 'lucide-svelte';
   import {
     preferences,
     toggleSidebarPosition,
@@ -236,7 +229,6 @@
       }
     }
   }
-
 </script>
 
 <svelte:window onkeydown={editingShortcutId ? handleKeyCapture : handleKeydown} />
