@@ -40,6 +40,9 @@
     loadSavedSize,
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
+    loadSavedSidebarWidth,
+    setSidebarWidth,
+    resetSidebarWidth,
     getCustomKeyboardBindings,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
@@ -82,6 +85,45 @@
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
+
+  // Sidebar resize state
+  let isDraggingSidebar = $state(false);
+  let dragStartX = $state(0);
+  let dragStartWidth = $state(0);
+
+  // Sidebar resize handlers
+  function handleSidebarResizeStart(e: MouseEvent) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+
+    isDraggingSidebar = true;
+    dragStartX = e.clientX;
+    dragStartWidth = preferences.sidebarWidth;
+
+    document.addEventListener('mousemove', handleSidebarResizeMove);
+    document.addEventListener('mouseup', handleSidebarResizeEnd);
+  }
+
+  function handleSidebarResizeMove(e: MouseEvent) {
+    if (!isDraggingSidebar) return;
+
+    const delta = preferences.sidebarPosition === 'left'
+      ? e.clientX - dragStartX
+      : dragStartX - e.clientX;
+
+    const newWidth = dragStartWidth + delta;
+    setSidebarWidth(newWidth);
+  }
+
+  function handleSidebarResizeEnd() {
+    isDraggingSidebar = false;
+    document.removeEventListener('mousemove', handleSidebarResizeMove);
+    document.removeEventListener('mouseup', handleSidebarResizeEnd);
+  }
+
+  function handleSidebarResizeDoubleClick() {
+    resetSidebarWidth();
+  }
 
   // Load files and comments for current spec
   async function loadAll() {
@@ -462,6 +504,7 @@
   onMount(() => {
     loadSavedSize();
     loadSavedSidebarPosition();
+    loadSavedSidebarWidth();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     // Apply custom keyboard bindings after a short delay to let shortcuts register
@@ -541,6 +584,9 @@
     unsubscribeMenuOpenFolder?.();
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();
+    // Cleanup sidebar resize listeners
+    document.removeEventListener('mousemove', handleSidebarResizeMove);
+    document.removeEventListener('mouseup', handleSidebarResizeEnd);
   });
 </script>
 
@@ -585,7 +631,19 @@
           />
         {/if}
       </section>
-      <aside class="sidebar">
+      <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
+        <!-- Resize handle -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div
+          class="sidebar-resize-handle"
+          class:left={preferences.sidebarPosition === 'left'}
+          class:dragging={isDraggingSidebar}
+          onmousedown={handleSidebarResizeStart}
+          ondblclick={handleSidebarResizeDoubleClick}
+        >
+          <div class="resize-handle-bar"></div>
+        </div>
+
         <Sidebar
           files={diffState.files}
           loading={diffState.loading}
@@ -650,12 +708,56 @@
   }
 
   .sidebar {
-    width: 260px;
+    width: calc(var(--sidebar-width) * 1px);
     min-width: 180px;
     background-color: transparent;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    position: relative;
+  }
+
+  .sidebar-resize-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 100;
+    display: flex;
+    align-items: stretch;
+  }
+
+  .sidebar-resize-handle.left {
+    right: 0;
+  }
+
+  .sidebar-resize-handle:not(.left) {
+    left: 0;
+  }
+
+  .resize-handle-bar {
+    margin: auto;
+    width: 4px;
+    height: 100%;
+    background-color: var(--border-muted);
+    border-radius: 2px;
+    opacity: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+
+  .sidebar-resize-handle:hover .resize-handle-bar,
+  .sidebar-resize-handle.dragging .resize-handle-bar {
+    opacity: 1;
+  }
+
+  .sidebar-resize-handle.dragging .resize-handle-bar {
+    background-color: var(--accent-primary);
+  }
+
+  .app-container:has(.sidebar-resize-handle.dragging) {
+    user-select: none;
   }
 
   .main-content {
