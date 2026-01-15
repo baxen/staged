@@ -38,9 +38,17 @@ const SIZE_DEFAULT = 13;
 const SIZE_STORAGE_KEY = 'staged-size-base';
 const SYNTAX_THEME_STORAGE_KEY = 'staged-syntax-theme';
 const SIDEBAR_POSITION_STORAGE_KEY = 'staged-sidebar-position';
+const SIDEBAR_WIDTH_STORAGE_KEY = 'staged-sidebar-width';
 const KEYBOARD_BINDINGS_STORAGE_KEY = 'staged-keyboard-bindings';
 const DEFAULT_SYNTAX_THEME: SyntaxThemeName = 'laserwave';
 const DEFAULT_SIDEBAR_POSITION: SidebarPosition = 'right';
+
+const SIDEBAR_WIDTH_DEFAULT = 260;
+const SIDEBAR_WIDTH_MIN = 180;
+const SIDEBAR_WIDTH_MAX = 600;
+
+// Export sidebar width constraints for use in components
+export { SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX };
 
 export type SidebarPosition = 'left' | 'right';
 
@@ -72,6 +80,8 @@ export const preferences = $state({
   syntaxThemeVersion: 0,
   /** Sidebar position (left or right) */
   sidebarPosition: DEFAULT_SIDEBAR_POSITION as SidebarPosition,
+  /** Sidebar width in pixels */
+  sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
 });
 
 // =============================================================================
@@ -288,6 +298,40 @@ export function loadSavedSidebarPosition(): void {
   const saved = localStorage.getItem(SIDEBAR_POSITION_STORAGE_KEY);
   if (saved === 'left' || saved === 'right') {
     preferences.sidebarPosition = saved;
+  }
+}
+
+// =============================================================================
+// Sidebar Width Actions
+// =============================================================================
+
+/**
+ * Set sidebar width (clamped to min/max bounds).
+ */
+export function setSidebarWidth(width: number): void {
+  const clamped = Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width));
+  preferences.sidebarWidth = clamped;
+  localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clamped));
+}
+
+/**
+ * Reset sidebar width to default.
+ */
+export function resetSidebarWidth(): void {
+  preferences.sidebarWidth = SIDEBAR_WIDTH_DEFAULT;
+  localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(SIDEBAR_WIDTH_DEFAULT));
+}
+
+/**
+ * Load saved sidebar width.
+ */
+export function loadSavedSidebarWidth(): void {
+  const saved = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
+  if (saved) {
+    const parsed = parseInt(saved, 10);
+    if (!isNaN(parsed) && parsed >= SIDEBAR_WIDTH_MIN && parsed <= SIDEBAR_WIDTH_MAX) {
+      preferences.sidebarWidth = parsed;
+    }
   }
 }
 
