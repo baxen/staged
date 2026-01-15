@@ -19,6 +19,7 @@ export interface DiffNavConfig {
   getCurrentScrollY: () => number;
   getLineHeight: () => number;
   getViewportHeight: () => number;
+  startCommentOnHunk: (hunkIndex: number) => void;
 }
 
 const DEFAULT_CONFIG: DiffNavConfig = {
@@ -29,6 +30,7 @@ const DEFAULT_CONFIG: DiffNavConfig = {
   getCurrentScrollY: () => 0,
   getLineHeight: () => 20,
   getViewportHeight: () => 400,
+  startCommentOnHunk: () => {},
 };
 
 /**
@@ -77,6 +79,18 @@ function goToNextHunk(config: DiffNavConfig): boolean {
     return true;
   }
 
+  return false;
+}
+
+/**
+ * Start a comment on the current hunk.
+ */
+function commentOnCurrentHunk(config: DiffNavConfig): boolean {
+  const currentIndex = findCurrentHunkIndex(config);
+  if (currentIndex >= 0) {
+    config.startCommentOnHunk(currentIndex);
+    return true;
+  }
   return false;
 }
 
@@ -159,6 +173,13 @@ export function setupDiffKeyboardNav(config: Partial<DiffNavConfig> = {}): () =>
       description: 'Scroll up',
       category: 'navigation',
       handler: () => cfg.scrollBy(-cfg.scrollAmount),
+    },
+    {
+      id: 'diff-add-comment',
+      keys: ['i'],
+      description: 'Add comment on hunk',
+      category: 'comments',
+      handler: () => commentOnCurrentHunk(cfg),
     },
   ];
 
