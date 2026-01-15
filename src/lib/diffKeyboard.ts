@@ -131,29 +131,15 @@ export function setupDiffKeyboardNav(config: Partial<DiffNavConfig> = {}): () =>
 
   const shortcuts: Shortcut[] = [
     {
-      id: 'diff-next-hunk-j',
-      keys: ['j'],
+      id: 'diff-next-hunk',
+      keys: ['j', 'ArrowDown'],
       description: 'Next diff hunk',
       category: 'navigation',
       handler: () => goToNextHunk(cfg),
     },
     {
-      id: 'diff-next-hunk-down',
-      keys: ['ArrowDown'],
-      description: 'Next diff hunk',
-      category: 'navigation',
-      handler: () => goToNextHunk(cfg),
-    },
-    {
-      id: 'diff-prev-hunk-k',
-      keys: ['k'],
-      description: 'Previous diff hunk',
-      category: 'navigation',
-      handler: () => goToPreviousHunk(cfg),
-    },
-    {
-      id: 'diff-prev-hunk-up',
-      keys: ['ArrowUp'],
+      id: 'diff-prev-hunk',
+      keys: ['k', 'ArrowUp'],
       description: 'Previous diff hunk',
       category: 'navigation',
       handler: () => goToPreviousHunk(cfg),

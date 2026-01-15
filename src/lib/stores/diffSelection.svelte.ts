@@ -49,6 +49,7 @@ function createDefaultPresets(): DiffPreset[] {
   return [
     { spec: DiffSpec.uncommitted(), label: 'Uncommitted' },
     { spec: DiffSpec.uncommitted(), label: 'Branch Changes' }, // Base updated on init
+    { spec: DiffSpec.uncommitted(), label: 'vs Merge Base' }, // Computed via merge-base at selection
     { spec: DiffSpec.lastCommit(), label: 'Last Commit' },
   ];
 }

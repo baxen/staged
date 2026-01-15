@@ -9,7 +9,7 @@
   import TopBar from './lib/TopBar.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import TabBar from './lib/TabBar.svelte';
-  import { listRefs } from './lib/services/git';
+  import { listRefs, getMergeBase } from './lib/services/git';
   import { getWindowLabel } from './lib/services/window';
   import {
     windowState,
@@ -39,8 +39,12 @@
     preferences,
     loadSavedSize,
     loadSavedSyntaxTheme,
+    loadSavedSidebarPosition,
+    loadSavedPRBaseBranch,
+    getCustomKeyboardBindings,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
+  import { loadCustomBindings } from './lib/services/keyboard';
   import { registerShortcut } from './lib/services/keyboard';
   import {
     diffSelection,
@@ -109,7 +113,30 @@
   async function handlePresetSelect(preset: DiffPreset) {
     resetState();
     clearReferenceFiles();
-    selectPreset(preset);
+
+    // Handle vs Merge Base preset specially - compute merge-base
+    if (preset.label === 'vs Merge Base') {
+      try {
+        const mergeBaseSha = await getMergeBase(
+          preferences.prBaseBranch,
+          'HEAD',
+          repoState.currentPath ?? undefined
+        );
+        const spec: DiffSpecType = {
+          base: { type: 'Rev', value: mergeBaseSha },
+          head: { type: 'WorkingTree' },
+        };
+        selectCustomDiff(spec, 'vs Merge Base');
+      } catch (e) {
+        console.error('Failed to compute merge-base:', e);
+        diffState.error = `Failed to compute merge base: ${e}`;
+        diffState.loading = false;
+        return;
+      }
+    } else {
+      selectPreset(preset);
+    }
+
     await loadAll();
 
     // Save updated state back to tab
@@ -432,7 +459,14 @@
 
   onMount(() => {
     loadSavedSize();
+    loadSavedSidebarPosition();
+    loadSavedPRBaseBranch();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
+
+    // Apply custom keyboard bindings after a short delay to let shortcuts register
+    setTimeout(() => {
+      loadCustomBindings(getCustomKeyboardBindings());
+    }, 100);
 
     // Register Cmd+O to open file search
     unregisterFileSearchShortcut = registerShortcut({
@@ -516,7 +550,7 @@
     onCommit={handleFilesChanged}
   />
 
-  <div class="app-container">
+  <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
     {#if showEmptyState}
       <!-- Full-width empty state -->
       <section class="main-content full-width">
@@ -597,6 +631,14 @@
     overflow: hidden;
     padding: 0 8px 8px 8px;
     gap: 8px;
+  }
+
+  .app-container.sidebar-left .main-content {
+    order: 1;
+  }
+
+  .app-container.sidebar-left .sidebar {
+    order: 0;
   }
 
   .sidebar {

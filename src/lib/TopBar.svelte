@@ -23,6 +23,7 @@
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
   import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
+  import SettingsModal from './SettingsModal.svelte';
   import { DiffSpec } from './types';
   import type { DiffSpec as DiffSpecType } from './types';
   import {
@@ -66,6 +67,7 @@
   let showThemeModal = $state(false);
   let showSyncModal = $state(false);
   let showShortcutsModal = $state(false);
+  let showSettingsModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
@@ -358,6 +360,14 @@
 
   <!-- Right section: Settings -->
   <div class="section section-right">
+    <button
+      class="icon-btn settings-btn"
+      onclick={() => (showSettingsModal = true)}
+      title="Settings"
+    >
+      <Settings2 size={14} />
+    </button>
+
     <div class="shortcuts-picker">
       <button
         class="icon-btn shortcuts-btn"
@@ -426,6 +436,10 @@
     comments={commentsState.comments}
     onClose={() => (showSyncModal = false)}
   />
+{/if}
+
+{#if showSettingsModal}
+  <SettingsModal onClose={() => (showSettingsModal = false)} />
 {/if}
 
 <style>
@@ -775,6 +789,18 @@
 
   .shortcuts-btn:hover,
   .shortcuts-btn.open {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  /* Settings button */
+  .settings-btn {
+    padding: 5px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+  }
+
+  .settings-btn:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
   }
