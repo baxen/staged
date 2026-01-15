@@ -56,6 +56,9 @@
   let capturedModifiers = $state<Modifiers>({});
   let conflictId = $state<string | null>(null);
 
+  // Version counter to force reactivity when shortcuts are reset
+  let shortcutVersion = $state(0);
+
   // Category display names and order
   const categoryInfo: Record<string, { title: string; order: number }> = {
     navigation: { title: 'Navigation', order: 1 },
@@ -70,13 +73,14 @@
     shortcuts: Shortcut[];
   }
 
-  function getGroupedShortcuts(): ShortcutGroup[] {
+  function getGroupedShortcuts(_version: number): ShortcutGroup[] {
     const allShortcuts = getAllShortcuts();
     const byCategory = new Map<string, Shortcut[]>();
 
     for (const shortcut of allShortcuts) {
+      const copy = { ...shortcut, keys: [...shortcut.keys] };
       const list = byCategory.get(shortcut.category) || [];
-      list.push(shortcut);
+      list.push(copy);
       byCategory.set(shortcut.category, list);
     }
 
@@ -94,7 +98,7 @@
     return groups.sort((a, b) => a.order - b.order);
   }
 
-  let shortcutGroups = $derived(getGroupedShortcuts());
+  let shortcutGroups = $derived(getGroupedShortcuts(shortcutVersion));
 
   function formatKeys(shortcut: Shortcut): string {
     const formatted = formatShortcutKeys(shortcut);
@@ -132,12 +136,14 @@
       modifiers: capturedModifiers,
     });
 
+    shortcutVersion++;
     cancelEditing();
   }
 
   function resetShortcut(id: string) {
     resetBinding(id);
     removeCustomKeyboardBinding(id);
+    shortcutVersion++;
   }
 
   function resetAllShortcuts() {
@@ -146,6 +152,7 @@
       resetBinding(shortcut.id);
     }
     resetAllKeyboardBindings();
+    shortcutVersion++;
   }
 
   function handleKeyCapture(event: KeyboardEvent) {
