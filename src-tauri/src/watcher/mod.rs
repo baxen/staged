@@ -11,6 +11,7 @@ use notify::{RecommendedWatcher, RecursiveMode};
 use notify_debouncer_full::{new_debouncer, DebouncedEvent, Debouncer, RecommendedCache};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::Arc;
 use std::thread;
@@ -37,7 +38,8 @@ enum WatcherCommand {
 
 /// Active watcher entry
 struct WatcherEntry {
-    watch_id: u64,
+    /// Shared watch ID that can be updated if frontend re-registers with a new ID
+    watch_id: Arc<AtomicU64>,
     #[allow(dead_code)] // Dropping this stops the watcher
     debouncer: Debouncer<RecommendedWatcher, RecommendedCache>,
 }
@@ -59,23 +61,26 @@ impl WatcherHandle {
             for cmd in rx {
                 match cmd {
                     WatcherCommand::Watch { path, watch_id } => {
-                        // Skip if already watching this path
-                        if watchers.contains_key(&path) {
-                            log::debug!(
-                                "Already watching {} (watch_id {})",
+                        // If already watching, just update the watch_id
+                        if let Some(entry) = watchers.get(&path) {
+                            let old_id = entry.watch_id.swap(watch_id, Ordering::SeqCst);
+                            log::info!(
+                                "Updated watch_id for {} from {} to {}",
                                 path.display(),
-                                watchers.get(&path).map(|e| e.watch_id).unwrap_or(0)
+                                old_id,
+                                watch_id
                             );
                             continue;
                         }
 
-                        // Setup new watcher
-                        match create_watcher(&path, watch_id, &app_handle) {
+                        // Setup new watcher with shared atomic watch_id
+                        let watch_id_arc = Arc::new(AtomicU64::new(watch_id));
+                        match create_watcher(&path, Arc::clone(&watch_id_arc), &app_handle) {
                             Ok(debouncer) => {
                                 watchers.insert(
                                     path.clone(),
                                     WatcherEntry {
-                                        watch_id,
+                                        watch_id: watch_id_arc,
                                         debouncer,
                                     },
                                 );
@@ -127,11 +132,12 @@ impl WatcherHandle {
 /// Create a new debounced watcher for the given repository.
 fn create_watcher(
     repo_path: &Path,
-    watch_id: u64,
+    watch_id: Arc<AtomicU64>,
     app_handle: &AppHandle,
 ) -> Result<Debouncer<RecommendedWatcher, RecommendedCache>, String> {
     let gitignore = build_gitignore(repo_path);
     let repo_path_for_filter = repo_path.to_path_buf();
+    let repo_path_for_log = repo_path.to_path_buf();
     let app_handle = app_handle.clone();
 
     let mut debouncer = new_debouncer(
@@ -146,7 +152,19 @@ fn create_watcher(
                     .collect();
 
                 if !relevant_paths.is_empty() {
-                    let _ = app_handle.emit(EVENT_FILES_CHANGED, FilesChangedPayload { watch_id });
+                    let current_watch_id = watch_id.load(Ordering::SeqCst);
+                    log::debug!(
+                        "Emitting files-changed for {} (watch_id {}), {} relevant paths",
+                        repo_path_for_log.display(),
+                        current_watch_id,
+                        relevant_paths.len()
+                    );
+                    let _ = app_handle.emit(
+                        EVENT_FILES_CHANGED,
+                        FilesChangedPayload {
+                            watch_id: current_watch_id,
+                        },
+                    );
                 }
             }
             Err(errors) => {

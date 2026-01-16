@@ -20,6 +20,8 @@ export interface DiffNavConfig {
   getLineHeight: () => number;
   getViewportHeight: () => number;
   startCommentOnHunk: (hunkIndex: number) => void;
+  /** Called when keyboard navigation focuses a hunk */
+  onHunkFocus?: (hunkIndex: number | null) => void;
 }
 
 const DEFAULT_CONFIG: DiffNavConfig = {
@@ -31,6 +33,7 @@ const DEFAULT_CONFIG: DiffNavConfig = {
   getLineHeight: () => 20,
   getViewportHeight: () => 400,
   startCommentOnHunk: () => {},
+  onHunkFocus: () => {},
 };
 
 /**
@@ -76,6 +79,7 @@ function goToNextHunk(config: DiffNavConfig): boolean {
   if (nextIndex < alignments.length) {
     const nextHunk = alignments[nextIndex].alignment;
     config.scrollToRow(nextHunk.after.start, 'after');
+    config.onHunkFocus?.(nextIndex);
     return true;
   }
 
@@ -116,6 +120,7 @@ function goToPreviousHunk(config: DiffNavConfig): boolean {
     // If we're more than 2 lines into the current hunk, go to its start
     if (anchorRow > currentHunk.after.start + 2) {
       config.scrollToRow(currentHunk.after.start, 'after');
+      config.onHunkFocus?.(currentIndex);
       return true;
     }
 
@@ -123,6 +128,7 @@ function goToPreviousHunk(config: DiffNavConfig): boolean {
     if (currentIndex > 0) {
       const prevHunk = alignments[currentIndex - 1].alignment;
       config.scrollToRow(prevHunk.after.start, 'after');
+      config.onHunkFocus?.(currentIndex - 1);
       return true;
     }
   }
@@ -130,6 +136,7 @@ function goToPreviousHunk(config: DiffNavConfig): boolean {
   // If at or before first hunk, go to first hunk
   if (alignments.length > 0) {
     config.scrollToRow(alignments[0].alignment.after.start, 'after');
+    config.onHunkFocus?.(0);
     return true;
   }
 

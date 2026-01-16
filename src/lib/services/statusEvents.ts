@@ -51,6 +51,11 @@ export async function initWatcher(onFilesChanged: FilesChangedCallback): Promise
     const repoPath = watchIdToPath.get(payload.watchId);
     if (repoPath) {
       onFilesChanged(repoPath);
+    } else {
+      console.warn(
+        `[FileWatcher] Received event for unknown watchId ${payload.watchId}. ` +
+        `Known watchIds: [${Array.from(watchIdToPath.keys()).join(', ')}]`
+      );
     }
   });
 
@@ -78,7 +83,13 @@ export function watchRepo(repoPath: string): void {
   watchedRepos.set(repoPath, watchId);
   watchIdToPath.set(watchId, repoPath);
 
-  invoke('watch_repo', { repoPath, watchId });
+  console.debug(`[FileWatcher] Starting watch for ${repoPath} (watchId: ${watchId})`);
+  invoke('watch_repo', { repoPath, watchId }).catch((err) => {
+    console.error(`[FileWatcher] Failed to start watching ${repoPath}:`, err);
+    // Rollback frontend state on failure
+    watchedRepos.delete(repoPath);
+    watchIdToPath.delete(watchId);
+  });
 }
 
 /**
@@ -96,7 +107,10 @@ export function unwatchRepo(repoPath: string): void {
   watchedRepos.delete(repoPath);
   watchIdToPath.delete(watchId);
 
-  invoke('unwatch_repo', { repoPath });
+  console.debug(`[FileWatcher] Stopping watch for ${repoPath} (watchId: ${watchId})`);
+  invoke('unwatch_repo', { repoPath }).catch((err) => {
+    console.error(`[FileWatcher] Failed to stop watching ${repoPath}:`, err);
+  });
 }
 
 /**

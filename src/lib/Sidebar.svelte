@@ -418,9 +418,10 @@
         class:selected={selectedFile === file.path}
         style="padding-left: 8px"
         onclick={() => selectFile(file)}
+        title={file.path}
       >
         {@render fileIcon(file, showReviewedSection)}
-        <span class="file-name">{file.path}</span>
+        <span class="file-name truncate-start">{file.path}</span>
         {#if file.commentCount > 0}
           <span class="comment-indicator">
             <MessageSquare size={12} />
@@ -553,11 +554,12 @@
                 tabindex="0"
                 onclick={() => onFileSelect?.(refFile.path)}
                 onkeydown={(e) => e.key === 'Enter' && onFileSelect?.(refFile.path)}
+                title={refFile.path}
               >
                 <span class="reference-icon">
                   <Eye size={16} />
                 </span>
-                <span class="file-name">{refFile.path}</span>
+                <span class="file-name truncate-start">{refFile.path}</span>
                 <button
                   class="remove-btn"
                   onclick={(e) => {
@@ -724,6 +726,12 @@
 
   .tree-item.selected {
     background-color: var(--bg-primary);
+    box-shadow: inset 2px 0 0 var(--accent-primary);
+  }
+
+  .tree-item.selected .file-name {
+    color: var(--text-primary);
+    font-weight: 500;
   }
 
   .tree-item:focus-visible {
@@ -770,6 +778,17 @@
     white-space: nowrap;
     min-width: 0;
     color: var(--text-primary);
+  }
+
+  /* Truncate from the beginning (show end of path) */
+  .file-name.truncate-start {
+    direction: rtl;
+    text-align: left;
+  }
+
+  /* Unicode bidi override to keep path segments in correct order */
+  .file-name.truncate-start::before {
+    content: '\200E'; /* Left-to-right mark */
   }
 
   /* Status icon as interactive span */
