@@ -107,9 +107,8 @@
   function handleSidebarResizeMove(e: MouseEvent) {
     if (!isDraggingSidebar) return;
 
-    const delta = preferences.sidebarPosition === 'left'
-      ? e.clientX - dragStartX
-      : dragStartX - e.clientX;
+    const delta =
+      preferences.sidebarPosition === 'left' ? e.clientX - dragStartX : dragStartX - e.clientX;
 
     const newWidth = dragStartWidth + delta;
     setSidebarWidth(newWidth);

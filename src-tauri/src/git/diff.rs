@@ -50,7 +50,7 @@ pub fn list_diff_files(repo: &Path, spec: &DiffSpec) -> Result<Vec<FileDiffSumma
 fn list_working_tree_changes(repo: &Path, base: &str) -> Result<Vec<FileDiffSummary>, GitError> {
     // Get status (includes staged, unstaged, and untracked)
     let output = cli::run(repo, &["status", "--porcelain", "-z"])?;
-    let status_files = parse_porcelain_status(&output);
+    let status_files = parse_porcelain_status(repo, &output)?;
 
     // If base is HEAD, status gives us exactly what we need
     if base == "HEAD" {
@@ -84,7 +84,10 @@ fn list_working_tree_changes(repo: &Path, base: &str) -> Result<Vec<FileDiffSumm
 /// Parse `git status --porcelain -z` output.
 /// Format: XY PATH\0 (or XY OLD\0NEW\0 for renames)
 /// X = index status, Y = worktree status
-fn parse_porcelain_status(output: &str) -> Vec<FileDiffSummary> {
+///
+/// Note: git status reports untracked directories as just the directory name (with trailing slash).
+/// We expand these into individual files using `git ls-files --others`.
+fn parse_porcelain_status(repo: &Path, output: &str) -> Result<Vec<FileDiffSummary>, GitError> {
     let mut results = Vec::new();
     let mut chars = output.chars().peekable();
 
@@ -114,33 +117,71 @@ fn parse_porcelain_status(output: &str) -> Vec<FileDiffSummary> {
 
         // Determine file status from XY
         // We care about the combined effect: is the file added, deleted, modified, or renamed?
-        let summary = match (x, y) {
-            ('?', '?') => FileDiffSummary {
-                before: None,
-                after: new_path.map(Into::into),
-            },
-            ('A', _) | (_, 'A') => FileDiffSummary {
-                before: None,
-                after: new_path.map(Into::into),
-            },
-            ('D', _) | (_, 'D') => FileDiffSummary {
-                before: new_path.map(Into::into),
-                after: None,
-            },
-            ('R', _) | ('C', _) => FileDiffSummary {
-                before: old_path.map(Into::into),
-                after: new_path.map(Into::into),
-            },
-            _ => FileDiffSummary {
-                before: new_path.clone().map(Into::into),
-                after: new_path.map(Into::into),
-            },
+        match (x, y) {
+            ('?', '?') => {
+                // Untracked: could be a file or directory
+                // git status reports directories with trailing slash
+                if let Some(ref p) = new_path {
+                    if p.ends_with('/') {
+                        // It's a directory - expand into individual files
+                        let files = expand_untracked_dir(repo, p)?;
+                        for file in files {
+                            results.push(FileDiffSummary {
+                                before: None,
+                                after: Some(file.into()),
+                            });
+                        }
+                    } else {
+                        results.push(FileDiffSummary {
+                            before: None,
+                            after: Some(p.clone().into()),
+                        });
+                    }
+                }
+            }
+            ('A', _) | (_, 'A') => {
+                results.push(FileDiffSummary {
+                    before: None,
+                    after: new_path.map(Into::into),
+                });
+            }
+            ('D', _) | (_, 'D') => {
+                results.push(FileDiffSummary {
+                    before: new_path.map(Into::into),
+                    after: None,
+                });
+            }
+            ('R', _) | ('C', _) => {
+                results.push(FileDiffSummary {
+                    before: old_path.map(Into::into),
+                    after: new_path.map(Into::into),
+                });
+            }
+            _ => {
+                results.push(FileDiffSummary {
+                    before: new_path.clone().map(Into::into),
+                    after: new_path.map(Into::into),
+                });
+            }
         };
-
-        results.push(summary);
     }
 
-    results
+    Ok(results)
+}
+
+/// Expand an untracked directory into its individual files.
+/// Uses `git ls-files --others --exclude-standard` to list untracked files.
+fn expand_untracked_dir(repo: &Path, dir: &str) -> Result<Vec<String>, GitError> {
+    let output = cli::run(
+        repo,
+        &["ls-files", "--others", "--exclude-standard", "-z", dir],
+    )?;
+
+    Ok(output
+        .split('\0')
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+        .collect())
 }
 
 /// Parse `git diff --name-status -z` output
@@ -545,8 +586,9 @@ mod tests {
 
     #[test]
     fn test_parse_porcelain_untracked() {
+        let dir = tempfile::tempdir().unwrap();
         let output = "?? untracked.txt\0";
-        let result = parse_porcelain_status(output);
+        let result = parse_porcelain_status(dir.path(), output).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].is_added());
         assert_eq!(
@@ -557,8 +599,9 @@ mod tests {
 
     #[test]
     fn test_parse_porcelain_modified() {
+        let dir = tempfile::tempdir().unwrap();
         let output = " M modified.txt\0";
-        let result = parse_porcelain_status(output);
+        let result = parse_porcelain_status(dir.path(), output).unwrap();
         assert_eq!(result.len(), 1);
         assert!(!result[0].is_added());
         assert!(!result[0].is_deleted());
@@ -566,8 +609,9 @@ mod tests {
 
     #[test]
     fn test_parse_porcelain_staged() {
+        let dir = tempfile::tempdir().unwrap();
         let output = "M  staged.txt\0";
-        let result = parse_porcelain_status(output);
+        let result = parse_porcelain_status(dir.path(), output).unwrap();
         assert_eq!(result.len(), 1);
         assert!(!result[0].is_added());
         assert!(!result[0].is_deleted());
@@ -575,24 +619,62 @@ mod tests {
 
     #[test]
     fn test_parse_porcelain_added() {
+        let dir = tempfile::tempdir().unwrap();
         let output = "A  new_file.txt\0";
-        let result = parse_porcelain_status(output);
+        let result = parse_porcelain_status(dir.path(), output).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].is_added());
     }
 
     #[test]
     fn test_parse_porcelain_deleted() {
+        let dir = tempfile::tempdir().unwrap();
         let output = " D deleted.txt\0";
-        let result = parse_porcelain_status(output);
+        let result = parse_porcelain_status(dir.path(), output).unwrap();
         assert_eq!(result.len(), 1);
         assert!(result[0].is_deleted());
     }
 
     #[test]
     fn test_parse_porcelain_multiple() {
+        let dir = tempfile::tempdir().unwrap();
         let output = "?? untracked.txt\0 M modified.txt\0A  added.txt\0";
-        let result = parse_porcelain_status(output);
+        let result = parse_porcelain_status(dir.path(), output).unwrap();
         assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_porcelain_untracked_directory() {
+        // Create a temp git repo with an untracked directory
+        let dir = tempfile::tempdir().unwrap();
+        let repo_path = dir.path();
+
+        // Initialize git repo
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(repo_path)
+            .output()
+            .unwrap();
+
+        // Create untracked directory with files
+        let newdir = repo_path.join("newdir");
+        std::fs::create_dir_all(newdir.join("subdir")).unwrap();
+        std::fs::write(newdir.join("file1.txt"), "content1").unwrap();
+        std::fs::write(newdir.join("subdir").join("file2.txt"), "content2").unwrap();
+
+        // Parse status output that reports the directory (with trailing slash)
+        let output = "?? newdir/\0";
+        let result = parse_porcelain_status(repo_path, output).unwrap();
+
+        // Should expand to 2 files
+        assert_eq!(result.len(), 2);
+        assert!(result.iter().all(|f| f.is_added()));
+
+        let paths: Vec<_> = result
+            .iter()
+            .map(|f| f.after.as_ref().unwrap().to_str().unwrap())
+            .collect();
+        assert!(paths.contains(&"newdir/file1.txt"));
+        assert!(paths.contains(&"newdir/subdir/file2.txt"));
     }
 }
