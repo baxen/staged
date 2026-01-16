@@ -19,6 +19,8 @@
     setWindowLabel,
     loadTabsFromStorage,
     getActiveTab,
+    markRepoNeedsRefresh,
+    clearNeedsRefresh,
   } from './lib/stores/tabState.svelte';
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
@@ -139,12 +141,21 @@
   });
 
   async function handleFilesChanged(changedRepoPath: string) {
-    // Only refresh if this is the active tab's repo
     const activeTab = getActiveTab();
-    if (!activeTab || activeTab.repoPath !== changedRepoPath) return;
+
+    // If this is NOT the active tab's repo, mark those tabs as needing refresh
+    if (!activeTab || activeTab.repoPath !== changedRepoPath) {
+      markRepoNeedsRefresh(changedRepoPath);
+      return;
+    }
 
     // Only refresh if viewing working tree
-    if (diffSelection.spec.head.type !== 'WorkingTree') return;
+    if (diffSelection.spec.head.type !== 'WorkingTree') {
+      // Mark as needing refresh for when user switches back to working tree
+      activeTab.needsRefresh = true;
+      console.debug('[App] Files changed but not viewing working tree, marked for refresh');
+      return;
+    }
 
     await refreshFiles(diffSelection.spec, repoState.currentPath ?? undefined);
     // Reload comments - they may have changed after a commit
@@ -184,6 +195,10 @@
 
     await loadAll();
 
+    // Clear needsRefresh since we just loaded fresh data
+    const tab = getActiveTab();
+    if (tab) clearNeedsRefresh(tab);
+
     // Save updated state back to tab
     syncGlobalToTab();
   }
@@ -194,6 +209,10 @@
     clearReferenceFiles();
     selectCustomDiff(spec, label, prNumber);
     await loadAll();
+
+    // Clear needsRefresh since we just loaded fresh data
+    const tab = getActiveTab();
+    if (tab) clearNeedsRefresh(tab);
 
     // Save updated state back to tab
     syncGlobalToTab();
@@ -401,7 +420,7 @@
    * Handle tab switching.
    * Watcher is already running for the repo - no restart needed.
    */
-  function handleTabSwitch(index: number) {
+  async function handleTabSwitch(index: number) {
     console.log(`Switching to tab ${index}`);
 
     // Save current tab state before switching
@@ -418,6 +437,13 @@
     const tab = getActiveTab();
     if (tab && tab.diffState.currentSpec === null) {
       initializeNewTab(tab);
+    } else if (tab?.needsRefresh && diffSelection.spec.head.type === 'WorkingTree') {
+      // Tab was marked dirty while inactive - refresh now
+      console.debug(`[App] Tab "${tab.repoName}" needs refresh, loading files`);
+      clearNeedsRefresh(tab);
+      await refreshFiles(diffSelection.spec, repoState.currentPath ?? undefined);
+      await loadComments(diffSelection.spec);
+      syncGlobalToTab();
     }
   }
 

@@ -28,6 +28,9 @@ export interface TabState {
   diffState: DiffState;
   commentsState: CommentsState;
   diffSelection: DiffSelection;
+
+  /** True if files changed while this tab was not active (needs refresh on switch) */
+  needsRefresh: boolean;
 }
 
 /**
@@ -96,6 +99,7 @@ export function addTab(
     diffState: createDiffState(),
     commentsState: createCommentsState(),
     diffSelection: createDiffSelection(),
+    needsRefresh: false,
   };
 
   windowState.tabs.push(tab);
@@ -150,6 +154,27 @@ export function getActiveRepoPath(): string | null {
   return getActiveTab()?.repoPath ?? null;
 }
 
+/**
+ * Mark all tabs for a repo as needing refresh.
+ * Called when files change for a non-active tab.
+ */
+export function markRepoNeedsRefresh(repoPath: string): void {
+  for (const tab of windowState.tabs) {
+    if (tab.repoPath === repoPath) {
+      tab.needsRefresh = true;
+      console.debug(`[TabState] Marked tab "${tab.repoName}" as needing refresh`);
+    }
+  }
+}
+
+/**
+ * Clear the needsRefresh flag for a tab.
+ * Called after refreshing the tab.
+ */
+export function clearNeedsRefresh(tab: TabState): void {
+  tab.needsRefresh = false;
+}
+
 // =============================================================================
 // Persistence
 // =============================================================================
@@ -196,6 +221,7 @@ export function loadTabsFromStorage(
         diffState: createDiffState(),
         commentsState: createCommentsState(),
         diffSelection: createDiffSelection(),
+        needsRefresh: false,
       }));
       windowState.activeTabIndex = data.activeTabIndex;
     } catch (e) {

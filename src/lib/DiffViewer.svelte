@@ -126,6 +126,9 @@
   let hoveredRangeIndex: number | null = $state(null);
   let rangeToolbarStyle: { top: number; left: number } | null = $state(null);
 
+  // Keyboard navigation focused hunk (set by J/K keys)
+  let focusedHunkIndex: number | null = $state(null);
+
   // ==========================================================================
   // Comment state
   // ==========================================================================
@@ -329,6 +332,7 @@
     if (diff) {
       hoveredRangeIndex = null;
       rangeToolbarStyle = null;
+      focusedHunkIndex = null;
       // Clear any line selection state from previous file
       lineSelection = null;
       commentingOnLines = null;
@@ -513,6 +517,12 @@
     if (hoveredRangeIndex === null) return false;
     const map = pane === 'before' ? beforeLineToAlignment : afterLineToAlignment;
     return map.get(lineIndex) === hoveredRangeIndex;
+  }
+
+  function isLineInFocusedHunk(pane: 'before' | 'after', lineIndex: number): boolean {
+    if (focusedHunkIndex === null) return false;
+    const map = pane === 'before' ? beforeLineToAlignment : afterLineToAlignment;
+    return map.get(lineIndex) === focusedHunkIndex;
   }
 
   // ==========================================================================
@@ -1041,6 +1051,9 @@
       return;
     }
 
+    // Clear keyboard-focused hunk when user clicks
+    focusedHunkIndex = null;
+
     const target = event.target as HTMLElement;
     if (
       target.closest('.line-selection-toolbar') ||
@@ -1154,6 +1167,9 @@
         commentPositionPreference = decideCommentPosition();
         updateCommentEditorPosition();
       },
+      onHunkFocus: (hunkIndex) => {
+        focusedHunkIndex = hunkIndex;
+      },
     });
 
     document.addEventListener('copy', handleCopy);
@@ -1249,6 +1265,7 @@
                     ? getLineBoundary(activeAlignments, 'before', i)
                     : { isStart: false, isEnd: false }}
                   {@const isInHoveredRange = isLineInHoveredRange('before', i)}
+                  {@const isInFocusedHunk = isLineInFocusedHunk('before', i)}
                   {@const isChanged = showRangeMarkers && isLineInChangedAlignment('before', i)}
                   <!-- svelte-ignore a11y_no_static_element_interactions -->
                   <div
@@ -1256,6 +1273,7 @@
                     class:range-start={boundary.isStart}
                     class:range-end={boundary.isEnd}
                     class:range-hovered={isInHoveredRange}
+                    class:range-focused={isInFocusedHunk}
                     class:content-changed={isChanged}
                     onmouseenter={() => handleLineMouseEnter('before', i)}
                     onmouseleave={handleLineMouseLeave}
@@ -1351,6 +1369,7 @@
                     ? getLineBoundary(activeAlignments, 'after', i)
                     : { isStart: false, isEnd: false }}
                   {@const isInHoveredRange = isLineInHoveredRange('after', i)}
+                  {@const isInFocusedHunk = isLineInFocusedHunk('after', i)}
                   {@const isChanged = showRangeMarkers && isLineInChangedAlignment('after', i)}
                   {@const isSelected = isLineSelected('after', i)}
                   <!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -1359,6 +1378,7 @@
                     class:range-start={boundary.isStart}
                     class:range-end={boundary.isEnd}
                     class:range-hovered={isInHoveredRange}
+                    class:range-focused={isInFocusedHunk}
                     class:content-changed={isChanged}
                     class:line-selected={isSelected}
                     onmouseenter={() => handleLineMouseEnter('after', i)}
@@ -1797,6 +1817,16 @@
 
   .line.range-hovered {
     background-color: rgba(128, 128, 128, 0.15);
+  }
+
+  /* Keyboard-navigated focused hunk - more prominent highlight */
+  .line.range-focused {
+    background-color: var(--accent-primary-muted, rgba(59, 130, 246, 0.12));
+    box-shadow: inset 3px 0 0 var(--accent-primary);
+  }
+
+  .line.range-focused.content-changed {
+    background-color: var(--accent-primary-muted, rgba(59, 130, 246, 0.18));
   }
 
   /* Line selection highlight */
