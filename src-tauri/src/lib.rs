@@ -4,15 +4,17 @@
 
 pub mod git;
 pub mod review;
+mod symbols;
 mod themes;
 mod watcher;
 
 use git::{
-    DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
-    PullRequest,
+    DiffId, DiffSpec, File, FileContent, FileDiff, FileDiffSummary, GitHubAuthStatus,
+    GitHubSyncResult, GitRef, PullRequest,
 };
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
+use symbols::{DefinitionResult, SymbolInfo};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
@@ -66,6 +68,136 @@ fn get_file_at_ref(
 ) -> Result<File, String> {
     let repo = get_repo_path(repo_path.as_deref());
     git::get_file_at_ref(repo, &ref_name, &path).map_err(|e| e.to_string())
+}
+
+// =============================================================================
+// Symbol Navigation Commands
+// =============================================================================
+
+/// Get symbol information at a specific position in a file.
+///
+/// Used for "Go to Definition" - finds what symbol is at the cursor position.
+#[tauri::command(rename_all = "camelCase")]
+fn get_symbol_at_position(
+    repo_path: Option<String>,
+    ref_name: String,
+    file_path: String,
+    line: usize,
+    column: usize,
+) -> Result<Option<SymbolInfo>, String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let file = git::get_file_at_ref(repo, &ref_name, &file_path).map_err(|e| e.to_string())?;
+
+    // Extract text content or return None for binary files
+    let content = match &file.content {
+        FileContent::Text { lines } => lines.join("\n"),
+        FileContent::Binary => return Ok(None),
+    };
+
+    let path = PathBuf::from(&file_path);
+    Ok(symbols::get_symbol_at_position(&path, &content, line, column))
+}
+
+/// Find the definition of a symbol.
+///
+/// Searches in the same file first, then looks at imports to find the definition.
+/// Returns the file path and location of the definition.
+#[tauri::command(rename_all = "camelCase")]
+async fn find_definition(
+    repo_path: Option<String>,
+    ref_name: String,
+    file_path: String,
+    symbol_name: String,
+    symbol_line: usize,
+    symbol_column: usize,
+) -> Result<Option<DefinitionResult>, String> {
+    let ref_name_clone = ref_name.clone();
+    let file_path_clone = file_path.clone();
+
+    // Get the absolute repo path (canonicalized for consistent comparison)
+    let repo = if let Some(ref p) = repo_path {
+        PathBuf::from(p)
+            .canonicalize()
+            .unwrap_or_else(|_| PathBuf::from(p))
+    } else {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    };
+
+    // Run on blocking thread pool since we may read multiple files
+    tokio::task::spawn_blocking(move || {
+        // Make the current file path absolute by joining with repo
+        let current_file = repo.join(&file_path_clone);
+
+        log::info!(
+            "find_definition: repo={:?}, file_path={}, current_file={:?}",
+            repo,
+            file_path_clone,
+            current_file
+        );
+
+        // Read the current file
+        let file = git::get_file_at_ref(&repo, &ref_name_clone, &file_path_clone)
+            .map_err(|e| e.to_string())?;
+
+        // Extract text content or return None for binary files
+        let current_content = match &file.content {
+            FileContent::Text { lines } => lines.join("\n"),
+            FileContent::Binary => return Ok(None),
+        };
+
+        // Create the symbol info
+        let symbol = SymbolInfo {
+            name: symbol_name,
+            kind: symbols::SymbolKind::Unknown,
+            line: symbol_line,
+            column: symbol_column,
+            end_column: symbol_column,
+            context: None,
+            language: String::new(),
+        };
+
+        // File reader that uses git to read files at the specified ref
+        // Supports both absolute paths and paths relative to repo root
+        let read_file = |path: &Path| -> Option<String> {
+            // Try to get a path relative to repo
+            let rel_path = if path.is_absolute() {
+                // Try to strip repo prefix
+                path.strip_prefix(&repo)
+                    .map(|p| p.to_path_buf())
+                    .unwrap_or_else(|_| {
+                        // If strip fails, use the path as-is (might already be relative)
+                        log::debug!("read_file: strip_prefix failed for {:?} with repo {:?}", path, repo);
+                        path.to_path_buf()
+                    })
+            } else {
+                path.to_path_buf()
+            };
+
+            let path_str = rel_path.to_string_lossy().to_string();
+            log::debug!("read_file: trying to read '{}' from git", path_str);
+            let file = git::get_file_at_ref(&repo, &ref_name_clone, &path_str).ok()?;
+            match file.content {
+                FileContent::Text { lines } => Some(lines.join("\n")),
+                FileContent::Binary => None,
+            }
+        };
+
+        Ok(symbols::find_definition(
+            &symbol,
+            &current_file,
+            &current_content,
+            &repo,
+            read_file,
+        ))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Check if a file type supports symbol navigation.
+#[tauri::command(rename_all = "camelCase")]
+fn supports_symbol_navigation(file_path: String) -> bool {
+    symbols::is_supported_extension(Path::new(&file_path))
 }
 
 // =============================================================================
@@ -493,6 +625,10 @@ pub fn run() {
             // File browsing commands
             search_files,
             get_file_at_ref,
+            // Symbol navigation commands
+            get_symbol_at_position,
+            find_definition,
+            supports_symbol_navigation,
             // Git commands
             get_repo_root,
             list_refs,
