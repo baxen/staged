@@ -185,6 +185,70 @@ pub fn get_file_at_ref(repo: &Path, ref_name: &str, path: &str) -> Result<File, 
     }
 }
 
+/// List files in a directory at a specific ref.
+///
+/// Returns file paths relative to the directory.
+/// For WORKDIR, reads from the filesystem.
+/// For other refs, uses git ls-tree.
+pub fn list_files_in_dir(
+    repo: &Path,
+    ref_name: &str,
+    dir_path: &str,
+) -> Result<Vec<String>, GitError> {
+    if ref_name == WORKDIR {
+        // Read from working directory
+        let full_path = repo.join(dir_path);
+
+        if !full_path.exists() || !full_path.is_dir() {
+            return Ok(vec![]);
+        }
+
+        let mut files = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(&full_path) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_file() {
+                        if let Some(name) = entry.file_name().to_str() {
+                            // Return path relative to repo root
+                            let rel_path = if dir_path.is_empty() {
+                                name.to_string()
+                            } else {
+                                format!("{}/{}", dir_path, name)
+                            };
+                            files.push(rel_path);
+                        }
+                    }
+                }
+            }
+        }
+        Ok(files)
+    } else {
+        // Use git ls-tree to list files at ref
+        let tree_spec = if dir_path.is_empty() {
+            ref_name.to_string()
+        } else {
+            format!("{}:{}", ref_name, dir_path)
+        };
+
+        // git ls-tree --name-only <ref>:<dir>
+        let output = cli::run(repo, &["ls-tree", "--name-only", &tree_spec]).unwrap_or_default();
+
+        let files: Vec<String> = output
+            .lines()
+            .filter(|line| !line.is_empty())
+            .map(|name| {
+                if dir_path.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}/{}", dir_path, name)
+                }
+            })
+            .collect();
+
+        Ok(files)
+    }
+}
+
 /// Check if data appears to be binary (contains null bytes in first 8KB)
 fn is_binary(data: &[u8]) -> bool {
     let check_len = data.len().min(8192);

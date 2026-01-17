@@ -182,12 +182,20 @@ async fn find_definition(
             }
         };
 
+        // Create a closure to list files in a directory at the given ref
+        let ref_for_list = ref_name_clone.clone();
+        let repo_for_list = repo.clone();
+        let list_files = move |dir: &str| -> Vec<String> {
+            git::list_files_in_dir(&repo_for_list, &ref_for_list, dir).unwrap_or_default()
+        };
+
         Ok(symbols::find_definition(
             &symbol,
             &current_file,
             &current_content,
             &repo,
             read_file,
+            list_files,
         ))
     })
     .await

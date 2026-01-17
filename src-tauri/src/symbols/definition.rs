@@ -38,18 +38,21 @@ pub struct DefinitionResult {
 /// * `current_content` - Content of the current file
 /// * `repo_root` - Root of the repository (for resolving imports)
 /// * `read_file` - Function to read file contents
+/// * `list_files` - Function to list files in a directory
 ///
 /// # Returns
 /// `Some(DefinitionResult)` if found, `None` otherwise.
-pub fn find_definition<F>(
+pub fn find_definition<F, L>(
     symbol: &SymbolInfo,
     current_file: &Path,
     current_content: &str,
     repo_root: &Path,
     read_file: F,
+    list_files: L,
 ) -> Option<DefinitionResult>
 where
     F: Fn(&Path) -> Option<String>,
+    L: Fn(&str) -> Vec<String>,
 {
     let language = SupportedLanguage::from_path(current_file)?;
 
@@ -80,7 +83,7 @@ where
     }
 
     // 3. Try common patterns (index files, etc.)
-    if let Some(def) = try_common_patterns(symbol, current_file, repo_root, &read_file) {
+    if let Some(def) = try_common_patterns(symbol, current_file, repo_root, &read_file, &list_files) {
         return Some(def);
     }
 
@@ -563,16 +566,31 @@ fn find_crate_root(current_file: &Path, repo_root: &Path) -> Option<PathBuf> {
 }
 
 /// Try common patterns to find definitions.
-fn try_common_patterns<F>(
+fn try_common_patterns<F, L>(
     symbol: &SymbolInfo,
     current_file: &Path,
     repo_root: &Path,
     read_file: &F,
+    list_files: &L,
 ) -> Option<DefinitionResult>
 where
     F: Fn(&Path) -> Option<String>,
+    L: Fn(&str) -> Vec<String>,
 {
     let language = SupportedLanguage::from_path(current_file)?;
+
+    // Get current file's relative path from repo root for comparison
+    let current_rel_path = current_file
+        .strip_prefix(repo_root)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
+
+    // Get directory path relative to repo root
+    let dir_rel_path = current_file
+        .parent()
+        .and_then(|p| p.strip_prefix(repo_root).ok())
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_default();
 
     match language {
         SupportedLanguage::TypeScript
@@ -599,59 +617,54 @@ where
             }
         }
         SupportedLanguage::Rust => {
-            // For Rust, search sibling files in the same module directory
-            if let Some(current_dir) = current_file.parent() {
-                log::debug!(
-                    "try_common_patterns: searching Rust sibling files in {:?}",
-                    current_dir
-                );
+            log::debug!(
+                "try_common_patterns: searching Rust sibling files in '{}'",
+                dir_rel_path
+            );
 
-                // Get all .rs files in the current directory
-                if let Ok(entries) = std::fs::read_dir(current_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "rs").unwrap_or(false)
-                            && path != current_file
-                        {
-                            log::debug!("  Checking sibling file: {:?}", path.file_name());
-                            if let Some(content) = read_file(&path) {
-                                log::debug!("    File read successfully, content length: {}", content.len());
-                                if let Some(def) =
-                                    find_definition_in_file(&symbol.name, &content, &path)
-                                {
-                                    return Some(def);
-                                }
-                            } else {
-                                log::debug!("    Failed to read file via git");
-                            }
-                        }
-                    }
-                } else {
-                    log::debug!("  Failed to read directory");
-                }
+            // Get all files in the current directory via git
+            let files = list_files(&dir_rel_path);
 
-                // Also check mod.rs if we're in a module directory
-                let mod_file = current_dir.join("mod.rs");
-                if mod_file.exists() && mod_file != current_file {
-                    if let Some(content) = read_file(&mod_file) {
-                        if let Some(def) = find_definition_in_file(&symbol.name, &content, &mod_file)
+            for file_path in files {
+                // Check if it's a .rs file and not the current file
+                if file_path.ends_with(".rs") && file_path != current_rel_path {
+                    log::debug!("  Checking sibling file: {}", file_path);
+                    let full_path = repo_root.join(&file_path);
+                    if let Some(content) = read_file(&full_path) {
+                        log::debug!(
+                            "    File read successfully, content length: {}",
+                            content.len()
+                        );
+                        if let Some(def) =
+                            find_definition_in_file(&symbol.name, &content, &full_path)
                         {
                             return Some(def);
                         }
+                    } else {
+                        log::debug!("    Failed to read file via git");
                     }
                 }
+            }
 
-                // Check parent's lib.rs or main.rs
-                if let Some(parent_dir) = current_dir.parent() {
-                    for name in ["lib.rs", "main.rs"] {
-                        let parent_file = parent_dir.join(name);
-                        if parent_file.exists() {
-                            if let Some(content) = read_file(&parent_file) {
-                                if let Some(def) =
-                                    find_definition_in_file(&symbol.name, &content, &parent_file)
-                                {
-                                    return Some(def);
-                                }
+            // Check parent directory for lib.rs or main.rs
+            if let Some(parent_dir) = Path::new(&dir_rel_path).parent() {
+                let parent_dir_str = parent_dir.to_string_lossy().to_string();
+                let parent_files = list_files(&parent_dir_str);
+
+                for name in ["lib.rs", "main.rs"] {
+                    let target = if parent_dir_str.is_empty() {
+                        name.to_string()
+                    } else {
+                        format!("{}/{}", parent_dir_str, name)
+                    };
+
+                    if parent_files.iter().any(|f| f == &target || f.ends_with(&format!("/{}", name))) {
+                        let full_path = repo_root.join(&target);
+                        if let Some(content) = read_file(&full_path) {
+                            if let Some(def) =
+                                find_definition_in_file(&symbol.name, &content, &full_path)
+                            {
+                                return Some(def);
                             }
                         }
                     }
@@ -659,54 +672,52 @@ where
             }
         }
         SupportedLanguage::Python => {
-            // For Python, check __init__.py and sibling files
-            if let Some(current_dir) = current_file.parent() {
-                let init_file = current_dir.join("__init__.py");
-                if init_file.exists() && init_file != current_file {
-                    if let Some(content) = read_file(&init_file) {
-                        if let Some(def) =
-                            find_definition_in_file(&symbol.name, &content, &init_file)
-                        {
-                            return Some(def);
-                        }
+            // Get all files in the current directory
+            let files = list_files(&dir_rel_path);
+
+            // Check __init__.py first
+            let init_path = if dir_rel_path.is_empty() {
+                "__init__.py".to_string()
+            } else {
+                format!("{}/__init__.py", dir_rel_path)
+            };
+
+            if files.iter().any(|f| f == &init_path) && init_path != current_rel_path {
+                let full_path = repo_root.join(&init_path);
+                if let Some(content) = read_file(&full_path) {
+                    if let Some(def) = find_definition_in_file(&symbol.name, &content, &full_path) {
+                        return Some(def);
                     }
                 }
+            }
 
-                // Search other .py files in the directory
-                if let Ok(entries) = std::fs::read_dir(current_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "py").unwrap_or(false)
-                            && path != current_file
+            // Search other .py files in the directory
+            for file_path in files {
+                if file_path.ends_with(".py") && file_path != current_rel_path {
+                    let full_path = repo_root.join(&file_path);
+                    if let Some(content) = read_file(&full_path) {
+                        if let Some(def) =
+                            find_definition_in_file(&symbol.name, &content, &full_path)
                         {
-                            if let Some(content) = read_file(&path) {
-                                if let Some(def) =
-                                    find_definition_in_file(&symbol.name, &content, &path)
-                                {
-                                    return Some(def);
-                                }
-                            }
+                            return Some(def);
                         }
                     }
                 }
             }
         }
         SupportedLanguage::Go => {
-            // For Go, search all .go files in the same package (directory)
-            if let Some(current_dir) = current_file.parent() {
-                if let Ok(entries) = std::fs::read_dir(current_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.extension().map(|e| e == "go").unwrap_or(false)
-                            && path != current_file
+            // Get all files in the current directory
+            let files = list_files(&dir_rel_path);
+
+            // Search all .go files in the same package (directory)
+            for file_path in files {
+                if file_path.ends_with(".go") && file_path != current_rel_path {
+                    let full_path = repo_root.join(&file_path);
+                    if let Some(content) = read_file(&full_path) {
+                        if let Some(def) =
+                            find_definition_in_file(&symbol.name, &content, &full_path)
                         {
-                            if let Some(content) = read_file(&path) {
-                                if let Some(def) =
-                                    find_definition_in_file(&symbol.name, &content, &path)
-                                {
-                                    return Some(def);
-                                }
-                            }
+                            return Some(def);
                         }
                     }
                 }
