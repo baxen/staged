@@ -92,8 +92,21 @@ export async function addReferenceFile(
   referenceFilesState.error = null;
 
   try {
-    // Load file content
-    const file = await getFileAtRef(refName, path, repoPath);
+    // Load file content - try the given ref first, fallback to WORKDIR if not found
+    let file;
+    try {
+      file = await getFileAtRef(refName, path, repoPath);
+    } catch (refError) {
+      // If file doesn't exist at the ref (e.g., new file not in HEAD),
+      // try loading from the working directory
+      const errorMsg = refError instanceof Error ? refError.message : String(refError);
+      if (errorMsg.includes('does not exist') || errorMsg.includes('exists on disk, but not in')) {
+        file = await getFileAtRef('WORKDIR', path, repoPath);
+      } else {
+        throw refError;
+      }
+    }
+
     referenceFilesState.files = [
       ...referenceFilesState.files,
       { path: file.path, content: file.content },
@@ -152,10 +165,20 @@ export async function loadReferenceFiles(
   referenceFilesState.error = null;
 
   try {
-    // Load all files in parallel
+    // Load all files in parallel - with fallback to WORKDIR if not found at ref
     const results = await Promise.allSettled(
       paths.map(async (path) => {
-        const file = await getFileAtRef(refName, path, repoPath);
+        let file;
+        try {
+          file = await getFileAtRef(refName, path, repoPath);
+        } catch (refError) {
+          const errorMsg = refError instanceof Error ? refError.message : String(refError);
+          if (errorMsg.includes('does not exist') || errorMsg.includes('exists on disk, but not in')) {
+            file = await getFileAtRef('WORKDIR', path, repoPath);
+          } else {
+            throw refError;
+          }
+        }
         return { path: file.path, content: file.content };
       })
     );

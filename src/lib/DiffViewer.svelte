@@ -15,6 +15,13 @@
   import { onMount } from 'svelte';
   import { X, GitBranch, MessageSquarePlus, MessageSquare, Trash2 } from 'lucide-svelte';
   import type { FileDiff, Alignment, Comment, Span } from './types';
+  import ContextMenu from './ContextMenu.svelte';
+  import {
+    getSymbolAtPosition,
+    findDefinition,
+    type SymbolInfo,
+    type DefinitionResult,
+  } from './services/symbolNavigation';
   import {
     commentsState,
     getCommentsForRange,
@@ -45,10 +52,12 @@
   } from './diffUtils';
   import { setupDiffKeyboardNav } from './diffKeyboard';
   import { diffSelection } from './stores/diffSelection.svelte';
-  import { diffState, clearScrollTarget } from './stores/diffState.svelte';
+  import { diffState, clearScrollTarget, selectFile } from './stores/diffState.svelte';
+  import { addReferenceFile } from './stores/referenceFiles.svelte';
   import { DiffSpec } from './types';
   import CommentEditor from './CommentEditor.svelte';
   import Scrollbar from './Scrollbar.svelte';
+  import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
   // ==========================================================================
   // Constants
@@ -163,6 +172,59 @@
   } | null = $state(null);
   let editingCommentId: string | null = $state(null);
   let lineSelectionToolbarStyle: { top: number; left: number } | null = $state(null);
+
+  // ==========================================================================
+  // Symbol navigation state (Go to Definition)
+  // ==========================================================================
+
+  /** Whether Cmd/Ctrl key is held down (for showing clickable symbols) */
+  let cmdKeyHeld = $state(false);
+
+  /** Context menu state */
+  let contextMenuState: {
+    x: number;
+    y: number;
+    symbolName: string;
+    symbolInfo: SymbolInfo;
+    pane: 'before' | 'after';
+    lineIndex: number;
+  } | null = $state(null);
+
+  /** Loading state for go to definition */
+  let isNavigatingToDefinition = $state(false);
+
+  /** Tooltip state for showing "Definition not found" message */
+  let tooltipState: {
+    x: number;
+    y: number;
+    message: string;
+  } | null = $state(null);
+  let tooltipTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  /** Show a tooltip at the given position */
+  function showTooltip(x: number, y: number, message: string, duration = 2000) {
+    // Clear any existing timeout
+    if (tooltipTimeout) {
+      clearTimeout(tooltipTimeout);
+    }
+
+    tooltipState = { x, y, message };
+
+    // Auto-hide after duration
+    tooltipTimeout = setTimeout(() => {
+      tooltipState = null;
+      tooltipTimeout = null;
+    }, duration);
+  }
+
+  /** Hide the tooltip */
+  function hideTooltip() {
+    if (tooltipTimeout) {
+      clearTimeout(tooltipTimeout);
+      tooltipTimeout = null;
+    }
+    tooltipState = null;
+  }
 
   // ==========================================================================
   // Derived state
@@ -1036,6 +1098,250 @@
   });
 
   // ==========================================================================
+  // Symbol navigation handlers (Go to Definition)
+  // ==========================================================================
+
+  /** Get the ref name for symbol navigation based on the pane */
+  function getRefNameForPane(pane: 'before' | 'after'): string {
+    if (pane === 'before') {
+      return diffSelection.spec.base.type === 'WorkingTree'
+        ? 'HEAD'
+        : diffSelection.spec.base.value;
+    } else {
+      return diffSelection.spec.head.type === 'WorkingTree'
+        ? 'WORKDIR'
+        : diffSelection.spec.head.value;
+    }
+  }
+
+  /** Handle click on code - check for Cmd+Click */
+  async function handleCodeClick(
+    pane: 'before' | 'after',
+    lineIndex: number,
+    event: MouseEvent
+  ) {
+    // Only handle Cmd+Click (Meta on Mac, Ctrl on Windows/Linux)
+    if (!event.metaKey && !event.ctrlKey) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const filePath = pane === 'before' ? beforePath : afterPath;
+    if (!filePath) return;
+
+    // Calculate column from click position
+    const target = event.target as HTMLElement;
+    const lineElement = target.closest('.line') as HTMLElement;
+    if (!lineElement) return;
+
+    const contentElement = lineElement.querySelector('.line-content') as HTMLElement;
+    if (!contentElement) return;
+
+    const rect = contentElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+
+    // Estimate column from click position (monospace font)
+    const style = window.getComputedStyle(contentElement);
+    const tempSpan = document.createElement('span');
+    tempSpan.style.font = style.font;
+    tempSpan.style.visibility = 'hidden';
+    tempSpan.style.position = 'absolute';
+    tempSpan.textContent = 'M';
+    document.body.appendChild(tempSpan);
+    const charWidth = tempSpan.getBoundingClientRect().width;
+    document.body.removeChild(tempSpan);
+
+    const column = Math.max(0, Math.floor(x / charWidth));
+
+    // Navigate directly on Cmd+Click
+    await navigateToDefinition(pane, filePath, lineIndex, column, event.clientX, event.clientY);
+  }
+
+  /** Handle right-click on code - show context menu */
+  async function handleCodeContextMenu(
+    pane: 'before' | 'after',
+    lineIndex: number,
+    event: MouseEvent
+  ) {
+    const filePath = pane === 'before' ? beforePath : afterPath;
+    if (!filePath) return;
+
+    // Calculate column from click position
+    const target = event.target as HTMLElement;
+    const lineElement = target.closest('.line') as HTMLElement;
+    if (!lineElement) return;
+
+    const contentElement = lineElement.querySelector('.line-content') as HTMLElement;
+    if (!contentElement) return;
+
+    const rect = contentElement.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+
+    // Estimate column from click position
+    const style = window.getComputedStyle(contentElement);
+    const tempSpan = document.createElement('span');
+    tempSpan.style.font = style.font;
+    tempSpan.style.visibility = 'hidden';
+    tempSpan.style.position = 'absolute';
+    tempSpan.textContent = 'M';
+    document.body.appendChild(tempSpan);
+    const charWidth = tempSpan.getBoundingClientRect().width;
+    document.body.removeChild(tempSpan);
+
+    const column = Math.max(0, Math.floor(x / charWidth));
+
+    // Get symbol at position
+    const refName = getRefNameForPane(pane);
+    const repoPath = diffState.currentRepoPath ?? undefined;
+
+    try {
+      const symbol = await getSymbolAtPosition(refName, filePath, lineIndex, column, repoPath);
+
+      if (symbol) {
+        event.preventDefault();
+        contextMenuState = {
+          x: event.clientX,
+          y: event.clientY,
+          symbolName: symbol.name,
+          symbolInfo: symbol,
+          pane,
+          lineIndex,
+        };
+      }
+    } catch (e) {
+      console.error('Failed to get symbol at position:', e);
+    }
+  }
+
+  /** Navigate to the definition of a symbol */
+  async function navigateToDefinition(
+    pane: 'before' | 'after',
+    filePath: string,
+    lineIndex: number,
+    column: number,
+    clickX?: number,
+    clickY?: number
+  ) {
+    if (isNavigatingToDefinition) return;
+
+    const refName = getRefNameForPane(pane);
+    const repoPath = diffState.currentRepoPath ?? undefined;
+
+    isNavigatingToDefinition = true;
+
+    try {
+      // First get the symbol at the position
+      const symbol = await getSymbolAtPosition(refName, filePath, lineIndex, column, repoPath);
+      if (!symbol) {
+        console.debug('No symbol found at position');
+        return;
+      }
+
+      // Find the definition
+      const definition = await findDefinition(
+        refName,
+        filePath,
+        symbol.name,
+        symbol.line,
+        symbol.column,
+        repoPath
+      );
+
+      if (!definition) {
+        console.debug('Definition not found for:', symbol.name);
+        // Show tooltip if we have click coordinates
+        if (clickX !== undefined && clickY !== undefined) {
+          showTooltip(clickX, clickY, `No definition found for "${symbol.name}"`);
+        }
+        return;
+      }
+
+      // Navigate to the definition
+      await goToDefinition(definition, refName, repoPath);
+    } catch (e) {
+      console.error('Failed to navigate to definition:', e);
+    } finally {
+      isNavigatingToDefinition = false;
+    }
+  }
+
+  /** Go to a definition result - either scroll to it or open as reference file */
+  async function goToDefinition(
+    definition: DefinitionResult,
+    refName: string,
+    repoPath?: string
+  ) {
+    const currentPath = afterPath ?? beforePath;
+
+    // Check if definition is in the current file
+    if (definition.filePath === currentPath) {
+      // Same file - just scroll to the line
+      scrollToLine(definition.line);
+      return;
+    }
+
+    // Check if definition is in any of the diff files
+    const isDiffFile = diffState.files.some(
+      (f) => f.after === definition.filePath || f.before === definition.filePath
+    );
+
+    if (isDiffFile) {
+      // Navigate to that diff file with scroll target
+      await selectFile(definition.filePath, definition.line);
+    } else {
+      // Open as reference file
+      try {
+        await addReferenceFile(refName, definition.filePath, diffSelection.spec, repoPath);
+        await selectFile(definition.filePath, definition.line);
+      } catch (e) {
+        console.error('Failed to open reference file:', e);
+      }
+    }
+  }
+
+  /** Handle context menu "Go to Definition" action */
+  async function handleContextMenuGoToDefinition() {
+    if (!contextMenuState) return;
+
+    const { pane, lineIndex, symbolInfo } = contextMenuState;
+    const filePath = pane === 'before' ? beforePath : afterPath;
+    if (!filePath) return;
+
+    contextMenuState = null;
+    await navigateToDefinition(pane, filePath, lineIndex, symbolInfo.column);
+  }
+
+  /** Handle context menu "Copy Symbol" action */
+  async function handleContextMenuCopySymbol() {
+    if (!contextMenuState) return;
+
+    try {
+      await writeText(contextMenuState.symbolName);
+    } catch (e) {
+      console.error('Failed to copy symbol name:', e);
+    }
+    contextMenuState = null;
+  }
+
+  /** Close the context menu */
+  function closeContextMenu() {
+    contextMenuState = null;
+  }
+
+  /** Track Cmd/Ctrl key state */
+  function handleKeyDown(event: KeyboardEvent) {
+    if (event.key === 'Meta' || event.key === 'Control') {
+      cmdKeyHeld = true;
+    }
+  }
+
+  function handleKeyUp(event: KeyboardEvent) {
+    if (event.key === 'Meta' || event.key === 'Control') {
+      cmdKeyHeld = false;
+    }
+  }
+
+  // ==========================================================================
   // Global event handlers
   // ==========================================================================
 
@@ -1176,6 +1482,9 @@
     document.addEventListener('mouseup', handleGlobalMouseUp);
     document.addEventListener('click', handleGlobalClick);
     document.addEventListener('keydown', handleLineSelectionKeydown);
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', () => { cmdKeyHeld = false; });
 
     return () => {
       cleanupKeyboardNav?.();
@@ -1183,6 +1492,8 @@
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('click', handleGlobalClick);
       document.removeEventListener('keydown', handleLineSelectionKeydown);
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
       document.removeEventListener('mousemove', handleDragMove);
       document.removeEventListener('mousemove', handleDividerMouseMove);
       document.removeEventListener('mouseup', handleDividerMouseUp);
@@ -1267,7 +1578,7 @@
                   {@const isInHoveredRange = isLineInHoveredRange('before', i)}
                   {@const isInFocusedHunk = isLineInFocusedHunk('before', i)}
                   {@const isChanged = showRangeMarkers && isLineInChangedAlignment('before', i)}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
                   <div
                     class="line"
                     class:range-start={boundary.isStart}
@@ -1275,8 +1586,11 @@
                     class:range-hovered={isInHoveredRange}
                     class:range-focused={isInFocusedHunk}
                     class:content-changed={isChanged}
+                    class:cmd-clickable={cmdKeyHeld}
                     onmouseenter={() => handleLineMouseEnter('before', i)}
                     onmouseleave={handleLineMouseLeave}
+                    onclick={(e) => handleCodeClick('before', i, e)}
+                    oncontextmenu={(e) => handleCodeContextMenu('before', i, e)}
                   >
                     <span class="line-content">
                       {#each getBeforeTokens(i) as token}
@@ -1321,7 +1635,13 @@
                 style="transform: translateY(-{scrollController.beforeScrollY}px)"
               >
                 {#each beforeLines as line, i}
-                  <div class="line">
+                  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
+                  <div
+                    class="line"
+                    class:cmd-clickable={cmdKeyHeld}
+                    onclick={(e) => handleCodeClick('before', i, e)}
+                    oncontextmenu={(e) => handleCodeContextMenu('before', i, e)}
+                  >
                     <span class="line-content">
                       {#each getBeforeTokens(i) as token}
                         <span style="color: {token.color}">{token.content}</span>
@@ -1372,7 +1692,7 @@
                   {@const isInFocusedHunk = isLineInFocusedHunk('after', i)}
                   {@const isChanged = showRangeMarkers && isLineInChangedAlignment('after', i)}
                   {@const isSelected = isLineSelected('after', i)}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
                   <div
                     class="line"
                     class:range-start={boundary.isStart}
@@ -1381,9 +1701,12 @@
                     class:range-focused={isInFocusedHunk}
                     class:content-changed={isChanged}
                     class:line-selected={isSelected}
+                    class:cmd-clickable={cmdKeyHeld}
                     onmouseenter={() => handleLineMouseEnter('after', i)}
                     onmouseleave={handleLineMouseLeave}
                     onmousedown={(e) => handleLineMouseDown('after', i, e)}
+                    onclick={(e) => handleCodeClick('after', i, e)}
+                    oncontextmenu={(e) => handleCodeContextMenu('after', i, e)}
                   >
                     <span class="line-content">
                       {#each getAfterTokens(i) as token}
@@ -1428,11 +1751,14 @@
               >
                 {#each afterLines as line, i}
                   {@const isSelected = isLineSelected('after', i)}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
+                  <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
                   <div
                     class="line"
                     class:line-selected={isSelected}
+                    class:cmd-clickable={cmdKeyHeld}
                     onmousedown={(e) => handleLineMouseDown('after', i, e)}
+                    onclick={(e) => handleCodeClick('after', i, e)}
+                    oncontextmenu={(e) => handleCodeContextMenu('after', i, e)}
                   >
                     <span class="line-content">
                       {#each getAfterTokens(i) as token}
@@ -1577,6 +1903,30 @@
           : undefined}
       />
     {/if}
+  {/if}
+
+  <!-- Context menu for symbol navigation -->
+  {#if contextMenuState}
+    <ContextMenu
+      x={contextMenuState.x}
+      y={contextMenuState.y}
+      symbolName={contextMenuState.symbolName}
+      canGoToDefinition={true}
+      onGoToDefinition={handleContextMenuGoToDefinition}
+      onCopySymbol={handleContextMenuCopySymbol}
+      onClose={closeContextMenu}
+    />
+  {/if}
+
+  <!-- Tooltip for "Definition not found" message -->
+  {#if tooltipState}
+    <div
+      class="definition-tooltip"
+      style="left: {tooltipState.x}px; top: {tooltipState.y}px;"
+      role="tooltip"
+    >
+      {tooltipState.message}
+    </div>
   {/if}
 </div>
 
@@ -1839,6 +2189,18 @@
     background-color: var(--accent-primary-muted, rgba(59, 130, 246, 0.15));
   }
 
+  /* Cmd+Click mode - cursor changes to pointer */
+  .line.cmd-clickable {
+    cursor: pointer;
+  }
+
+  .line.cmd-clickable .line-content span {
+    text-decoration: underline;
+    text-decoration-color: var(--text-faint);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 2px;
+  }
+
   .empty-state,
   .binary-notice {
     display: flex;
@@ -1923,5 +2285,33 @@
     color: var(--text-muted);
     padding: 4px 4px;
     white-space: nowrap;
+  }
+
+  /* Definition not found tooltip */
+  .definition-tooltip {
+    position: fixed;
+    z-index: 1000;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: var(--size-sm);
+    color: var(--text-secondary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    pointer-events: none;
+    transform: translate(-50%, -100%) translateY(-8px);
+    animation: tooltip-fade-in 0.15s ease-out;
+    white-space: nowrap;
+  }
+
+  @keyframes tooltip-fade-in {
+    from {
+      opacity: 0;
+      transform: translate(-50%, -100%) translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translate(-50%, -100%) translateY(-8px);
+    }
   }
 </style>
