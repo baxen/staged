@@ -37,3 +37,15 @@ pub fn resolve_ref(repo: &Path, reference: &str) -> Result<String, GitError> {
     let output = cli::run(repo, &["rev-parse", reference])?;
     Ok(output.trim().to_string())
 }
+
+/// Get the current branch name (or None if in detached HEAD state)
+pub fn get_current_branch(repo: &Path) -> Result<Option<String>, GitError> {
+    match cli::run(repo, &["symbolic-ref", "--short", "HEAD"]) {
+        Ok(output) => Ok(Some(output.trim().to_string())),
+        Err(GitError::CommandFailed(msg)) if msg.contains("not a symbolic ref") => {
+            // Detached HEAD state
+            Ok(None)
+        }
+        Err(e) => Err(e),
+    }
+}

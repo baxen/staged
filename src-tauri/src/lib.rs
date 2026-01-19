@@ -241,6 +241,13 @@ fn get_merge_base(repo_path: Option<String>, ref1: String, ref2: String) -> Resu
     git::merge_base(path, &ref1, &ref2).map_err(|e| e.to_string())
 }
 
+/// Get the current branch name (or None if in detached HEAD state).
+#[tauri::command(rename_all = "camelCase")]
+fn get_current_branch(repo_path: Option<String>) -> Result<Option<String>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::get_current_branch(path).map_err(|e| e.to_string())
+}
+
 /// List files changed in a diff (for sidebar).
 /// Runs on a blocking thread to avoid freezing the UI on large repos.
 #[tauri::command(rename_all = "camelCase")]
@@ -642,6 +649,7 @@ pub fn run() {
             list_refs,
             resolve_ref,
             get_merge_base,
+            get_current_branch,
             list_diff_files,
             get_file_diff,
             commit,
