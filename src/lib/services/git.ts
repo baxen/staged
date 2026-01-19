@@ -53,6 +53,15 @@ export async function getMergeBase(ref1: string, ref2: string, repoPath?: string
 }
 
 /**
+ * Get the current branch name (or null if in detached HEAD state).
+ */
+export async function getCurrentBranch(repoPath?: string): Promise<string | null> {
+  return invoke<string | null>('get_current_branch', {
+    repoPath: repoPath ?? null,
+  });
+}
+
+/**
  * List files changed in a diff (for sidebar).
  */
 export async function listDiffFiles(spec: DiffSpec, repoPath?: string): Promise<FileDiffSummary[]> {

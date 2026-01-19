@@ -12,6 +12,7 @@
     GitCompareArrows,
     GitPullRequest,
     GitCommitHorizontal,
+    GitBranch,
     Upload,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
@@ -37,6 +38,7 @@
   } from './stores/comments.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
+  import { getCurrentBranch } from './services/git';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
@@ -60,6 +62,21 @@
 
   // Copy feedback
   let copiedFeedback = $state(false);
+
+  // Current branch
+  let currentBranch = $state<string | null>(null);
+
+  // Fetch current branch when repo changes
+  $effect(() => {
+    const repoPath = repoState.currentPath;
+    getCurrentBranch(repoPath ?? undefined)
+      .then((branch) => {
+        currentBranch = branch;
+      })
+      .catch(() => {
+        currentBranch = null;
+      });
+  });
 
   // Check if we're viewing working directory changes (can show commit button)
   let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
@@ -175,8 +192,15 @@
 <svelte:window onclick={handleClickOutside} />
 
 <header class="top-bar">
-  <!-- Left section: Diff selector -->
+  <!-- Left section: Branch indicator and Diff selector -->
   <div class="section section-left">
+    {#if currentBranch}
+      <div class="branch-indicator" title="Current branch: {currentBranch}">
+        <GitBranch size={12} />
+        <span class="branch-name">{currentBranch}</span>
+      </div>
+    {/if}
+
     <div class="diff-selector">
       <button
         class="diff-selector-btn"
@@ -376,6 +400,30 @@
   .section-right {
     flex: 1;
     justify-content: flex-end;
+  }
+
+  /* Branch indicator */
+  .branch-indicator {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+  }
+
+  .branch-indicator :global(svg) {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .branch-name {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Diff selector */
