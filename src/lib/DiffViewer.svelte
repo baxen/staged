@@ -48,6 +48,8 @@
   import { diffState, clearScrollTarget } from './stores/diffState.svelte';
   import { DiffSpec } from './types';
   import CommentEditor from './CommentEditor.svelte';
+  import AnnotationOverlay from './AnnotationOverlay.svelte';
+  import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
   import Scrollbar from './Scrollbar.svelte';
 
   // ==========================================================================
@@ -99,6 +101,9 @@
   let afterPane: HTMLDivElement | null = $state(null);
   let connectorCanvas: HTMLCanvasElement | null = $state(null);
   let diffViewerEl: HTMLDivElement | null = $state(null);
+
+  /** Tracked width of afterPane for annotation overlays (updated via ResizeObserver) */
+  let afterPaneWidth = $state(0);
 
   // ==========================================================================
   // Highlighter state
@@ -201,6 +206,33 @@
   let beforePath = $derived(diff?.before?.path ?? null);
   let afterPath = $derived(diff?.after?.path ?? null);
   let currentFilePath = $derived(afterPath ?? beforePath ?? '');
+
+  // AI annotations for current file
+  let currentFileAnnotations = $derived.by(() => {
+    if (!currentFilePath) return [];
+    const result = smartDiffState.results.get(currentFilePath);
+    if (!result) return [];
+    // Only return annotations with after_span (we're ignoring before-only for now)
+    const annotations = result.annotations.filter((a) => a.after_span);
+    if (annotations.length > 0) {
+      console.log(
+        '[DEBUG] Found',
+        annotations.length,
+        'annotations for',
+        currentFilePath,
+        annotations
+      );
+    }
+    return annotations;
+  });
+
+  // Whether annotations should be shown (have results and not globally hidden)
+  let showAiAnnotations = $derived(
+    currentFileAnnotations.length > 0 && smartDiffState.showAnnotations
+  );
+
+  // Whether annotations are currently revealed (hold A key)
+  let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
 
   // Language detection
   let language = $derived(diff ? getLanguageFromDiff(diff, detectLanguage) : null);
@@ -316,7 +348,18 @@
         return { top: startPercent, height: heightPercent, type: 'comment' as const };
       });
 
-    return [...changeMarkers, ...commentMarkers];
+    // AI annotation markers
+    const annotationMarkers = currentFileAnnotations
+      .filter((a) => a.after_span)
+      .map((annotation) => {
+        const span = annotation.after_span!;
+        const startPercent = (span.start / afterLines.length) * 100;
+        const rangeSize = Math.max(1, span.end - span.start);
+        const heightPercent = Math.max(0.5, (rangeSize / afterLines.length) * 100);
+        return { top: startPercent, height: heightPercent, type: 'annotation' as const };
+      });
+
+    return [...changeMarkers, ...commentMarkers, ...annotationMarkers];
   });
 
   // Content dimensions for scrollbars
@@ -1090,6 +1133,36 @@
     }
   }
 
+  // ==========================================================================
+  // AI Annotation Reveal (hold A key)
+  // ==========================================================================
+
+  function handleAnnotationRevealKeydown(event: KeyboardEvent) {
+    // Skip if focus is in an input or textarea
+    const target = event.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      return;
+    }
+
+    // A key: reveal annotations (show code through blur)
+    if (event.key === 'a' || event.key === 'A') {
+      // Don't trigger if modifier keys are held (allow Cmd+A for select all, etc.)
+      if (event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      console.log('[DEBUG] A key pressed, revealing annotations');
+      setAnnotationsRevealed(true);
+    }
+  }
+
+  function handleAnnotationRevealKeyup(event: KeyboardEvent) {
+    // A key released: hide annotations again
+    if (event.key === 'a' || event.key === 'A') {
+      console.log('[DEBUG] A key released, hiding annotations');
+      setAnnotationsRevealed(false);
+    }
+  }
+
   function handleCopy(event: ClipboardEvent) {
     if (selectedLineRange) {
       event.preventDefault();
@@ -1176,6 +1249,8 @@
     document.addEventListener('mouseup', handleGlobalMouseUp);
     document.addEventListener('click', handleGlobalClick);
     document.addEventListener('keydown', handleLineSelectionKeydown);
+    document.addEventListener('keydown', handleAnnotationRevealKeydown);
+    document.addEventListener('keyup', handleAnnotationRevealKeyup);
 
     return () => {
       cleanupKeyboardNav?.();
@@ -1183,6 +1258,8 @@
       document.removeEventListener('mouseup', handleGlobalMouseUp);
       document.removeEventListener('click', handleGlobalClick);
       document.removeEventListener('keydown', handleLineSelectionKeydown);
+      document.removeEventListener('keydown', handleAnnotationRevealKeydown);
+      document.removeEventListener('keyup', handleAnnotationRevealKeyup);
       document.removeEventListener('mousemove', handleDragMove);
       document.removeEventListener('mousemove', handleDividerMouseMove);
       document.removeEventListener('mouseup', handleDividerMouseUp);
@@ -1192,6 +1269,24 @@
         connectorRenderer = null;
       }
     };
+  });
+
+  // Track afterPane width for annotation overlays
+  $effect(() => {
+    if (!afterPane) return;
+
+    // Set initial width
+    afterPaneWidth = afterPane.clientWidth;
+
+    // Update on resize
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        afterPaneWidth = entry.contentRect.width;
+      }
+    });
+    resizeObserver.observe(afterPane);
+
+    return () => resizeObserver.disconnect();
   });
 
   // Handle external scroll target requests (e.g., from sidebar comment clicks)
@@ -1397,6 +1492,23 @@
                     <span class="empty-pane-label">File deleted</span>
                   </div>
                 {/if}
+
+                <!-- AI Annotation Overlays -->
+                {#if showAiAnnotations}
+                  {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+                  {#each currentFileAnnotations as annotation}
+                    {#if annotation.after_span}
+                      <AnnotationOverlay
+                        {annotation}
+                        top={annotation.after_span.start * lineHeight}
+                        height={(annotation.after_span.end - annotation.after_span.start) *
+                          lineHeight}
+                        revealed={annotationsRevealed}
+                        containerWidth={afterPaneWidth}
+                      />
+                    {/if}
+                  {/each}
+                {/if}
               </div>
             </div>
             <Scrollbar
@@ -1445,6 +1557,23 @@
                   <div class="empty-pane-notice">
                     <span class="empty-pane-label">Empty file</span>
                   </div>
+                {/if}
+
+                <!-- AI Annotation Overlays (new file mode) -->
+                {#if showAiAnnotations}
+                  {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+                  {#each currentFileAnnotations as annotation}
+                    {#if annotation.after_span}
+                      <AnnotationOverlay
+                        {annotation}
+                        top={annotation.after_span.start * lineHeight}
+                        height={(annotation.after_span.end - annotation.after_span.start) *
+                          lineHeight}
+                        revealed={annotationsRevealed}
+                        containerWidth={afterPaneWidth}
+                      />
+                    {/if}
+                  {/each}
                 {/if}
               </div>
             </div>
@@ -1775,6 +1904,7 @@
     display: inline-block;
     min-width: 100%;
     will-change: transform;
+    position: relative; /* For AI annotation overlays */
   }
 
   .line {

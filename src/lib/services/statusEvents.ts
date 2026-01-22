@@ -54,7 +54,7 @@ export async function initWatcher(onFilesChanged: FilesChangedCallback): Promise
     } else {
       console.warn(
         `[FileWatcher] Received event for unknown watchId ${payload.watchId}. ` +
-        `Known watchIds: [${Array.from(watchIdToPath.keys()).join(', ')}]`
+          `Known watchIds: [${Array.from(watchIdToPath.keys()).join(', ')}]`
       );
     }
   });

@@ -50,5 +50,9 @@ open = "5"
 name = "debug_diff"
 path = "src/bin/debug_diff.rs"
 
+[[bin]]
+name = "test_ai"
+path = "src/bin/test_ai.rs"
+
 [dev-dependencies]
 tempfile = "3.0"

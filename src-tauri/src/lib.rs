@@ -2,6 +2,7 @@
 //!
 //! This module provides the bridge between the frontend and the git/github modules.
 
+pub mod ai;
 pub mod git;
 pub mod review;
 mod themes;
@@ -218,6 +219,117 @@ async fn sync_review_to_github(
     git::sync_review_to_github(&path, pr_number, &review.comments)
         .await
         .map_err(|e| e.to_string())
+}
+
+// =============================================================================
+// AI Commands
+// =============================================================================
+
+use ai::{ChangesetAnalysis, ChangesetSummary, SmartDiffResult};
+
+/// Check if an AI CLI tool is available.
+#[tauri::command(rename_all = "camelCase")]
+fn check_ai_available() -> Result<String, String> {
+    match ai::find_ai_tool() {
+        Some(tool) => Ok(tool.name().to_string()),
+        None => Err("No AI CLI found. Install goose or claude.".to_string()),
+    }
+}
+
+/// Analyze a diff using AI.
+///
+/// This is the main AI entry point - handles file listing, content loading,
+/// and AI analysis in one call. Frontend just provides the diff spec.
+#[tauri::command(rename_all = "camelCase")]
+async fn analyze_diff(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+) -> Result<ChangesetAnalysis, String> {
+    let path = get_repo_path(repo_path.as_deref()).to_path_buf();
+
+    // Run on blocking thread pool since this does file I/O and spawns a subprocess
+    tokio::task::spawn_blocking(move || ai::analyze_diff(&path, &spec))
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
+}
+
+// =============================================================================
+// AI Analysis Persistence Commands
+// =============================================================================
+
+/// Save a changeset summary to the database.
+#[tauri::command(rename_all = "camelCase")]
+fn save_changeset_summary(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    summary: ChangesetSummary,
+) -> Result<(), String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.save_changeset_summary(&id, &summary).map_err(|e| e.0)
+}
+
+/// Get a saved changeset summary from the database.
+#[tauri::command(rename_all = "camelCase")]
+fn get_changeset_summary(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+) -> Result<Option<ChangesetSummary>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.get_changeset_summary(&id).map_err(|e| e.0)
+}
+
+/// Save a file analysis to the database.
+#[tauri::command(rename_all = "camelCase")]
+fn save_file_analysis(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    file_path: String,
+    result: SmartDiffResult,
+) -> Result<(), String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store
+        .save_file_analysis(&id, &file_path, &result)
+        .map_err(|e| e.0)
+}
+
+/// Get a saved file analysis from the database.
+#[tauri::command(rename_all = "camelCase")]
+fn get_file_analysis(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    file_path: String,
+) -> Result<Option<SmartDiffResult>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.get_file_analysis(&id, &file_path).map_err(|e| e.0)
+}
+
+/// Get all saved file analyses for a diff.
+#[tauri::command(rename_all = "camelCase")]
+fn get_all_file_analyses(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+) -> Result<Vec<(String, SmartDiffResult)>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.get_all_file_analyses(&id).map_err(|e| e.0)
+}
+
+/// Delete all AI analyses for a diff (used when refreshing).
+#[tauri::command(rename_all = "camelCase")]
+fn delete_all_analyses(repo_path: Option<String>, spec: DiffSpec) -> Result<(), String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.delete_all_analyses(&id).map_err(|e| e.0)
 }
 
 // =============================================================================
@@ -507,6 +619,16 @@ pub fn run() {
             fetch_pr,
             sync_review_to_github,
             invalidate_pr_cache,
+            // AI commands
+            analyze_diff,
+            check_ai_available,
+            // AI persistence commands
+            save_changeset_summary,
+            get_changeset_summary,
+            save_file_analysis,
+            get_file_analysis,
+            get_all_file_analyses,
+            delete_all_analyses,
             // Review commands
             get_review,
             add_comment,
