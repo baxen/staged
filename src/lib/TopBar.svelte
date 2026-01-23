@@ -14,6 +14,8 @@
     GitCommitHorizontal,
     Upload,
     Orbit,
+    Eye,
+    EyeOff,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
@@ -45,6 +47,7 @@
     runAnalysis,
     deleteAnalysis,
     clearResults as clearSmartDiffState,
+    setAnnotationsRevealed,
   } from './stores/smartDiff.svelte';
 
   interface Props {
@@ -82,6 +85,8 @@
   let isAiLoading = $derived(smartDiffState.loading);
   let hasAiResults = $derived(smartDiffState.changesetSummary !== null);
   let canRunAi = $derived(diffState.files.length > 0 && !diffState.loading);
+  let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
+  let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffPreset): boolean {
@@ -320,6 +325,22 @@
         <Orbit size={14} />
       </div>
     </button>
+
+    <!-- AI Annotations reveal toggle (only show when annotations exist) -->
+    {#if hasFileAnnotations}
+      <button
+        class="action-btn reveal-btn"
+        class:active={annotationsRevealed}
+        onclick={() => setAnnotationsRevealed(!annotationsRevealed)}
+        title="Hold A to show explanation view"
+      >
+        {#if annotationsRevealed}
+          <Eye size={14} />
+        {:else}
+          <EyeOff size={14} />
+        {/if}
+      </button>
+    {/if}
 
     <div class="comments-section">
       <MessageSquare size={14} />
@@ -765,5 +786,14 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* AI Annotations reveal toggle */
+  .reveal-btn.active {
+    color: var(--ui-accent);
+  }
+
+  .reveal-btn.active:hover {
+    color: var(--ui-accent);
   }
 </style>

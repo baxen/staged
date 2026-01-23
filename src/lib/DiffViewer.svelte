@@ -1492,24 +1492,26 @@
                     <span class="empty-pane-label">File deleted</span>
                   </div>
                 {/if}
-
-                <!-- AI Annotation Overlays -->
-                {#if showAiAnnotations}
-                  {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+              </div>
+              <!-- Full-pane AI blur overlay with annotation text -->
+              {#if showAiAnnotations && annotationsRevealed}
+                {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+                <div class="ai-blur-overlay">
                   {#each currentFileAnnotations as annotation}
                     {#if annotation.after_span}
                       <AnnotationOverlay
                         {annotation}
-                        top={annotation.after_span.start * lineHeight}
+                        top={annotation.after_span.start * lineHeight -
+                          scrollController.afterScrollY}
                         height={(annotation.after_span.end - annotation.after_span.start) *
                           lineHeight}
-                        revealed={annotationsRevealed}
+                        revealed={true}
                         containerWidth={afterPaneWidth}
                       />
                     {/if}
                   {/each}
-                {/if}
-              </div>
+                </div>
+              {/if}
             </div>
             <Scrollbar
               scrollY={scrollController.afterScrollY}
@@ -1558,24 +1560,26 @@
                     <span class="empty-pane-label">Empty file</span>
                   </div>
                 {/if}
-
-                <!-- AI Annotation Overlays (new file mode) -->
-                {#if showAiAnnotations}
-                  {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+              </div>
+              <!-- Full-pane AI blur overlay with annotation text (new file mode) -->
+              {#if showAiAnnotations && annotationsRevealed}
+                {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+                <div class="ai-blur-overlay">
                   {#each currentFileAnnotations as annotation}
                     {#if annotation.after_span}
                       <AnnotationOverlay
                         {annotation}
-                        top={annotation.after_span.start * lineHeight}
+                        top={annotation.after_span.start * lineHeight -
+                          scrollController.afterScrollY}
                         height={(annotation.after_span.end - annotation.after_span.start) *
                           lineHeight}
-                        revealed={annotationsRevealed}
+                        revealed={true}
                         containerWidth={afterPaneWidth}
                       />
                     {/if}
                   {/each}
-                {/if}
-              </div>
+                </div>
+              {/if}
             </div>
             <Scrollbar
               scrollY={scrollController.afterScrollY}
@@ -2053,5 +2057,16 @@
     color: var(--text-muted);
     padding: 4px 4px;
     white-space: nowrap;
+  }
+
+  /* Full-pane AI blur overlay */
+  .ai-blur-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    background: rgba(var(--ui-accent-rgb, 59, 130, 246), 0.08);
+    pointer-events: none;
   }
 </style>
