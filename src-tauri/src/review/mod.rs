@@ -9,6 +9,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
+use crate::ai::{ChangesetSummary, SmartDiffResult};
 use crate::git::{DiffId, Span};
 
 // =============================================================================
@@ -234,6 +235,26 @@ impl ReviewStore {
                 FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
             );
 
+            -- AI analysis results
+            CREATE TABLE IF NOT EXISTS ai_changeset_summary (
+                before_ref TEXT NOT NULL,
+                after_ref TEXT NOT NULL,
+                summary_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (before_ref, after_ref),
+                FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS ai_file_analysis (
+                before_ref TEXT NOT NULL,
+                after_ref TEXT NOT NULL,
+                path TEXT NOT NULL,
+                result_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                PRIMARY KEY (before_ref, after_ref, path),
+                FOREIGN KEY (before_ref, after_ref) REFERENCES reviews(before_ref, after_ref) ON DELETE CASCADE
+            );
+
             PRAGMA foreign_keys = ON;
             "#,
         )?;
@@ -429,6 +450,129 @@ impl ReviewStore {
         // Foreign key cascades handle child tables
         conn.execute(
             "DELETE FROM reviews WHERE before_ref = ?1 AND after_ref = ?2",
+            params![&id.before, &id.after],
+        )?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // AI Analysis Storage
+    // =========================================================================
+
+    /// Save a changeset summary for a diff.
+    pub fn save_changeset_summary(&self, id: &DiffId, summary: &ChangesetSummary) -> Result<()> {
+        self.get_or_create(id)?;
+        let conn = self.conn.lock().unwrap();
+        let json = serde_json::to_string(summary)
+            .map_err(|e| ReviewError::new(format!("Failed to serialize summary: {}", e)))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_changeset_summary (before_ref, after_ref, summary_json, created_at)
+             VALUES (?1, ?2, ?3, datetime('now'))",
+            params![&id.before, &id.after, &json],
+        )?;
+        Ok(())
+    }
+
+    /// Get the changeset summary for a diff, if available.
+    pub fn get_changeset_summary(&self, id: &DiffId) -> Result<Option<ChangesetSummary>> {
+        let conn = self.conn.lock().unwrap();
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT summary_json FROM ai_changeset_summary WHERE before_ref = ?1 AND after_ref = ?2",
+                params![&id.before, &id.after],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        match json {
+            Some(j) => {
+                let summary: ChangesetSummary = serde_json::from_str(&j)
+                    .map_err(|e| ReviewError::new(format!("Failed to parse summary: {}", e)))?;
+                Ok(Some(summary))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Delete the changeset summary for a diff.
+    pub fn delete_changeset_summary(&self, id: &DiffId) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM ai_changeset_summary WHERE before_ref = ?1 AND after_ref = ?2",
+            params![&id.before, &id.after],
+        )?;
+        Ok(())
+    }
+
+    /// Save AI analysis for a specific file.
+    pub fn save_file_analysis(
+        &self,
+        id: &DiffId,
+        path: &str,
+        result: &SmartDiffResult,
+    ) -> Result<()> {
+        self.get_or_create(id)?;
+        let conn = self.conn.lock().unwrap();
+        let json = serde_json::to_string(result)
+            .map_err(|e| ReviewError::new(format!("Failed to serialize analysis: {}", e)))?;
+        conn.execute(
+            "INSERT OR REPLACE INTO ai_file_analysis (before_ref, after_ref, path, result_json, created_at)
+             VALUES (?1, ?2, ?3, ?4, datetime('now'))",
+            params![&id.before, &id.after, path, &json],
+        )?;
+        Ok(())
+    }
+
+    /// Get AI analysis for a specific file, if available.
+    pub fn get_file_analysis(&self, id: &DiffId, path: &str) -> Result<Option<SmartDiffResult>> {
+        let conn = self.conn.lock().unwrap();
+        let json: Option<String> = conn
+            .query_row(
+                "SELECT result_json FROM ai_file_analysis WHERE before_ref = ?1 AND after_ref = ?2 AND path = ?3",
+                params![&id.before, &id.after, path],
+                |row| row.get(0),
+            )
+            .optional()?;
+
+        match json {
+            Some(j) => {
+                let result: SmartDiffResult = serde_json::from_str(&j)
+                    .map_err(|e| ReviewError::new(format!("Failed to parse analysis: {}", e)))?;
+                Ok(Some(result))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Get all file analyses for a diff.
+    pub fn get_all_file_analyses(&self, id: &DiffId) -> Result<Vec<(String, SmartDiffResult)>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT path, result_json FROM ai_file_analysis WHERE before_ref = ?1 AND after_ref = ?2",
+        )?;
+        let rows = stmt.query_map(params![&id.before, &id.after], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            let (path, json) = row?;
+            let result: SmartDiffResult = serde_json::from_str(&json)
+                .map_err(|e| ReviewError::new(format!("Failed to parse analysis: {}", e)))?;
+            results.push((path, result));
+        }
+        Ok(results)
+    }
+
+    /// Delete all AI analyses for a diff.
+    pub fn delete_all_analyses(&self, id: &DiffId) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "DELETE FROM ai_changeset_summary WHERE before_ref = ?1 AND after_ref = ?2",
+            params![&id.before, &id.after],
+        )?;
+        conn.execute(
+            "DELETE FROM ai_file_analysis WHERE before_ref = ?1 AND after_ref = ?2",
             params![&id.before, &id.after],
         )?;
         Ok(())

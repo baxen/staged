@@ -13,6 +13,9 @@
     GitPullRequest,
     GitCommitHorizontal,
     Upload,
+    Orbit,
+    Eye,
+    EyeOff,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
@@ -21,6 +24,7 @@
   import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
+  import SmartDiffModal from './SmartDiffModal.svelte';
   import { DiffSpec } from './types';
   import type { DiffSpec as DiffSpecType } from './types';
   import {
@@ -37,6 +41,14 @@
   } from './stores/comments.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
+  import {
+    smartDiffState,
+    checkAi,
+    runAnalysis,
+    deleteAnalysis,
+    clearResults as clearSmartDiffState,
+    setAnnotationsRevealed,
+  } from './stores/smartDiff.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
@@ -57,6 +69,7 @@
   let showSyncModal = $state(false);
   let showShortcutsModal = $state(false);
   let showSettingsModal = $state(false);
+  let showSmartDiffModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
@@ -67,6 +80,13 @@
   let canCommit = $derived(isWorkingTree && diffState.files.length > 0);
   // Can sync if viewing a PR with comments
   let canSync = $derived(diffSelection.prNumber !== undefined && commentsState.comments.length > 0);
+
+  // Smart diff state
+  let isAiLoading = $derived(smartDiffState.loading);
+  let hasAiResults = $derived(smartDiffState.changesetSummary !== null);
+  let canRunAi = $derived(diffState.files.length > 0 && !diffState.loading);
+  let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
+  let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffPreset): boolean {
@@ -109,6 +129,66 @@
         copiedFeedback = false;
       }, 1500);
     }
+  }
+
+  /**
+   * Handle AI analysis button click.
+   * If results exist, show modal. Otherwise, trigger analysis.
+   */
+  async function handleAiAnalysis() {
+    // If we have results, just open the modal
+    if (hasAiResults) {
+      showSmartDiffModal = true;
+      return;
+    }
+
+    // If already loading, do nothing (button shows progress)
+    if (isAiLoading) return;
+
+    if (!canRunAi) return;
+
+    // Check AI availability first
+    const available = await checkAi();
+    if (!available) {
+      // TODO: Show error toast or modal
+      console.error('AI not available:', smartDiffState.aiError);
+      return;
+    }
+
+    // Start analysis in background - don't open modal yet
+    // The button will show loading state, modal opens when done
+    runChangesetAnalysis();
+  }
+
+  /**
+   * Run changeset analysis in background.
+   * Opens modal automatically when complete.
+   */
+  async function runChangesetAnalysis() {
+    try {
+      // Single call - backend handles file listing and content loading
+      const result = await runAnalysis(repoState.currentPath ?? null, diffSelection.spec);
+
+      if (result) {
+        // Analysis complete - open modal to show results
+        showSmartDiffModal = true;
+      }
+    } catch (e) {
+      console.error('Analysis failed:', e);
+    }
+  }
+
+  /**
+   * Handle refresh button click in the AI modal.
+   * Deletes existing analysis and re-runs.
+   */
+  async function handleRefreshAnalysis() {
+    // Clear existing results from memory and database
+    await deleteAnalysis(repoState.currentPath ?? null, diffSelection.spec);
+    clearSmartDiffState();
+
+    // Re-run analysis
+    await runChangesetAnalysis();
   }
 
   /**
@@ -217,7 +297,7 @@
     </div>
   </div>
 
-  <!-- Center section: Actions (Commit, Comments) -->
+  <!-- Center section: Actions (Commit, Comments, AI) -->
   <div class="section section-center">
     {#if isWorkingTree}
       <button
@@ -228,6 +308,37 @@
         disabled={!canCommit}
       >
         <GitCommitHorizontal size={14} />
+      </button>
+    {/if}
+
+    <!-- AI Analysis button -->
+    <button
+      class="action-btn ai-btn"
+      class:loading={isAiLoading}
+      class:has-results={hasAiResults}
+      class:disabled={!canRunAi}
+      onclick={handleAiAnalysis}
+      title={isAiLoading ? 'Analyzing...' : hasAiResults ? 'View AI analysis' : 'Analyze with AI'}
+      disabled={!canRunAi && !hasAiResults}
+    >
+      <div class="ai-icon" class:spinning={isAiLoading}>
+        <Orbit size={14} />
+      </div>
+    </button>
+
+    <!-- AI Annotations reveal toggle (only show when annotations exist) -->
+    {#if hasFileAnnotations}
+      <button
+        class="action-btn reveal-btn"
+        class:active={annotationsRevealed}
+        onclick={() => setAnnotationsRevealed(!annotationsRevealed)}
+        title="Hold A to show explanation view"
+      >
+        {#if annotationsRevealed}
+          <Eye size={14} />
+        {:else}
+          <EyeOff size={14} />
+        {/if}
       </button>
     {/if}
 
@@ -345,6 +456,10 @@
 
 {#if showSettingsModal}
   <SettingsModal onClose={() => (showSettingsModal = false)} />
+{/if}
+
+{#if showSmartDiffModal}
+  <SmartDiffModal onClose={() => (showSmartDiffModal = false)} onRefresh={handleRefreshAnalysis} />
 {/if}
 
 <style>
@@ -638,5 +753,47 @@
 
   .action-btn :global(svg) {
     flex-shrink: 0;
+  }
+
+  /* AI Analysis button */
+  .ai-btn {
+    position: relative;
+    overflow: visible;
+  }
+
+  .ai-btn.has-results {
+    color: var(--ui-accent);
+  }
+
+  .ai-btn.has-results:hover:not(:disabled) {
+    color: var(--ui-accent);
+  }
+
+  .ai-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ai-icon.spinning {
+    animation: spin 2s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* AI Annotations reveal toggle */
+  .reveal-btn.active {
+    color: var(--ui-accent);
+  }
+
+  .reveal-btn.active:hover {
+    color: var(--ui-accent);
   }
 </style>

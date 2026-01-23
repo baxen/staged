@@ -15,7 +15,7 @@
     /** Height as percentage (0-100) */
     height: number;
     /** Type determines color */
-    type: 'change' | 'comment';
+    type: 'change' | 'comment' | 'annotation';
   }
 
   interface Props {
@@ -202,6 +202,7 @@
         class="marker"
         class:change={marker.type === 'change'}
         class:comment={marker.type === 'comment'}
+        class:annotation={marker.type === 'annotation'}
         style="top: {marker.top}%; height: {marker.height}%;"
       ></div>
     {/each}
@@ -286,5 +287,9 @@
 
   .marker.comment {
     background-color: var(--diff-comment-highlight);
+  }
+
+  .marker.annotation {
+    background-color: var(--ui-accent);
   }
 </style>
