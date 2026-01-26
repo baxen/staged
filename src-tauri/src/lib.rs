@@ -4,6 +4,7 @@
 
 pub mod agent;
 pub mod ai;
+mod cli_discovery;
 pub mod git;
 pub mod review;
 mod themes;

@@ -22,6 +22,7 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 use crate::agent::types::{
     AgentConfig, AgentError, AgentEvent, ContentBlock, SessionId, SessionInfo, ToolResult,
 };
+use crate::cli_discovery;
 
 /// Shared state for tracking the current response message ID
 struct SharedState {
@@ -46,15 +47,21 @@ pub async fn spawn_agent(
         .map(|arg| arg.replace("{session_id}", &session_id))
         .collect();
 
+    // Resolve the command path using CLI discovery
+    // This handles GUI apps not inheriting shell PATH
+    let command_path = cli_discovery::find_command(&config.command)
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|| config.command.clone());
+
     log::info!(
         "Spawning agent '{}' with command: {} {:?}",
         config.id,
-        config.command,
+        command_path,
         resolved_args
     );
 
     // Spawn the agent process
-    let mut cmd = Command::new(&config.command);
+    let mut cmd = Command::new(&command_path);
     cmd.args(&resolved_args)
         .current_dir(&working_dir)
         .stdin(Stdio::piped())
@@ -67,7 +74,10 @@ pub async fn spawn_agent(
     }
 
     let child = cmd.spawn().map_err(|e| {
-        AgentError::new(format!("Failed to spawn agent '{}': {}", config.command, e))
+        AgentError::new(format!(
+            "Failed to spawn agent '{}': {}. Make sure '{}' is installed.",
+            config.command, e, config.command
+        ))
     })?;
 
     // Create session info
