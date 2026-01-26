@@ -43,8 +43,15 @@ chrono = { version = "0.4", features = ["serde"] }
 dirs = "5.0"
 tauri-plugin-clipboard-manager = "2.3.2"
 reqwest = { version = "0.13.1", features = ["json"] }
-tokio = { version = "1.49.0", features = ["sync"] }
+tokio = { version = "1.49.0", features = ["sync", "macros", "rt-multi-thread", "process", "io-util"] }
 open = "5"
+
+# Agent Client Protocol - for AI agent integration (Goose, etc.)
+agent-client-protocol = "0.9"
+async-trait = "0.1"
+tokio-util = { version = "0.7", features = ["compat"] }
+futures = "0.3"
+env_logger = "0.11"
 
 [[bin]]
 name = "debug_diff"

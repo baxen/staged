@@ -84,6 +84,12 @@
     clearResults as clearSmartDiffResults,
     loadAnalysisFromDb,
   } from './lib/stores/smartDiff.svelte';
+  import {
+    agentState,
+    createAgentState,
+    initAgentEventListener,
+    cleanupAgentEventListener,
+  } from './lib/stores/agent.svelte';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -362,6 +368,15 @@
     diffSelection.label = tab.diffSelection.label;
     diffSelection.prNumber = tab.diffSelection.prNumber;
 
+    // Sync agent state
+    agentState.messages = tab.agentState.messages;
+    agentState.status = tab.agentState.status;
+    agentState.isStreaming = tab.agentState.isStreaming;
+    agentState.currentToolCall = tab.agentState.currentToolCall;
+    agentState.error = tab.agentState.error;
+    agentState.sessionId = tab.agentState.sessionId;
+    agentState.currentMessageId = tab.agentState.currentMessageId;
+
     // Update repo state
     setCurrentRepo(tab.repoPath);
   }
@@ -397,6 +412,15 @@
     tab.diffSelection.spec = diffSelection.spec;
     tab.diffSelection.label = diffSelection.label;
     tab.diffSelection.prNumber = diffSelection.prNumber;
+
+    // Sync agent state back to tab
+    tab.agentState.messages = agentState.messages;
+    tab.agentState.status = agentState.status;
+    tab.agentState.isStreaming = agentState.isStreaming;
+    tab.agentState.currentToolCall = agentState.currentToolCall;
+    tab.agentState.error = agentState.error;
+    tab.agentState.sessionId = agentState.sessionId;
+    tab.agentState.currentMessageId = agentState.currentMessageId;
   }
 
   /**
@@ -470,7 +494,14 @@
     syncGlobalToTab();
 
     const repoName = extractRepoName(repoPath);
-    addTab(repoPath, repoName, createDiffState, createCommentsState, createDiffSelection);
+    addTab(
+      repoPath,
+      repoName,
+      createDiffState,
+      createCommentsState,
+      createDiffSelection,
+      createAgentState
+    );
 
     // Start watching the new repo (idempotent - won't restart if already watching)
     watchRepo(repoPath);
@@ -566,6 +597,9 @@
     // Register the reference files loader so comments store can trigger it
     setReferenceFilesLoader(loadReferenceFiles);
 
+    // Initialize agent event listener
+    initAgentEventListener();
+
     (async () => {
       await loadSavedSyntaxTheme();
 
@@ -574,7 +608,12 @@
       setWindowLabel(label);
 
       // Load tabs from storage (if any)
-      loadTabsFromStorage(createDiffState, createCommentsState, createDiffSelection);
+      loadTabsFromStorage(
+        createDiffState,
+        createCommentsState,
+        createDiffSelection,
+        createAgentState
+      );
 
       // Initialize watcher listener once (handles all repos)
       unsubscribeWatcher = await initWatcher(handleFilesChanged);
@@ -596,7 +635,14 @@
         // Create initial tab if no tabs loaded from storage
         if (windowState.tabs.length === 0) {
           const repoName = extractRepoName(repoPath);
-          addTab(repoPath, repoName, createDiffState, createCommentsState, createDiffSelection);
+          addTab(
+            repoPath,
+            repoName,
+            createDiffState,
+            createCommentsState,
+            createDiffSelection,
+            createAgentState
+          );
         }
 
         // Sync the active tab to global state
@@ -621,6 +667,8 @@
     unsubscribeMenuOpenFolder?.();
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();
+    // Cleanup agent event listener
+    cleanupAgentEventListener();
     // Cleanup sidebar resize listeners
     document.removeEventListener('mousemove', handleSidebarResizeMove);
     document.removeEventListener('mouseup', handleSidebarResizeEnd);

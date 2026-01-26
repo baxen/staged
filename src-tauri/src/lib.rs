@@ -2,20 +2,24 @@
 //!
 //! This module provides the bridge between the frontend and the git/github modules.
 
+pub mod agent;
 pub mod ai;
 pub mod git;
 pub mod review;
 mod themes;
 mod watcher;
 
+use agent::{AgentEvent, AgentManager, ConnectionCommand, ConnectionManager, SessionInfo};
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
 };
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
+use tokio::sync::mpsc;
 use watcher::WatcherHandle;
 
 // =============================================================================
@@ -521,6 +525,60 @@ fn get_window_label(window: tauri::Window) -> String {
 }
 
 // =============================================================================
+// Agent Commands
+// =============================================================================
+
+/// Application state for agent management
+pub struct AgentState {
+    manager: Arc<AgentManager>,
+}
+
+/// Create a new agent session.
+#[tauri::command(rename_all = "camelCase")]
+async fn agent_create_session(
+    window: tauri::Window,
+    state: State<'_, AgentState>,
+    working_dir: String,
+    name: String,
+) -> Result<SessionInfo, String> {
+    let working_dir = PathBuf::from(working_dir);
+
+    // Create an event sender for this session
+    let (event_sender, mut event_receiver) = mpsc::unbounded_channel::<AgentEvent>();
+
+    // Spawn a task to forward events to the frontend
+    let window_clone = window.clone();
+    tokio::spawn(async move {
+        while let Some(event) = event_receiver.recv().await {
+            if let Err(e) = window_clone.emit("agent-event", &event) {
+                log::error!("Failed to emit agent event: {}", e);
+            }
+        }
+    });
+
+    // Create the session (always use "goose" for now)
+    state
+        .manager
+        .create_session("goose", working_dir, name, event_sender)
+        .await
+        .map_err(|e| e.message)
+}
+
+/// Send a message to an agent session.
+#[tauri::command(rename_all = "camelCase")]
+async fn agent_send_message(
+    state: State<'_, AgentState>,
+    session_id: String,
+    message: String,
+) -> Result<(), String> {
+    state
+        .manager
+        .send_message(&session_id, message)
+        .await
+        .map_err(|e| e.message)
+}
+
+// =============================================================================
 // Menu System
 // =============================================================================
 
@@ -589,11 +647,27 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
 // Tauri App Setup
 // =============================================================================
 
+/// Run the connection manager on a LocalSet (required for ACP's !Send futures)
+async fn run_connection_manager(mut command_receiver: mpsc::UnboundedReceiver<ConnectionCommand>) {
+    let mut manager = ConnectionManager::new();
+
+    while let Some(command) = command_receiver.recv().await {
+        manager.handle_command(command).await;
+    }
+
+    log::info!("Connection manager shutting down");
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(
+            tauri_plugin_log::Builder::default()
+                .level(log::LevelFilter::Info)
+                .build(),
+        )
         .setup(|app| {
             // Initialize the review store with app data directory
             review::init_store(app.handle()).map_err(|e| e.0)?;
@@ -601,6 +675,30 @@ pub fn run() {
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
             app.manage(watcher);
+
+            // Create the agent manager and get the command receiver
+            let (agent_manager, command_receiver) = AgentManager::new();
+            let agent_manager = Arc::new(agent_manager);
+
+            // Create agent state
+            let agent_state = AgentState {
+                manager: agent_manager,
+            };
+            app.manage(agent_state);
+
+            // Spawn the connection manager on a LocalSet (required for ACP's !Send futures)
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("Failed to create tokio runtime for connection manager");
+
+                let local = tokio::task::LocalSet::new();
+
+                local.block_on(&rt, async move {
+                    run_connection_manager(command_receiver).await;
+                });
+            });
 
             // Build and set the menu
             let menu = build_menu(app.handle()).map_err(|e| e.to_string())?;
@@ -611,13 +709,6 @@ pub fn run() {
                 handle_menu_event(app, event);
             });
 
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -673,6 +764,9 @@ pub fn run() {
             unwatch_repo,
             // Window commands
             get_window_label,
+            // Agent commands
+            agent_create_session,
+            agent_send_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
