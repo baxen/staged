@@ -37,6 +37,20 @@ impl AgentRegistry {
             api_key_env_var: None, // Goose manages its own API keys
             version_check_arg: None,
         });
+
+        // Claude Code - Anthropic's AI coding agent (via ACP)
+        self.register(AgentConfig {
+            id: "claude-code".to_string(),
+            name: "Claude Code".to_string(),
+            description: "Anthropic's AI coding assistant".to_string(),
+            command: "claude".to_string(),
+            args: vec!["acp".to_string()],
+            env: vec![],
+            icon: Some("claude".to_string()),
+            enabled: true,
+            api_key_env_var: None, // Claude Code manages its own API keys
+            version_check_arg: None,
+        });
     }
 
     /// Register an agent configuration

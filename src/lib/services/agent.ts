@@ -18,9 +18,14 @@ export interface SessionInfo {
  * Create a new agent session.
  * @param workingDir - The working directory for the agent
  * @param name - A name for the session
+ * @param agentId - The agent to use (e.g., 'goose', 'claude-code'). Defaults to 'goose'.
  */
-export async function createSession(workingDir: string, name: string): Promise<SessionInfo> {
-  return invoke<SessionInfo>('agent_create_session', { workingDir, name });
+export async function createSession(
+  workingDir: string,
+  name: string,
+  agentId?: string
+): Promise<SessionInfo> {
+  return invoke<SessionInfo>('agent_create_session', { workingDir, name, agentId });
 }
 
 /**

@@ -90,6 +90,8 @@
     createAgentState,
     initAgentEventListener,
     cleanupAgentEventListener,
+    registerSession,
+    unregisterSession,
   } from './lib/stores/agent.svelte';
 
   // UI State
@@ -285,6 +287,11 @@
     const activeTab = getActiveTab();
     if (!activeTab) return;
 
+    // Unregister the session if the tab has one
+    if (activeTab.agentState.sessionId) {
+      unregisterSession(activeTab.agentState.sessionId);
+    }
+
     closeTab(activeTab.id);
 
     // Close window if no tabs left
@@ -376,7 +383,13 @@
     agentState.currentToolCall = tab.agentState.currentToolCall;
     agentState.error = tab.agentState.error;
     agentState.sessionId = tab.agentState.sessionId;
+    agentState.agentId = tab.agentState.agentId;
     agentState.currentMessageId = tab.agentState.currentMessageId;
+
+    // Register the session if the tab has one (enables event routing for this tab)
+    if (tab.agentState.sessionId) {
+      registerSession(tab.agentState.sessionId, tab.agentState);
+    }
 
     // Update repo state
     setCurrentRepo(tab.repoPath);
@@ -421,6 +434,7 @@
     tab.agentState.currentToolCall = agentState.currentToolCall;
     tab.agentState.error = agentState.error;
     tab.agentState.sessionId = agentState.sessionId;
+    tab.agentState.agentId = agentState.agentId;
     tab.agentState.currentMessageId = agentState.currentMessageId;
   }
 

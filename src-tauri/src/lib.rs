@@ -540,8 +540,10 @@ async fn agent_create_session(
     state: State<'_, AgentState>,
     working_dir: String,
     name: String,
+    agent_id: Option<String>,
 ) -> Result<SessionInfo, String> {
     let working_dir = PathBuf::from(working_dir);
+    let agent_id = agent_id.unwrap_or_else(|| "goose".to_string());
 
     // Create an event sender for this session
     let (event_sender, mut event_receiver) = mpsc::unbounded_channel::<AgentEvent>();
@@ -556,10 +558,10 @@ async fn agent_create_session(
         }
     });
 
-    // Create the session (always use "goose" for now)
+    // Create the session with the specified agent
     state
         .manager
-        .create_session("goose", working_dir, name, event_sender)
+        .create_session(&agent_id, working_dir, name, event_sender)
         .await
         .map_err(|e| e.message)
 }
