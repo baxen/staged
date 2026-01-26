@@ -30,7 +30,6 @@
   import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
-  import AgentChat from './AgentChat.svelte';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -589,9 +588,6 @@
           {@render commentList()}
         </ul>
       {/if}
-
-      <!-- Agent Chat -->
-      <AgentChat />
     </div>
   {/if}
 </div>

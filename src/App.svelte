@@ -9,6 +9,7 @@
   import TopBar from './lib/TopBar.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import TabBar from './lib/TabBar.svelte';
+  import ChatPanel from './lib/ChatPanel.svelte';
   import { listRefs, getMergeBase } from './lib/services/git';
   import { getWindowLabel } from './lib/services/window';
   import {
@@ -741,6 +742,11 @@
       </aside>
     {/if}
   </div>
+
+  <!-- Bottom chat panel -->
+  {#if repoState.currentPath}
+    <ChatPanel />
+  {/if}
 </main>
 
 {#if showFileSearch}

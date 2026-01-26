@@ -1,8 +1,8 @@
 <!--
-  AgentChat.svelte - Chat interface for Goose agent
+  ChatPanel.svelte - Bottom panel chat interface for Goose agent
   
-  Displays conversation history with markdown rendering and handles message input.
-  User messages appear as bubbles on the right, agent responses on the left.
+  A VSCode terminal-style bottom panel that displays conversation history
+  with markdown rendering and handles message input.
 -->
 <script lang="ts">
   import { tick } from 'svelte';
@@ -13,6 +13,9 @@
 
   let chatInput = $state('');
   let chatMessagesEl: HTMLDivElement | undefined = $state();
+
+  // Show messages area when there are messages
+  let hasMessages = $derived(agentState.messages.length > 0);
 
   // Auto-scroll chat to bottom when messages change
   $effect(() => {
@@ -48,23 +51,18 @@
   }
 </script>
 
-<div class="agent-section">
-  <div class="agent-messages" bind:this={chatMessagesEl}>
-    {#if agentState.messages.length === 0}
-      <div class="agent-empty">
-        <Bot size={20} />
-        <span>Ask Goose to help with this code</span>
-      </div>
-    {:else}
+<div class="chat-panel" class:expanded={hasMessages}>
+  {#if hasMessages}
+    <div class="chat-messages" bind:this={chatMessagesEl}>
       {#each agentState.messages as message (message.id)}
-        <div class="agent-message" class:user={message.role === 'user'}>
+        <div class="chat-message" class:user={message.role === 'user'}>
           <div class="message-content">
             {@html renderMarkdown(message.content)}
           </div>
         </div>
       {/each}
       {#if agentState.currentToolCall}
-        <div class="agent-tool-call">
+        <div class="chat-tool-call">
           <Terminal size={12} />
           <span class="tool-name">{agentState.currentToolCall.name}</span>
           {#if agentState.currentToolCall.status === 'running'}
@@ -73,17 +71,23 @@
         </div>
       {/if}
       {#if agentState.isStreaming && !agentState.currentToolCall}
-        <div class="agent-thinking">
+        <div class="chat-thinking">
           <Loader2 size={12} class="spinning" />
           <span>Thinking...</span>
         </div>
       {/if}
-    {/if}
-  </div>
-  <form class="agent-input-form" onsubmit={handleChatSubmit}>
+    </div>
+  {/if}
+  <form class="chat-input-form" onsubmit={handleChatSubmit}>
+    <div class="input-actions">
+      <span class="chat-icon">
+        <Bot size={14} />
+      </span>
+      <!-- Future buttons can go here -->
+    </div>
     <input
       type="text"
-      class="agent-input"
+      class="chat-input"
       placeholder="Ask Goose..."
       bind:value={chatInput}
       onkeydown={handleChatKeydown}
@@ -91,7 +95,7 @@
     />
     <button
       type="submit"
-      class="agent-send-btn"
+      class="chat-send-btn"
       disabled={agentState.isStreaming || !chatInput.trim()}
       title="Send message"
     >
@@ -101,62 +105,52 @@
 </div>
 
 <style>
-  .agent-section {
+  .chat-panel {
     display: flex;
     flex-direction: column;
-    flex: 1;
-    min-height: 0;
-    margin: 0 8px 8px;
-    border-radius: 6px;
     background: var(--bg-secondary);
-    border: 1px solid var(--border-subtle);
+    border-top: 1px solid var(--border-subtle);
+    max-height: 48px;
+    transition: max-height 0.2s ease;
   }
 
-  .agent-messages {
+  .chat-panel.expanded {
+    max-height: 300px;
+  }
+
+  .chat-messages {
     flex: 1;
     overflow-y: auto;
-    padding: 8px;
+    padding: 12px 16px;
     display: flex;
     flex-direction: column;
     gap: 8px;
+    min-height: 0;
   }
 
-  .agent-empty {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    height: 100%;
-    color: var(--text-faint);
-    font-size: var(--size-sm);
-    text-align: center;
-    padding: 16px;
-  }
-
-  .agent-message {
+  .chat-message {
     padding: 6px 0;
     font-size: var(--size-sm);
-    line-height: 1.4;
+    line-height: 1.5;
     max-width: 100%;
     color: var(--text-primary);
     align-self: flex-start;
   }
 
-  .agent-message.user {
-    padding: 6px 10px;
+  .chat-message.user {
+    padding: 6px 12px;
     border-radius: 6px;
     background: var(--ui-accent);
     color: white;
     align-self: flex-end;
-    max-width: 90%;
+    max-width: 80%;
   }
 
   .message-content {
     word-break: break-word;
   }
 
-  /* Markdown styles for agent messages */
+  /* Markdown styles for chat messages */
   .message-content :global(p) {
     margin: 0 0 0.5em 0;
   }
@@ -173,7 +167,7 @@
     background: var(--bg-hover);
   }
 
-  .agent-message.user .message-content :global(code) {
+  .chat-message.user .message-content :global(code) {
     background: rgba(255, 255, 255, 0.2);
   }
 
@@ -203,7 +197,7 @@
     text-decoration: underline;
   }
 
-  .agent-message.user .message-content :global(a) {
+  .chat-message.user .message-content :global(a) {
     color: inherit;
     text-decoration: underline;
   }
@@ -242,7 +236,7 @@
     font-size: 1em;
   }
 
-  .agent-tool-call {
+  .chat-tool-call {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -257,7 +251,7 @@
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
   }
 
-  .agent-thinking {
+  .chat-thinking {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -266,14 +260,33 @@
     font-size: var(--size-xs);
   }
 
-  .agent-input-form {
+  .chat-input-form {
     display: flex;
-    gap: 4px;
-    padding: 8px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 12px;
+    background: var(--bg-secondary);
+  }
+
+  .chat-panel.expanded .chat-input-form {
+    padding-bottom: 8px;
     border-top: 1px solid var(--border-subtle);
   }
 
-  .agent-input {
+  .input-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .chat-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-faint);
+  }
+
+  .chat-input {
     flex: 1;
     padding: 6px 10px;
     border: 1px solid var(--border-subtle);
@@ -284,21 +297,21 @@
     font-family: inherit;
   }
 
-  .agent-input:focus {
+  .chat-input:focus {
     outline: none;
     border-color: var(--ui-accent);
   }
 
-  .agent-input:disabled {
+  .chat-input:disabled {
     opacity: 0.6;
     cursor: not-allowed;
   }
 
-  .agent-input::placeholder {
+  .chat-input::placeholder {
     color: var(--text-faint);
   }
 
-  .agent-send-btn {
+  .chat-send-btn {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -311,11 +324,11 @@
     transition: opacity 0.1s;
   }
 
-  .agent-send-btn:hover:not(:disabled) {
+  .chat-send-btn:hover:not(:disabled) {
     opacity: 0.9;
   }
 
-  .agent-send-btn:disabled {
+  .chat-send-btn:disabled {
     opacity: 0.4;
     cursor: not-allowed;
   }
