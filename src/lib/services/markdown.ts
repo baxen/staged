@@ -1,7 +1,124 @@
 /**
- * Simple markdown renderer for chat messages.
- * Supports: bold, italic, inline code, code blocks, links, and paragraphs.
+ * Markdown renderer for chat messages using marked.
+ * Supports full GitHub Flavored Markdown: tables, task lists, strikethrough, etc.
+ * Code blocks are syntax highlighted using Shiki (same as diff viewer).
  */
+
+import { marked, type Tokens } from 'marked';
+import {
+  highlightLines,
+  detectLanguage,
+  prepareLanguage,
+  getTheme,
+  type Token,
+} from './highlighter';
+import type { BundledLanguage } from 'shiki';
+
+// Configure marked for chat context
+marked.setOptions({
+  gfm: true, // GitHub Flavored Markdown (tables, strikethrough, etc.)
+  breaks: true, // Convert \n to <br> (more natural for chat)
+});
+
+// Map markdown code fence language identifiers to Shiki BundledLanguage
+// These are common aliases people use in markdown that don't match file extensions
+const LANG_ALIASES: Record<string, BundledLanguage> = {
+  // Full names
+  python: 'python',
+  javascript: 'javascript',
+  typescript: 'typescript',
+  rust: 'rust',
+  golang: 'go',
+  ruby: 'ruby',
+  shell: 'bash',
+  bash: 'bash',
+  zsh: 'bash',
+  fish: 'bash',
+  powershell: 'powershell',
+  csharp: 'csharp',
+  fsharp: 'fsharp',
+  cpp: 'cpp',
+  objectivec: 'objective-c',
+  'objective-c': 'objective-c',
+  kotlin: 'kotlin',
+  scala: 'scala',
+  swift: 'swift',
+  dart: 'dart',
+  elixir: 'elixir',
+  erlang: 'erlang',
+  haskell: 'haskell',
+  clojure: 'clojure',
+  ocaml: 'ocaml',
+  lua: 'lua',
+  perl: 'perl',
+  php: 'php',
+  java: 'java',
+  sql: 'sql',
+  graphql: 'graphql',
+  dockerfile: 'dockerfile',
+  docker: 'dockerfile',
+  yaml: 'yaml',
+  toml: 'toml',
+  json: 'json',
+  jsonc: 'json',
+  xml: 'xml',
+  html: 'html',
+  css: 'css',
+  scss: 'scss',
+  sass: 'sass',
+  less: 'less',
+  markdown: 'markdown',
+  diff: 'diff',
+  makefile: 'make',
+  make: 'make',
+  cmake: 'cmake',
+  nginx: 'nginx',
+  terraform: 'terraform',
+  hcl: 'terraform',
+  prisma: 'prisma',
+  solidity: 'solidity',
+  latex: 'latex',
+  tex: 'latex',
+  nix: 'nix',
+  zig: 'zig',
+  nim: 'nim',
+  julia: 'julia',
+  r: 'r',
+
+  // React/JSX/TSX - these use typescript/javascript highlighting
+  react: 'typescript',
+  jsx: 'javascript',
+  tsx: 'typescript',
+
+  // Svelte/Vue/Astro
+  svelte: 'svelte',
+  vue: 'vue',
+  astro: 'astro',
+
+  // Common short aliases
+  py: 'python',
+  js: 'javascript',
+  ts: 'typescript',
+  rs: 'rust',
+  go: 'go',
+  rb: 'ruby',
+  sh: 'bash',
+  ps1: 'powershell',
+  cs: 'csharp',
+  fs: 'fsharp',
+  kt: 'kotlin',
+  ex: 'elixir',
+  erl: 'erlang',
+  hs: 'haskell',
+  clj: 'clojure',
+  ml: 'ocaml',
+  pl: 'perl',
+  yml: 'yaml',
+  md: 'markdown',
+  tf: 'terraform',
+  sol: 'solidity',
+  jl: 'julia',
+};
 
 /**
  * Escape HTML entities to prevent XSS.
@@ -16,114 +133,63 @@ function escapeHtml(text: string): string {
 }
 
 /**
- * Render inline markdown (bold, italic, code, links).
+ * Convert tokens to HTML spans.
  */
-function renderInline(text: string): string {
-  let result = escapeHtml(text);
-
-  // Inline code (must come before bold/italic to avoid conflicts)
-  result = result.replace(/`([^`]+)`/g, '<code>$1</code>');
-
-  // Bold: **text** or __text__
-  result = result.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-  result = result.replace(/__([^_]+)__/g, '<strong>$1</strong>');
-
-  // Italic: *text* or _text_ (but not inside words for underscore)
-  result = result.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-  result = result.replace(/(?<!\w)_([^_]+)_(?!\w)/g, '<em>$1</em>');
-
-  // Links: [text](url)
-  result = result.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
-  );
-
-  // Auto-link URLs
-  result = result.replace(
-    /(?<!")https?:\/\/[^\s<]+/g,
-    '<a href="$&" target="_blank" rel="noopener noreferrer">$&</a>'
-  );
-
-  return result;
+function tokensToHtml(tokens: Token[]): string {
+  return tokens
+    .map((t) => `<span style="color:${t.color}">${escapeHtml(t.content)}</span>`)
+    .join('');
 }
+
+/**
+ * Resolve a markdown language identifier to a Shiki BundledLanguage.
+ * Tries the alias map first, then falls back to file extension detection.
+ */
+function resolveLanguage(lang: string): BundledLanguage | null {
+  const normalized = lang.toLowerCase();
+
+  // Check alias map first
+  if (normalized in LANG_ALIASES) {
+    return LANG_ALIASES[normalized];
+  }
+
+  // Fall back to file extension detection
+  return detectLanguage(`file.${normalized}`);
+}
+
+/**
+ * Highlight code using Shiki and return HTML.
+ * Falls back to plain escaped code if highlighting fails.
+ */
+function highlightCode(code: string, lang: string | undefined): string {
+  const theme = getTheme();
+  const bgColor = theme?.bg || '#1e1e1e';
+
+  // Resolve the language
+  const detectedLang = lang ? resolveLanguage(lang) : null;
+
+  // Highlight the code
+  const lines = highlightLines(code, detectedLang);
+  const highlightedLines = lines.map((lineTokens) => tokensToHtml(lineTokens));
+
+  return `<pre style="background:${bgColor};padding:8px;border-radius:4px;overflow-x:auto;margin:0.5em 0"><code>${highlightedLines.join('\n')}</code></pre>`;
+}
+
+// Custom renderer for code blocks
+const renderer = new marked.Renderer();
+
+renderer.code = function ({ text, lang }: Tokens.Code): string {
+  // Resolve and prepare the language (async load if needed)
+  const resolvedLang = lang ? resolveLanguage(lang) : null;
+  if (resolvedLang) {
+    prepareLanguage(`file.${resolvedLang}`);
+  }
+  return highlightCode(text, lang);
+};
 
 /**
  * Render markdown text to HTML.
  */
 export function renderMarkdown(text: string): string {
-  const lines = text.split('\n');
-  const result: string[] = [];
-  let inCodeBlock = false;
-  let codeBlockContent: string[] = [];
-  let codeBlockLang = '';
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-
-    // Code block start/end
-    if (line.startsWith('```')) {
-      if (inCodeBlock) {
-        // End code block
-        result.push(
-          `<pre><code class="language-${codeBlockLang}">${escapeHtml(codeBlockContent.join('\n'))}</code></pre>`
-        );
-        codeBlockContent = [];
-        codeBlockLang = '';
-        inCodeBlock = false;
-      } else {
-        // Start code block
-        codeBlockLang = line.slice(3).trim();
-        inCodeBlock = true;
-      }
-      continue;
-    }
-
-    if (inCodeBlock) {
-      codeBlockContent.push(line);
-      continue;
-    }
-
-    // Empty line
-    if (line.trim() === '') {
-      continue;
-    }
-
-    // Headers
-    const headerMatch = line.match(/^(#{1,6})\s+(.+)$/);
-    if (headerMatch) {
-      const level = headerMatch[1].length;
-      result.push(`<h${level}>${renderInline(headerMatch[2])}</h${level}>`);
-      continue;
-    }
-
-    // Unordered list items
-    if (line.match(/^[-*+]\s+/)) {
-      const content = line.replace(/^[-*+]\s+/, '');
-      result.push(`<li>${renderInline(content)}</li>`);
-      continue;
-    }
-
-    // Ordered list items
-    if (line.match(/^\d+\.\s+/)) {
-      const content = line.replace(/^\d+\.\s+/, '');
-      result.push(`<li>${renderInline(content)}</li>`);
-      continue;
-    }
-
-    // Regular paragraph
-    result.push(`<p>${renderInline(line)}</p>`);
-  }
-
-  // Close unclosed code block
-  if (inCodeBlock && codeBlockContent.length > 0) {
-    result.push(
-      `<pre><code class="language-${codeBlockLang}">${escapeHtml(codeBlockContent.join('\n'))}</code></pre>`
-    );
-  }
-
-  // Wrap consecutive list items in ul
-  let html = result.join('\n');
-  html = html.replace(/(<li>.*?<\/li>\n?)+/g, (match) => `<ul>${match}</ul>`);
-
-  return html;
+  return marked.parse(text, { async: false, renderer }) as string;
 }

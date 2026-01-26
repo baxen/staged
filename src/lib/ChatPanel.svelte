@@ -354,6 +354,57 @@
     font-size: 1em;
   }
 
+  .message-content :global(table) {
+    border-collapse: collapse;
+    margin: 0.5em 0;
+    font-size: 0.9em;
+    width: auto;
+  }
+
+  .message-content :global(th),
+  .message-content :global(td) {
+    border: 1px solid var(--border-muted);
+    padding: 4px 8px;
+    text-align: left;
+  }
+
+  .message-content :global(th) {
+    background: var(--bg-hover);
+    font-weight: 600;
+  }
+
+  .message-content :global(tr:nth-child(even)) {
+    background: var(--bg-hover);
+  }
+
+  .chat-message.user .message-content :global(th),
+  .chat-message.user .message-content :global(td) {
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .chat-message.user .message-content :global(th),
+  .chat-message.user .message-content :global(tr:nth-child(even)) {
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  .message-content :global(blockquote) {
+    margin: 0.5em 0;
+    padding: 0.25em 0.75em;
+    border-left: 3px solid var(--border-muted);
+    color: var(--text-muted);
+  }
+
+  .message-content :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border-subtle);
+    margin: 0.75em 0;
+  }
+
+  .message-content :global(del) {
+    text-decoration: line-through;
+    opacity: 0.7;
+  }
+
   .chat-tool-call {
     display: flex;
     align-items: center;
