@@ -30,6 +30,7 @@
   import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
+  import AgentChat from './AgentChat.svelte';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -588,6 +589,9 @@
           {@render commentList()}
         </ul>
       {/if}
+
+      <!-- Agent Chat -->
+      <AgentChat />
     </div>
   {/if}
 </div>
@@ -645,6 +649,9 @@
     flex: 1;
     overflow-y: auto;
     padding: 8px 0;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
   }
 
   .tree-section {
@@ -726,7 +733,7 @@
 
   .tree-item.selected {
     background-color: var(--bg-primary);
-    box-shadow: inset 2px 0 0 var(--accent-primary);
+    box-shadow: inset 2px 0 0 var(--ui-accent);
   }
 
   .tree-item.selected .file-name {
