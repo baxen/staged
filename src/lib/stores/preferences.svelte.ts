@@ -361,12 +361,10 @@ export function toggleChatPanelVisible(): void {
 
 /**
  * Load saved chat panel visibility preference.
+ * Note: We intentionally don't restore the saved value - the panel always starts closed.
  */
 export function loadSavedChatPanelVisible(): void {
-  const saved = localStorage.getItem(CHAT_PANEL_VISIBLE_STORAGE_KEY);
-  if (saved !== null) {
-    preferences.chatPanelVisible = saved === 'true';
-  }
+  // Always start with panel closed - don't restore from localStorage
 }
 
 // =============================================================================

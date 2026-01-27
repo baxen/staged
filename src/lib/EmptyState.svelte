@@ -86,18 +86,6 @@
   // Track if we've seen streaming start - prevents false transitions on mount
   let hasSeenStreaming = $state(false);
 
-  // Debug: log state changes
-  $effect(() => {
-    console.log(
-      '[EmptyState] Plan status:',
-      planState.plan?.status,
-      'isStreaming:',
-      agentState.isStreaming,
-      'hasSeenStreaming:',
-      hasSeenStreaming
-    );
-  });
-
   // Watch agent streaming to update plan content
   // We track messages length and isStreaming to ensure reactivity
   $effect(() => {
