@@ -213,6 +213,8 @@ export type AnnotationCategory = 'explanation' | 'warning' | 'suggestion' | 'con
 /** A single AI annotation on a diff */
 export interface SmartDiffAnnotation {
   id: string;
+  /** Description of the old state (for before_span annotations) */
+  before_description?: string;
   /** File path this annotation belongs to (for changeset-level analysis) */
   file_path?: string;
   /** Span in 'before' content (undefined if only applies to 'after') */

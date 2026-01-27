@@ -49,6 +49,7 @@
   import { DiffSpec } from './types';
   import CommentEditor from './CommentEditor.svelte';
   import AnnotationOverlay from './AnnotationOverlay.svelte';
+  import BeforeAnnotationOverlay from './BeforeAnnotationOverlay.svelte';
   import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
   import Scrollbar from './Scrollbar.svelte';
 
@@ -104,6 +105,9 @@
 
   /** Tracked width of afterPane for annotation overlays (updated via ResizeObserver) */
   let afterPaneWidth = $state(0);
+
+  /** Tracked width of beforePane for annotation overlays (updated via ResizeObserver) */
+  let beforePaneWidth = $state(0);
 
   // ==========================================================================
   // Highlighter state
@@ -212,7 +216,7 @@
     if (!currentFilePath) return [];
     const result = smartDiffState.results.get(currentFilePath);
     if (!result) return [];
-    // Only return annotations with after_span (we're ignoring before-only for now)
+    // Return annotations with after_span for the right pane
     const annotations = result.annotations.filter((a) => a.after_span);
     if (annotations.length > 0) {
       console.log(
@@ -225,6 +229,19 @@
     }
     return annotations;
   });
+
+  // AI annotations with before_span for the left pane
+  let beforeFileAnnotations = $derived.by(() => {
+    if (!currentFilePath) return [];
+    const result = smartDiffState.results.get(currentFilePath);
+    if (!result) return [];
+    // Return annotations with before_span for the left pane
+    return result.annotations.filter((a) => a.before_span);
+  });
+
+  let showBeforeAnnotations = $derived(
+    beforeFileAnnotations.length > 0 && smartDiffState.showAnnotations
+  );
 
   // Whether annotations should be shown (have results and not globally hidden)
   let showAiAnnotations = $derived(
@@ -320,13 +337,26 @@
   // Scrollbar marker computation
   let beforeMarkers = $derived.by(() => {
     if (beforeLines.length === 0) return [];
-    return changedAlignments.map(({ alignment }) => {
+    const changeMarkers = changedAlignments.map(({ alignment }) => {
       const span = alignment.before;
       const startPercent = (span.start / beforeLines.length) * 100;
       const rangeSize = span.end - span.start;
       const heightPercent = Math.max(0.5, (rangeSize / beforeLines.length) * 100);
       return { top: startPercent, height: heightPercent, type: 'change' as const };
     });
+
+    // AI annotation markers for before pane
+    const annotationMarkers = beforeFileAnnotations
+      .filter((a) => a.before_span)
+      .map((annotation) => {
+        const span = annotation.before_span!;
+        const startPercent = (span.start / beforeLines.length) * 100;
+        const rangeSize = Math.max(1, span.end - span.start);
+        const heightPercent = Math.max(0.5, (rangeSize / beforeLines.length) * 100);
+        return { top: startPercent, height: heightPercent, type: 'annotation' as const };
+      });
+
+    return [...changeMarkers, ...annotationMarkers];
   });
 
   let afterMarkers = $derived.by(() => {
@@ -1289,6 +1319,24 @@
     return () => resizeObserver.disconnect();
   });
 
+  // Track beforePane width for annotation overlays
+  $effect(() => {
+    if (!beforePane) return;
+
+    // Set initial width
+    beforePaneWidth = beforePane.clientWidth;
+
+    // Update on resize
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        beforePaneWidth = entry.contentRect.width;
+      }
+    });
+    resizeObserver.observe(beforePane);
+
+    return () => resizeObserver.disconnect();
+  });
+
   // Handle external scroll target requests (e.g., from sidebar comment clicks)
   $effect(() => {
     const targetLine = diffState.scrollTargetLine;
@@ -1386,6 +1434,25 @@
                   </div>
                 {/if}
               </div>
+              <!-- Full-pane AI blur overlay with before_description text -->
+              {#if showBeforeAnnotations && annotationsRevealed}
+                {@const lineHeight = scrollController.getDimensions('before').lineHeight || 20}
+                <div class="ai-blur-overlay">
+                  {#each beforeFileAnnotations as annotation}
+                    {#if annotation.before_span}
+                      <BeforeAnnotationOverlay
+                        {annotation}
+                        top={annotation.before_span.start * lineHeight -
+                          scrollController.beforeScrollY}
+                        height={(annotation.before_span.end - annotation.before_span.start) *
+                          lineHeight}
+                        revealed={true}
+                        containerWidth={beforePaneWidth}
+                      />
+                    {/if}
+                  {/each}
+                </div>
+              {/if}
             </div>
           </div>
         </div>
