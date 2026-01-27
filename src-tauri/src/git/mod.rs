@@ -8,7 +8,7 @@ mod types;
 
 pub use cli::GitError;
 pub use commit::commit;
-pub use diff::{get_file_diff, list_diff_files};
+pub use diff::{get_file_diff, get_unified_diff, list_diff_files};
 pub use files::{get_file_at_ref, search_files};
 pub use github::{
     check_github_auth, fetch_pr, invalidate_cache as invalidate_pr_cache, list_pull_requests,
