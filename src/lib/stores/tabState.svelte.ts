@@ -2,7 +2,7 @@
  * Tab State Store
  *
  * Manages multiple repository tabs within each window.
- * Each tab maintains isolated state for its repository (diffs, comments, selection, agent).
+ * Each tab maintains isolated state for its repository (diffs, comments, selection, agent, plan).
  */
 
 import { unwatchRepo } from '../services/statusEvents';
@@ -10,9 +10,10 @@ import type { DiffState } from './diffState.svelte';
 import type { CommentsState } from './comments.svelte';
 import type { DiffSelection } from './diffSelection.svelte';
 import type { AgentState } from './agent.svelte';
+import type { PlanState } from './plan.svelte';
 
 // Re-export types for convenience
-export type { DiffState, CommentsState, DiffSelection, AgentState };
+export type { DiffState, CommentsState, DiffSelection, AgentState, PlanState };
 
 /**
  * State for a single tab
@@ -30,6 +31,7 @@ export interface TabState {
   commentsState: CommentsState;
   diffSelection: DiffSelection;
   agentState: AgentState;
+  planState: PlanState;
 
   /** True if files changed while this tab was not active (needs refresh on switch) */
   needsRefresh: boolean;
@@ -83,7 +85,8 @@ export function addTab(
   createDiffState: () => DiffState,
   createCommentsState: () => CommentsState,
   createDiffSelection: () => DiffSelection,
-  createAgentState: () => AgentState
+  createAgentState: () => AgentState,
+  createPlanState: () => PlanState
 ): void {
   // Check if tab already exists
   const existingIndex = windowState.tabs.findIndex((t) => t.id === repoPath);
@@ -103,6 +106,7 @@ export function addTab(
     commentsState: createCommentsState(),
     diffSelection: createDiffSelection(),
     agentState: createAgentState(),
+    planState: createPlanState(),
     needsRefresh: false,
   };
 
@@ -209,7 +213,8 @@ export function loadTabsFromStorage(
   createDiffState: () => DiffState,
   createCommentsState: () => CommentsState,
   createDiffSelection: () => DiffSelection,
-  createAgentState: () => AgentState
+  createAgentState: () => AgentState,
+  createPlanState: () => PlanState
 ): void {
   const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
   const stored = localStorage.getItem(key);
@@ -227,6 +232,7 @@ export function loadTabsFromStorage(
         commentsState: createCommentsState(),
         diffSelection: createDiffSelection(),
         agentState: createAgentState(),
+        planState: createPlanState(),
         needsRefresh: false,
       }));
       windowState.activeTabIndex = data.activeTabIndex;

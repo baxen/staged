@@ -6,14 +6,14 @@
 -->
 <script lang="ts">
   import { tick } from 'svelte';
-  import { Bot, Send, Loader2, Terminal, ChevronDown } from 'lucide-svelte';
+  import { Send, Loader2, Terminal, ChevronDown } from 'lucide-svelte';
   import { agentState, sendMessage as sendAgentMessage } from './stores/agent.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { getActiveTab } from './stores/tabState.svelte';
   import { renderMarkdown } from './services/markdown';
+  import AgentSelector, { type AgentId } from './AgentSelector.svelte';
 
   type AgentMode = 'plan' | 'implement' | 'review';
-  type AgentId = 'goose' | 'claude-code';
 
   const modeLabels: Record<AgentMode, string> = {
     plan: 'Plan',
@@ -27,24 +27,12 @@
     review: 'Review the current diff and provide feedback',
   };
 
-  const agentLabels: Record<AgentId, string> = {
-    goose: 'Goose',
-    'claude-code': 'Claude Code',
-  };
-
-  const agentDescriptions: Record<AgentId, string> = {
-    goose: "Block's open-source AI developer agent",
-    'claude-code': "Anthropic's AI coding assistant",
-  };
-
   let chatInput = $state('');
   let chatMessagesEl: HTMLDivElement | undefined = $state();
   let selectedMode = $state<AgentMode>('plan');
   let selectedAgent = $state<AgentId>('goose');
   let modeDropdownOpen = $state(false);
-  let agentDropdownOpen = $state(false);
   let modeDropdownEl: HTMLDivElement | undefined = $state();
-  let agentDropdownEl: HTMLDivElement | undefined = $state();
 
   // Show messages area when there are messages
   let hasMessages = $derived(agentState.messages.length > 0);
@@ -64,14 +52,11 @@
 
   // Close dropdowns when clicking outside
   $effect(() => {
-    if (!modeDropdownOpen && !agentDropdownOpen) return;
+    if (!modeDropdownOpen) return;
 
     function handleClickOutside(e: MouseEvent) {
       if (modeDropdownEl && !modeDropdownEl.contains(e.target as Node)) {
         modeDropdownOpen = false;
-      }
-      if (agentDropdownEl && !agentDropdownEl.contains(e.target as Node)) {
-        agentDropdownOpen = false;
       }
     }
 
@@ -82,11 +67,6 @@
   function selectMode(mode: AgentMode) {
     selectedMode = mode;
     modeDropdownOpen = false;
-  }
-
-  function selectAgent(agent: AgentId) {
-    selectedAgent = agent;
-    agentDropdownOpen = false;
   }
 
   async function handleChatSubmit(e: Event) {
@@ -145,35 +125,12 @@
   {/if}
   <form class="chat-input-form" onsubmit={handleChatSubmit}>
     <div class="input-actions">
-      <!-- Agent selector dropdown -->
-      <div class="dropdown" bind:this={agentDropdownEl}>
-        <button
-          type="button"
-          class="dropdown-trigger"
-          class:open={agentDropdownOpen}
-          onclick={() => (agentDropdownOpen = !agentDropdownOpen)}
-          title={agentDescriptions[selectedAgent]}
-        >
-          <Bot size={14} />
-          <span class="dropdown-label">{agentLabels[selectedAgent]}</span>
-          <ChevronDown size={12} />
-        </button>
-        {#if agentDropdownOpen}
-          <div class="dropdown-menu">
-            {#each Object.entries(agentLabels) as [agent, label]}
-              <button
-                type="button"
-                class="dropdown-option"
-                class:selected={selectedAgent === agent}
-                onclick={() => selectAgent(agent as AgentId)}
-              >
-                <span class="dropdown-option-label">{label}</span>
-                <span class="dropdown-option-desc">{agentDescriptions[agent as AgentId]}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
-      </div>
+      <!-- Agent selector -->
+      <AgentSelector
+        value={selectedAgent}
+        onchange={(agent) => (selectedAgent = agent)}
+        disabled={agentState.isStreaming}
+      />
       <!-- Mode selector dropdown -->
       <div class="dropdown" bind:this={modeDropdownEl}>
         <button
@@ -206,7 +163,7 @@
     <input
       type="text"
       class="chat-input"
-      placeholder="Ask {agentLabels[selectedAgent]}..."
+      placeholder="Ask the agent..."
       bind:value={chatInput}
       onkeydown={handleChatKeydown}
       disabled={agentState.isStreaming}

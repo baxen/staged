@@ -94,6 +94,12 @@
     registerSession,
     unregisterSession,
   } from './lib/stores/agent.svelte';
+  import {
+    planState,
+    createPlanState,
+    syncFromTab as syncPlanFromTab,
+    syncToTab as syncPlanToTab,
+  } from './lib/stores/plan.svelte';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -392,6 +398,9 @@
       registerSession(tab.agentState.sessionId, tab.agentState);
     }
 
+    // Sync plan state
+    syncPlanFromTab(tab.planState);
+
     // Update repo state
     setCurrentRepo(tab.repoPath);
   }
@@ -437,6 +446,9 @@
     tab.agentState.sessionId = agentState.sessionId;
     tab.agentState.agentId = agentState.agentId;
     tab.agentState.currentMessageId = agentState.currentMessageId;
+
+    // Sync plan state back to tab
+    syncPlanToTab(tab.planState);
   }
 
   /**
@@ -516,7 +528,8 @@
       createDiffState,
       createCommentsState,
       createDiffSelection,
-      createAgentState
+      createAgentState,
+      createPlanState
     );
 
     // Start watching the new repo (idempotent - won't restart if already watching)
@@ -629,7 +642,8 @@
         createDiffState,
         createCommentsState,
         createDiffSelection,
-        createAgentState
+        createAgentState,
+        createPlanState
       );
 
       // Initialize watcher listener once (handles all repos)
@@ -658,7 +672,8 @@
             createDiffState,
             createCommentsState,
             createDiffSelection,
-            createAgentState
+            createAgentState,
+            createPlanState
           );
         }
 

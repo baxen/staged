@@ -382,3 +382,21 @@ export function clearError(): void {
     agentState.status = agentState.sessionId ? 'connected' : 'disconnected';
   }
 }
+
+/**
+ * Clear the current session to force creating a new one on next message.
+ * Used when switching from planning to implementation to get a fresh context.
+ * Also clears messages so the UI starts fresh.
+ */
+export function clearSession(): void {
+  if (agentState.sessionId) {
+    unregisterSession(agentState.sessionId);
+  }
+  agentState.sessionId = null;
+  agentState.agentId = null;
+  agentState.status = 'disconnected';
+  agentState.messages = [];
+  agentState.currentMessageId = null;
+  agentState.currentToolCall = null;
+  agentState.error = null;
+}

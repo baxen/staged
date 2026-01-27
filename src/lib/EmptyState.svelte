@@ -4,58 +4,75 @@
   Shows when there are no changes to review. Provides a planning interface
   where users can describe work they want to do, triggering an AI agent
   to create a plan that's displayed inline.
+  
+  Uses the plan store for state management - the plan is a first-class entity
+  separate from the agent conversation used to create it.
 -->
 <script lang="ts">
   import { Sparkles, Loader2, RotateCcw, Play, Send } from 'lucide-svelte';
   import GitTreeAnimation from './GitTreeAnimation.svelte';
+  import AgentSelector, { type AgentId } from './AgentSelector.svelte';
+  import { agentState, sendMessage as sendAgentMessage, clearSession } from './stores/agent.svelte';
   import {
-    agentState,
-    sendMessage as sendAgentMessage,
-    clearMessages,
-  } from './stores/agent.svelte';
+    planState,
+    startDrafting,
+    updatePlanContent,
+    markPlanReady,
+    startRefining,
+    markRefiningComplete,
+    startImplementing,
+    markImplementationComplete,
+    setImplementAgent,
+    setPlanError,
+    clearPlan,
+  } from './stores/plan.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { getActiveTab } from './stores/tabState.svelte';
   import { renderMarkdown } from './services/markdown';
 
-  type ActionType = 'planning' | 'refining' | 'implementing';
-
+  // Local UI state
   let planDescription = $state('');
   let commentInput = $state('');
-  let currentAction = $state<ActionType | null>(null);
-  let isSubmitting = $derived(agentState.isStreaming);
+  let selectedAgent = $state<AgentId>('goose');
 
-  // Reset action when streaming completes
-  $effect(() => {
-    if (!agentState.isStreaming && currentAction) {
-      currentAction = null;
+  // Derived state from plan store - read directly from planState for reactivity
+  let plan = $derived(planState.plan);
+  let implementAgent = $derived(planState.plan?.implementAgent ?? 'goose');
+
+  // Plan content: prefer plan store, but during streaming also check agent messages
+  let planContent = $derived.by(() => {
+    const storedContent = planState.plan?.content ?? '';
+    const status = planState.plan?.status;
+
+    // During drafting/refining, also check agent messages for latest content
+    if (status === 'drafting' || status === 'refining') {
+      const assistantMessages = agentState.messages.filter((m) => m.role === 'assistant');
+      if (assistantMessages.length > 0) {
+        const latestFromAgent = assistantMessages[assistantMessages.length - 1].content;
+        // Use whichever is longer (agent might have more recent content)
+        if (latestFromAgent.length > storedContent.length) {
+          return latestFromAgent;
+        }
+      }
     }
+    return storedContent;
   });
 
-  // Infer action type from conversation context when we don't have explicit currentAction
-  // This handles the case when switching tabs while an action is in progress
-  let inferredAction = $derived.by((): ActionType => {
-    // If we have an explicit action (just triggered), use it
-    if (currentAction) return currentAction;
+  let planStatus = $derived(planState.plan?.status ?? null);
 
-    // Otherwise, infer from the last user message
-    const userMessages = agentState.messages.filter((m) => m.role === 'user');
-    if (userMessages.length === 0) return 'planning';
+  // UI state derivations
+  let isLoading = $derived(
+    planState.plan?.status === 'drafting' ||
+      planState.plan?.status === 'refining' ||
+      planState.plan?.status === 'implementing'
+  );
+  let showPlan = $derived(planState.plan !== null && planState.plan?.status === 'ready');
+  let isImplementing = $derived(planState.plan?.status === 'implementing');
 
-    const lastUserMessage = userMessages[userMessages.length - 1].content;
-
-    if (lastUserMessage.includes('please implement the plan')) {
-      return 'implementing';
-    } else if (lastUserMessage.includes('incorporate this feedback')) {
-      return 'refining';
-    }
-    return 'planning';
-  });
-
-  // Loading message based on current or inferred action
+  // Loading message based on plan status
   let loadingMessage = $derived.by(() => {
-    const action = currentAction ?? inferredAction;
-    switch (action) {
-      case 'planning':
+    switch (planStatus) {
+      case 'drafting':
         return { title: 'Planning your work...', subtitle: 'Analyzing the codebase' };
       case 'refining':
         return { title: 'Updating the plan...', subtitle: 'Incorporating your feedback' };
@@ -66,19 +83,78 @@
     }
   });
 
-  // Get the latest assistant message as the plan
-  let planContent = $derived.by(() => {
-    const assistantMessages = agentState.messages.filter((m) => m.role === 'assistant');
-    if (assistantMessages.length === 0) return null;
-    return assistantMessages[assistantMessages.length - 1].content;
+  // Track if we've seen streaming start - prevents false transitions on mount
+  let hasSeenStreaming = $state(false);
+
+  // Debug: log state changes
+  $effect(() => {
+    console.log(
+      '[EmptyState] Plan status:',
+      planState.plan?.status,
+      'isStreaming:',
+      agentState.isStreaming,
+      'hasSeenStreaming:',
+      hasSeenStreaming
+    );
   });
 
-  // Show plan view when we have a plan and not currently streaming
-  let showPlan = $derived(planContent && !isSubmitting);
+  // Watch agent streaming to update plan content
+  // We track messages length and isStreaming to ensure reactivity
+  $effect(() => {
+    const isStreaming = agentState.isStreaming;
+    const messagesLength = agentState.messages.length;
+    const status = planState.plan?.status;
+
+    if (isStreaming) {
+      hasSeenStreaming = true;
+    }
+
+    // When agent is streaming and we're in a planning state, update plan content
+    if (isStreaming && (status === 'drafting' || status === 'refining')) {
+      const assistantMessages = agentState.messages.filter((m) => m.role === 'assistant');
+      if (assistantMessages.length > 0) {
+        const latestContent = assistantMessages[assistantMessages.length - 1].content;
+        console.log('[EmptyState] Updating plan content, length:', latestContent.length);
+        updatePlanContent(latestContent);
+      }
+    }
+  });
+
+  // Watch for streaming completion to transition plan status
+  // Only transition if we've actually seen streaming happen (not on initial mount)
+  $effect(() => {
+    const isStreaming = agentState.isStreaming;
+    const currentPlan = planState.plan;
+    const seenStreaming = hasSeenStreaming;
+
+    if (!isStreaming && currentPlan && seenStreaming) {
+      console.log('[EmptyState] Streaming complete, transitioning from:', currentPlan.status);
+      if (currentPlan.status === 'drafting') {
+        markPlanReady();
+        hasSeenStreaming = false;
+      } else if (currentPlan.status === 'refining') {
+        markRefiningComplete();
+        hasSeenStreaming = false;
+      } else if (currentPlan.status === 'implementing') {
+        markImplementationComplete();
+        hasSeenStreaming = false;
+      }
+    }
+  });
+
+  // Watch for agent errors
+  $effect(() => {
+    const error = agentState.error;
+    const currentPlan = planState.plan;
+
+    if (error && currentPlan) {
+      setPlanError(error);
+    }
+  });
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
-    if (!planDescription.trim() || isSubmitting) return;
+    if (!planDescription.trim() || isLoading) return;
     if (!repoState.currentPath) {
       console.error('No repository path available');
       return;
@@ -87,7 +163,10 @@
     const activeTab = getActiveTab();
     const tabAgentState = activeTab?.agentState;
 
-    // Create a planning-focused prompt that returns the plan as markdown
+    // Start drafting in plan store
+    startDrafting(planDescription.trim(), selectedAgent);
+
+    // Create a planning-focused prompt
     const planningPrompt = `I want to plan some work in this repository. Here's what I want to accomplish:
 
 ${planDescription.trim()}
@@ -112,12 +191,10 @@ Any potential risks, edge cases, or things to watch out for
 Focus on planning only - don't make any code changes. Just return the plan as markdown.`;
 
     planDescription = '';
-    currentAction = 'planning';
-    await sendAgentMessage(planningPrompt, repoState.currentPath, 'goose', tabAgentState);
+    await sendAgentMessage(planningPrompt, repoState.currentPath, selectedAgent, tabAgentState);
   }
 
   function handleKeydown(e: KeyboardEvent) {
-    // Submit on Cmd/Ctrl+Enter
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit(e);
@@ -125,7 +202,6 @@ Focus on planning only - don't make any code changes. Just return the plan as ma
   }
 
   function handleCommentKeydown(e: KeyboardEvent) {
-    // Submit comment on Enter (without shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleAddComment();
@@ -133,47 +209,98 @@ Focus on planning only - don't make any code changes. Just return the plan as ma
   }
 
   function handleStartOver() {
-    clearMessages();
+    clearPlan();
+    clearSession();
     planDescription = '';
     commentInput = '';
   }
 
   async function handleAddComment() {
-    if (!commentInput.trim() || isSubmitting) return;
+    if (!commentInput.trim() || isLoading || !plan) return;
     if (!repoState.currentPath) return;
 
     const activeTab = getActiveTab();
     const tabAgentState = activeTab?.agentState;
 
-    // Send the comment as a refinement request
-    const refinementPrompt = `Based on the plan above, please incorporate this feedback and return an updated plan:
+    // Transition to refining state
+    startRefining();
+
+    const refinementPrompt = `Based on the plan here, please incorporate this feedback and return an updated plan:
 
 ${commentInput.trim()}
 
 Return the complete updated plan as markdown, keeping the same structure (Overview, Files to Modify, Files to Create, Implementation Steps, Considerations). Don't make any code changes yet.`;
 
     commentInput = '';
-    currentAction = 'refining';
-    await sendAgentMessage(refinementPrompt, repoState.currentPath, 'goose', tabAgentState);
+    await sendAgentMessage(
+      refinementPrompt,
+      repoState.currentPath,
+      plan.planningAgent,
+      tabAgentState
+    );
+  }
+
+  function handleImplementAgentChange(agent: AgentId) {
+    setImplementAgent(agent);
   }
 
   async function handleImplement() {
-    if (isSubmitting) return;
+    if (isLoading || !plan) return;
     if (!repoState.currentPath) return;
 
     const activeTab = getActiveTab();
     const tabAgentState = activeTab?.agentState;
 
-    // Send the implement command
-    const implementPrompt = `Great, please implement the plan above. Make the necessary code changes following the implementation steps outlined in the plan.`;
+    // Capture the plan content before any state changes
+    const planContentToImplement = plan.content;
+    const agentToUse = plan.implementAgent;
 
-    currentAction = 'implementing';
-    await sendAgentMessage(implementPrompt, repoState.currentPath, 'goose', tabAgentState);
+    // Transition to implementing state BEFORE clearing session
+    startImplementing();
+
+    // Clear the agent session to start fresh for implementation
+    clearSession();
+    if (tabAgentState) {
+      tabAgentState.sessionId = null;
+      tabAgentState.agentId = null;
+      tabAgentState.status = 'disconnected';
+      tabAgentState.messages = [];
+      tabAgentState.currentMessageId = null;
+      tabAgentState.currentToolCall = null;
+      tabAgentState.error = null;
+    }
+
+    // Build the implement prompt with the captured plan content
+    const implementPrompt = `I have a plan that I'd like you to implement. Here's the plan:
+
+${planContentToImplement}
+
+Please implement this plan. Make the necessary code changes following the implementation steps outlined above. Don't try to start any server or apps, just make the code changes as per the plan. And lint/format the code as needed.`;
+
+    await sendAgentMessage(implementPrompt, repoState.currentPath, agentToUse, tabAgentState);
   }
 </script>
 
 <div class="empty-state-container">
-  {#if showPlan}
+  {#if isImplementing}
+    <!-- Implementing loader - shows plan with overlay -->
+    <div class="plan-view implementing">
+      <div class="plan-header">
+        <h2 class="plan-title">
+          <Sparkles size={20} />
+          Your Plan
+        </h2>
+      </div>
+      <div class="plan-content faded">
+        {@html renderMarkdown(planContent)}
+      </div>
+      <div class="implementing-overlay">
+        <Loader2 size={24} class="spinning" />
+        <p class="loading-text">{loadingMessage.title}</p>
+        <p class="loading-subtext">{loadingMessage.subtitle}</p>
+      </div>
+    </div>
+  {:else if showPlan}
     <!-- Plan display view -->
     <div class="plan-view">
       <div class="plan-header">
@@ -183,7 +310,7 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
         </h2>
       </div>
       <div class="plan-content">
-        {@html renderMarkdown(planContent ?? '')}
+        {@html renderMarkdown(planContent)}
       </div>
       <div class="plan-actions">
         <button class="action-btn secondary" onclick={handleStartOver} title="Start over">
@@ -197,65 +324,78 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
             placeholder="Request changes to the plan..."
             bind:value={commentInput}
             onkeydown={handleCommentKeydown}
-            disabled={isSubmitting}
+            disabled={isLoading}
           />
           <button
             class="send-btn"
             onclick={handleAddComment}
-            disabled={isSubmitting || !commentInput.trim()}
+            disabled={isLoading || !commentInput.trim()}
             title="Send feedback"
           >
             <Send size={14} />
           </button>
         </div>
-        <button
-          class="action-btn primary"
-          onclick={handleImplement}
-          disabled={isSubmitting}
-          title="Implement this plan"
-        >
-          <Play size={14} />
-          <span>Implement</span>
-        </button>
+        <div class="implement-wrapper">
+          <AgentSelector
+            value={implementAgent}
+            onchange={handleImplementAgentChange}
+            disabled={isLoading}
+          />
+          <button
+            class="action-btn primary"
+            onclick={handleImplement}
+            disabled={isLoading}
+            title="Implement this plan"
+          >
+            <Play size={14} />
+            <span>Implement</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  {:else if isLoading}
+    <!-- Loading state (drafting or refining) -->
+    <GitTreeAnimation />
+    <div class="planning-section">
+      <div class="loading-state">
+        <Loader2 size={24} class="spinning" />
+        <p class="loading-text">{loadingMessage.title}</p>
+        <p class="loading-subtext">{loadingMessage.subtitle}</p>
+        {#if planContent}
+          <div class="streaming-preview">
+            {@html renderMarkdown(planContent)}
+          </div>
+        {/if}
       </div>
     </div>
   {:else}
-    <!-- Planning input view -->
+    <!-- Initial planning input view -->
     <GitTreeAnimation />
 
     <div class="planning-section">
-      {#if isSubmitting}
-        <div class="loading-state">
-          <Loader2 size={24} class="spinning" />
-          <p class="loading-text">{loadingMessage.title}</p>
-          <p class="loading-subtext">{loadingMessage.subtitle}</p>
-        </div>
-      {:else}
-        <p class="title">Ready to start something new?</p>
-        <p class="subtitle">Describe what you want to build and let AI help you plan</p>
+      <p class="title">Ready to start something new?</p>
+      <p class="subtitle">Describe what you want to build and let AI help you plan</p>
 
-        <form class="planning-form" onsubmit={handleSubmit}>
-          <textarea
-            class="planning-input"
-            placeholder="Describe the feature or change you want to make..."
-            bind:value={planDescription}
-            onkeydown={handleKeydown}
-            disabled={isSubmitting}
-            rows="3"
-          ></textarea>
+      <form class="planning-form" onsubmit={handleSubmit}>
+        <textarea
+          class="planning-input"
+          placeholder="Describe the feature or change you want to make..."
+          bind:value={planDescription}
+          onkeydown={handleKeydown}
+          rows="3"
+        ></textarea>
 
-          <button
-            type="submit"
-            class="planning-submit"
-            disabled={isSubmitting || !planDescription.trim()}
-          >
+        <div class="form-actions">
+          <AgentSelector value={selectedAgent} onchange={(agent) => (selectedAgent = agent)} />
+
+          <button type="submit" class="planning-submit" disabled={!planDescription.trim()}>
             <Sparkles size={16} />
             <span>Plan with AI</span>
           </button>
-        </form>
+        </div>
+      </form>
 
-        <p class="hint">Press <kbd>⌘</kbd><kbd>Enter</kbd> to submit</p>
-      {/if}
+      <p class="hint">Press <kbd>⌘</kbd><kbd>Enter</kbd> to submit</p>
     </div>
   {/if}
 </div>
@@ -382,6 +522,7 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     flex-direction: column;
     align-items: center;
     gap: 12px;
+    width: 100%;
   }
 
   .loading-text {
@@ -397,6 +538,21 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     margin: 0;
   }
 
+  .streaming-preview {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+    border: 1px solid var(--border-subtle);
+    text-align: left;
+    max-height: 300px;
+    overflow-y: auto;
+    width: 100%;
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+    line-height: 1.6;
+  }
+
   /* Plan display view */
   .plan-view {
     display: flex;
@@ -405,6 +561,32 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     height: 100%;
     max-width: 800px;
     overflow: hidden;
+    position: relative;
+  }
+
+  .plan-view.implementing .plan-header {
+    opacity: 0.5;
+  }
+
+  .plan-content.faded {
+    opacity: 0.3;
+    pointer-events: none;
+  }
+
+  .implementing-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 32px;
+    background: var(--bg-primary);
+    border-radius: 12px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+    z-index: 10;
   }
 
   .plan-header {
@@ -548,7 +730,8 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
   }
 
   /* Markdown styles for plan content */
-  .plan-content :global(h2) {
+  .plan-content :global(h2),
+  .streaming-preview :global(h2) {
     font-size: var(--size-md);
     font-weight: 600;
     color: var(--text-primary);
@@ -557,32 +740,39 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     border-bottom: 1px solid var(--border-subtle);
   }
 
-  .plan-content :global(h2:first-child) {
+  .plan-content :global(h2:first-child),
+  .streaming-preview :global(h2:first-child) {
     margin-top: 0;
   }
 
-  .plan-content :global(h3) {
+  .plan-content :global(h3),
+  .streaming-preview :global(h3) {
     font-size: var(--size-sm);
     font-weight: 600;
     color: var(--text-primary);
     margin: 16px 0 8px 0;
   }
 
-  .plan-content :global(p) {
+  .plan-content :global(p),
+  .streaming-preview :global(p) {
     margin: 0 0 12px 0;
   }
 
   .plan-content :global(ul),
-  .plan-content :global(ol) {
+  .plan-content :global(ol),
+  .streaming-preview :global(ul),
+  .streaming-preview :global(ol) {
     margin: 0 0 12px 0;
     padding-left: 24px;
   }
 
-  .plan-content :global(li) {
+  .plan-content :global(li),
+  .streaming-preview :global(li) {
     margin: 4px 0;
   }
 
-  .plan-content :global(code) {
+  .plan-content :global(code),
+  .streaming-preview :global(code) {
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
     font-size: 0.9em;
     padding: 2px 6px;
@@ -591,7 +781,8 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     color: var(--text-primary);
   }
 
-  .plan-content :global(pre) {
+  .plan-content :global(pre),
+  .streaming-preview :global(pre) {
     margin: 12px 0;
     padding: 12px;
     border-radius: 6px;
@@ -599,22 +790,26 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     overflow-x: auto;
   }
 
-  .plan-content :global(pre code) {
+  .plan-content :global(pre code),
+  .streaming-preview :global(pre code) {
     padding: 0;
     background: none;
   }
 
-  .plan-content :global(strong) {
+  .plan-content :global(strong),
+  .streaming-preview :global(strong) {
     font-weight: 600;
     color: var(--text-primary);
   }
 
-  .plan-content :global(a) {
+  .plan-content :global(a),
+  .streaming-preview :global(a) {
     color: var(--text-accent);
     text-decoration: none;
   }
 
-  .plan-content :global(a:hover) {
+  .plan-content :global(a:hover),
+  .streaming-preview :global(a:hover) {
     text-decoration: underline;
   }
 
@@ -630,5 +825,21 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* Form actions row */
+  .form-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  /* Implement button with agent selector */
+  .implement-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
   }
 </style>
