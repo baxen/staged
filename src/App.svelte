@@ -8,6 +8,7 @@
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
+  import FolderPickerModal from './lib/FolderPickerModal.svelte';
   import TabBar from './lib/TabBar.svelte';
   import { listRefs, getMergeBase } from './lib/services/git';
   import { getWindowLabel } from './lib/services/window';
@@ -78,7 +79,8 @@
     repoState,
     initRepoState,
     setCurrentRepo,
-    openRepoPicker,
+    openRepo,
+    getRecentRepos,
   } from './lib/stores/repoState.svelte';
   import {
     clearResults as clearSmartDiffResults,
@@ -88,6 +90,7 @@
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
+  let showFolderPicker = $state(false);
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
@@ -460,11 +463,20 @@
   }
 
   /**
-   * Handle new tab creation.
+   * Handle new tab creation - show the folder picker modal.
    */
-  async function handleNewTab() {
-    const repoPath = await openRepoPicker();
-    if (!repoPath) return;
+  function handleNewTab() {
+    showFolderPicker = true;
+  }
+
+  /**
+   * Handle folder selection from the picker modal.
+   */
+  async function handleFolderSelect(repoPath: string) {
+    showFolderPicker = false;
+
+    // Update repo state
+    openRepo(repoPath);
 
     // Save current tab state before creating new one
     syncGlobalToTab();
@@ -708,6 +720,15 @@
     ]}
     onSelect={handleReferenceFileSelect}
     onClose={() => (showFileSearch = false)}
+  />
+{/if}
+
+{#if showFolderPicker}
+  <FolderPickerModal
+    recentRepos={getRecentRepos()}
+    currentPath={repoState.currentPath}
+    onSelect={handleFolderSelect}
+    onClose={() => (showFolderPicker = false)}
   />
 {/if}
 
