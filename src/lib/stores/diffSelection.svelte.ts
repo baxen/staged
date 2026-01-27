@@ -101,17 +101,23 @@ export function getDefaultBranch(): string {
 }
 
 /**
- * Update the "Branch Changes" preset to use the detected default branch.
+ * Update the "Branch Changes" preset to use the merge-base with the default branch.
  * Called during app initialization.
+ *
+ * @param branch - The default branch name (e.g., 'origin/main')
+ * @param mergeBase - Optional merge-base SHA between HEAD and the default branch.
+ *                    If provided, uses this as the base to show only branch-specific changes.
+ *                    If not provided, falls back to comparing directly against the branch.
  */
-export function setDefaultBranch(branch: string): void {
+export function setDefaultBranch(branch: string, mergeBase?: string): void {
   defaultBranch = branch;
+  const baseValue = mergeBase ?? branch;
   presetStore.presets = presetStore.presets.map((preset) => {
     if (preset.label === 'Branch Changes') {
       return {
         ...preset,
         spec: {
-          base: { type: 'Rev', value: branch },
+          base: { type: 'Rev', value: baseValue },
           head: { type: 'WorkingTree' },
         },
       };

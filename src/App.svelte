@@ -240,7 +240,14 @@
       try {
         const refs = await listRefs(repoState.currentPath);
         const defaultBranch = detectDefaultBranch(refs);
-        setDefaultBranch(defaultBranch);
+        // Compute merge-base between HEAD and default branch for accurate branch diff
+        let mergeBase: string | undefined;
+        try {
+          mergeBase = await getMergeBase('HEAD', defaultBranch, repoState.currentPath);
+        } catch {
+          // If merge-base fails (e.g., unrelated histories), fall back to direct comparison
+        }
+        setDefaultBranch(defaultBranch, mergeBase);
         // Mark repo as valid since we got refs
         setCurrentRepo(repoState.currentPath);
       } catch (e) {
@@ -407,7 +414,14 @@
       // Load refs and detect default branch
       const refs = await listRefs(tab.repoPath);
       const defaultBranch = detectDefaultBranch(refs);
-      setDefaultBranch(defaultBranch);
+      // Compute merge-base between HEAD and default branch for accurate branch diff
+      let mergeBase: string | undefined;
+      try {
+        mergeBase = await getMergeBase('HEAD', defaultBranch, tab.repoPath);
+      } catch {
+        // If merge-base fails, fall back to direct comparison
+      }
+      setDefaultBranch(defaultBranch, mergeBase);
 
       // Reset to uncommitted preset
       resetDiffSelection();
