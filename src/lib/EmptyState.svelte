@@ -263,7 +263,13 @@ Return the complete updated plan as markdown, keeping the same structure (Overvi
 
 ${planContentToImplement}
 
-Please implement this plan. Make the necessary code changes following the implementation steps outlined above. Don't try to start any server or apps, just make the code changes as per the plan. And lint/format the code as needed.`;
+Please implement this plan by making the necessary code changes following the implementation steps above.
+
+Important:
+- Make the code changes only - do not start servers, run tests, or verify builds
+- Run the formatter/linter if the project has one configured
+- When you've finished making all the changes, simply summarize what you did
+- Do not perform additional verification or cleanup steps after the changes are complete`;
 
     await sendAgentMessage(implementPrompt, repoState.currentPath, agentToUse, tabAgentState);
   }
