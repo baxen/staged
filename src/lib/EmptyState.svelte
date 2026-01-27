@@ -159,24 +159,15 @@
 
 ${planDescription.trim()}
 
-Please analyze the codebase and create a detailed plan. Return the plan as markdown with the following structure:
+Create a brief implementation plan as markdown:
 
-## Overview
-Brief summary of the changes needed
+## Files
+List each file to modify or create (one per line, prefix new files with "new:")
 
-## Files to Modify
-List of existing files that will need changes
+## Steps
+Numbered list of what to do (be specific but concise)
 
-## Files to Create
-List of new files that need to be created (if any)
-
-## Implementation Steps
-Step-by-step approach to implement this
-
-## Considerations
-Any potential risks, edge cases, or things to watch out for
-
-Focus on planning only - don't make any code changes. Just return the plan as markdown.`;
+Keep it short - just enough detail to implement. No code changes yet.`;
 
     planDescription = '';
     await sendAgentMessage(planningPrompt, repoState.currentPath, selectedAgent, tabAgentState);
@@ -213,11 +204,11 @@ Focus on planning only - don't make any code changes. Just return the plan as ma
     // Transition to refining state
     startRefining();
 
-    const refinementPrompt = `Based on the plan here, please incorporate this feedback and return an updated plan:
+    const refinementPrompt = `Based on the plan, incorporate this feedback and return an updated plan:
 
 ${commentInput.trim()}
 
-Return the complete updated plan as markdown, keeping the same structure (Overview, Files to Modify, Files to Create, Implementation Steps, Considerations). Don't make any code changes yet.`;
+Return the complete updated plan as markdown (Files and Steps sections). No code changes yet.`;
 
     commentInput = '';
     await sendAgentMessage(
