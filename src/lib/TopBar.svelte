@@ -16,6 +16,7 @@
     Orbit,
     Eye,
     EyeOff,
+    PanelBottom,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
@@ -49,6 +50,7 @@
     clearResults as clearSmartDiffState,
     setAnnotationsRevealed,
   } from './stores/smartDiff.svelte';
+  import { preferences, toggleChatPanelVisible } from './stores/preferences.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
@@ -384,6 +386,15 @@
       <Settings2 size={14} />
     </button>
 
+    <button
+      class="icon-btn chat-btn"
+      class:active={preferences.chatPanelVisible}
+      onclick={toggleChatPanelVisible}
+      title={preferences.chatPanelVisible ? 'Hide chat panel' : 'Show chat panel'}
+    >
+      <PanelBottom size={14} />
+    </button>
+
     <div class="shortcuts-picker">
       <button
         class="icon-btn shortcuts-btn"
@@ -703,6 +714,22 @@
   .settings-btn:hover {
     background: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  /* Chat panel toggle button */
+  .chat-btn {
+    padding: 5px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+  }
+
+  .chat-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .chat-btn.active {
+    color: var(--ui-accent);
   }
 
   /* Theme picker */

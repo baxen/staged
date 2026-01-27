@@ -47,6 +47,9 @@ const SIDEBAR_WIDTH_DEFAULT = 260;
 const SIDEBAR_WIDTH_MIN = 180;
 const SIDEBAR_WIDTH_MAX = 600;
 
+const CHAT_PANEL_VISIBLE_STORAGE_KEY = 'staged-chat-panel-visible';
+const DEFAULT_CHAT_PANEL_VISIBLE = false;
+
 // Export sidebar width constraints for use in components
 export { SIDEBAR_WIDTH_MIN, SIDEBAR_WIDTH_MAX };
 
@@ -82,6 +85,8 @@ export const preferences = $state({
   sidebarPosition: DEFAULT_SIDEBAR_POSITION as SidebarPosition,
   /** Sidebar width in pixels */
   sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+  /** Whether the chat panel is visible */
+  chatPanelVisible: DEFAULT_CHAT_PANEL_VISIBLE,
 });
 
 // =============================================================================
@@ -332,6 +337,35 @@ export function loadSavedSidebarWidth(): void {
     if (!isNaN(parsed) && parsed >= SIDEBAR_WIDTH_MIN && parsed <= SIDEBAR_WIDTH_MAX) {
       preferences.sidebarWidth = parsed;
     }
+  }
+}
+
+// =============================================================================
+// Chat Panel Visibility Actions
+// =============================================================================
+
+/**
+ * Set chat panel visibility.
+ */
+export function setChatPanelVisible(visible: boolean): void {
+  preferences.chatPanelVisible = visible;
+  localStorage.setItem(CHAT_PANEL_VISIBLE_STORAGE_KEY, String(visible));
+}
+
+/**
+ * Toggle chat panel visibility.
+ */
+export function toggleChatPanelVisible(): void {
+  setChatPanelVisible(!preferences.chatPanelVisible);
+}
+
+/**
+ * Load saved chat panel visibility preference.
+ */
+export function loadSavedChatPanelVisible(): void {
+  const saved = localStorage.getItem(CHAT_PANEL_VISIBLE_STORAGE_KEY);
+  if (saved !== null) {
+    preferences.chatPanelVisible = saved === 'true';
   }
 }
 

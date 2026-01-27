@@ -44,6 +44,7 @@
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
     loadSavedSidebarWidth,
+    loadSavedChatPanelVisible,
     setSidebarWidth,
     resetSidebarWidth,
     getCustomKeyboardBindings,
@@ -588,6 +589,7 @@
     loadSavedSize();
     loadSavedSidebarPosition();
     loadSavedSidebarWidth();
+    loadSavedChatPanelVisible();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     // Apply custom keyboard bindings after a short delay to let shortcuts register
@@ -758,7 +760,7 @@
   </div>
 
   <!-- Bottom chat panel -->
-  {#if repoState.currentPath}
+  {#if repoState.currentPath && preferences.chatPanelVisible}
     <ChatPanel />
   {/if}
 </main>
