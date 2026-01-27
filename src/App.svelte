@@ -377,8 +377,8 @@
     diffSelection.label = tab.diffSelection.label;
     diffSelection.prNumber = tab.diffSelection.prNumber;
 
-    // Sync agent state
-    agentState.messages = tab.agentState.messages;
+    // Sync agent state (copy arrays to avoid shared references)
+    agentState.messages = [...tab.agentState.messages];
     agentState.status = tab.agentState.status;
     agentState.isStreaming = tab.agentState.isStreaming;
     agentState.currentToolCall = tab.agentState.currentToolCall;
@@ -428,8 +428,8 @@
     tab.diffSelection.label = diffSelection.label;
     tab.diffSelection.prNumber = diffSelection.prNumber;
 
-    // Sync agent state back to tab
-    tab.agentState.messages = agentState.messages;
+    // Sync agent state back to tab (copy arrays to avoid shared references)
+    tab.agentState.messages = [...agentState.messages];
     tab.agentState.status = agentState.status;
     tab.agentState.isStreaming = agentState.isStreaming;
     tab.agentState.currentToolCall = agentState.currentToolCall;
