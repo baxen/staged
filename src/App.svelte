@@ -56,7 +56,6 @@
     selectPreset,
     selectCustomDiff,
     resetDiffSelection,
-
     type DiffPreset,
   } from './lib/stores/diffSelection.svelte';
   import {

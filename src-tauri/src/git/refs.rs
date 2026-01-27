@@ -46,7 +46,12 @@ pub fn detect_default_branch(repo: &Path) -> Result<String, GitError> {
     let refs = list_refs(repo)?;
 
     // Check for remote-tracking branches first (preferred for merge-base)
-    let remote_candidates = ["origin/main", "origin/master", "origin/develop", "origin/trunk"];
+    let remote_candidates = [
+        "origin/main",
+        "origin/master",
+        "origin/develop",
+        "origin/trunk",
+    ];
     for candidate in remote_candidates {
         if refs.iter().any(|r| r == candidate) {
             return Ok(candidate.to_string());

@@ -92,8 +92,6 @@ export function getPresets(): readonly DiffPreset[] {
   return presetStore.presets;
 }
 
-
-
 /**
  * Diff selection state object.
  * Use this directly in components - it's reactive!
