@@ -104,6 +104,8 @@ export function getDefaultBranch(): string {
  * Update the "Branch Changes" preset to use the merge-base with the default branch.
  * Called during app initialization.
  *
+ * Shows only commits on the current branch (merge-base..HEAD), not uncommitted changes.
+ *
  * @param branch - The default branch name (e.g., 'origin/main')
  * @param mergeBase - Optional merge-base SHA between HEAD and the default branch.
  *                    If provided, uses this as the base to show only branch-specific changes.
@@ -118,7 +120,7 @@ export function setDefaultBranch(branch: string, mergeBase?: string): void {
         ...preset,
         spec: {
           base: { type: 'Rev', value: baseValue },
-          head: { type: 'WorkingTree' },
+          head: { type: 'Rev', value: 'HEAD' },
         },
       };
     }
