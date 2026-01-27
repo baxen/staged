@@ -16,24 +16,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Install Node.js
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: 'npm'
-
-      # Install Rust
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      # Install hermit (manages node, rust, just)
+      - uses: cashapp/activate-hermit@v1
 
       # Cache Cargo dependencies
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
-
-      # Install just
-      - uses: extractions/setup-just@v2
 
       # Install system dependencies for Tauri (Linux)
       - name: Install Tauri dependencies (Linux)
