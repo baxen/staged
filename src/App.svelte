@@ -38,6 +38,7 @@
     getReferenceFile,
     getReferenceFilePaths,
   } from './lib/stores/referenceFiles.svelte';
+  import { findRecentRepos, type RecentRepo } from './lib/services/files';
   import {
     preferences,
     loadSavedSize,
@@ -56,7 +57,6 @@
     selectPreset,
     selectCustomDiff,
     resetDiffSelection,
-
     type DiffPreset,
   } from './lib/stores/diffSelection.svelte';
   import {
@@ -90,6 +90,7 @@
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
   let showFolderPicker = $state(false);
+  let suggestedRepos = $state<RecentRepo[]>([]);
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
@@ -510,6 +511,11 @@
     loadSavedSidebarWidth();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
+    // Pre-load suggested repos (Spotlight search runs in background)
+    findRecentRepos(24, 10).then((repos) => {
+      suggestedRepos = repos;
+    });
+
     // Apply custom keyboard bindings after a short delay to let shortcuts register
     setTimeout(() => {
       loadCustomBindings(getCustomKeyboardBindings());
@@ -679,6 +685,7 @@
 {#if showFolderPicker}
   <FolderPickerModal
     recentRepos={getRecentRepos()}
+    {suggestedRepos}
     currentPath={repoState.currentPath}
     onSelect={handleFolderSelect}
     onClose={() => (showFolderPicker = false)}

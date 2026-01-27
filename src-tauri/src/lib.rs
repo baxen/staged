@@ -4,6 +4,7 @@
 
 pub mod ai;
 pub mod git;
+mod recent_repos;
 pub mod review;
 mod themes;
 mod watcher;
@@ -36,8 +37,7 @@ fn make_diff_id(repo: &Path, spec: &DiffSpec) -> Result<DiffId, String> {
             GitRef::Rev(rev) => git::resolve_ref(repo, rev).map_err(|e| e.to_string()),
             GitRef::MergeBase => {
                 // Resolve merge-base to a concrete SHA for stable storage key
-                let default_branch =
-                    git::detect_default_branch(repo).map_err(|e| e.to_string())?;
+                let default_branch = git::detect_default_branch(repo).map_err(|e| e.to_string())?;
                 git::merge_base(repo, &default_branch, "HEAD").map_err(|e| e.to_string())
             }
         }
@@ -306,6 +306,18 @@ fn get_home_dir() -> Result<String, String> {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .ok_or_else(|| "Could not determine home directory".to_string())
+}
+
+/// Find git repositories that have been recently active.
+///
+/// Uses macOS Spotlight to find files modified within the last `hours_ago` hours,
+/// then walks up to find the containing git repository.
+#[tauri::command(rename_all = "camelCase")]
+fn find_recent_repos(
+    hours_ago: Option<u32>,
+    limit: Option<usize>,
+) -> Vec<recent_repos::RecentRepo> {
+    recent_repos::find_recent_repos(hours_ago.unwrap_or(24), limit.unwrap_or(10))
 }
 
 /// Search for files matching a query in the repository.
@@ -889,6 +901,7 @@ pub fn run() {
             list_directory,
             search_directories,
             get_home_dir,
+            find_recent_repos,
             search_files,
             get_file_at_ref,
             // Git commands
