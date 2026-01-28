@@ -12,30 +12,33 @@
   import { Sparkles, Loader2, RotateCcw, Play, Send } from 'lucide-svelte';
   import GitTreeAnimation from './GitTreeAnimation.svelte';
   import AgentSelector, { type AgentId } from './AgentSelector.svelte';
-  import { agentState, sendMessage as sendAgentMessage, clearSession } from './stores/agent.svelte';
+  import { agentState, sendMessage as sendAgentMessage, clearSession, clearSessionKeepMessages } from './stores/agent.svelte';
   import {
     planState,
     startDrafting,
-    updatePlanContent,
-    markPlanReady,
     startRefining,
-    markRefiningComplete,
     startImplementing,
-    markImplementationComplete,
     setImplementAgent,
-    setPlanError,
     clearPlan,
     clearPlanError,
   } from './stores/plan.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { getActiveTab } from './stores/tabState.svelte';
   import { renderMarkdown } from './services/markdown';
+  import { setChatPanelVisible } from './stores/preferences.svelte';
+  import { addPlanArtifact, addImplementationArtifact } from './stores/artifacts.svelte';
+  import { preferences } from './stores/preferences.svelte';
 
   // Local UI state
   let planDescription = $state('');
   let commentInput = $state('');
   let selectedAgent = $state<AgentId>('goose');
   let submitError = $state<string | null>(null);
+  let currentPlanArtifactId = $state<string | null>(null);
+  let currentSessionArtifactId = $state<string | null>(null);
+
+  // Check if chat panel is visible
+  let chatPanelVisible = $derived(preferences.chatPanelVisible);
 
   // Derived state from plan store - read directly from planState for reactivity
   let plan = $derived(planState.plan);
@@ -47,8 +50,8 @@
     const storedContent = planState.plan?.content ?? '';
     const status = planState.plan?.status;
 
-    // During drafting/refining, also check agent messages for latest content
-    if (status === 'drafting' || status === 'refining') {
+    // During drafting/refining, or if agent is streaming, check agent messages for latest content
+    if (status === 'drafting' || status === 'refining' || agentState.isStreaming) {
       const assistantMessages = agentState.messages.filter((m) => m.role === 'assistant');
       if (assistantMessages.length > 0) {
         const latestFromAgent = assistantMessages[assistantMessages.length - 1].content;
@@ -64,15 +67,17 @@
   let planStatus = $derived(planState.plan?.status ?? null);
 
   // UI state derivations
+  // Show loading if plan is in progress OR if agent is actively streaming (covers race conditions)
   let isLoading = $derived(
-    planState.plan?.status === 'drafting' ||
+    (planState.plan?.status === 'drafting' ||
       planState.plan?.status === 'refining' ||
-      planState.plan?.status === 'implementing'
+      planState.plan?.status === 'implementing') ||
+    (agentState.isStreaming && agentState.messages.length > 0)
   );
   let showPlan = $derived(planState.plan !== null && planState.plan?.status === 'ready');
   let isImplementing = $derived(planState.plan?.status === 'implementing');
 
-  // Loading message based on plan status
+  // Loading message based on plan status or agent activity
   let loadingMessage = $derived.by(() => {
     switch (planStatus) {
       case 'drafting':
@@ -82,66 +87,83 @@
       case 'implementing':
         return { title: 'Implementing the plan...', subtitle: 'Making code changes' };
       default:
+        // If agent is streaming but plan status not set, show planning message
+        if (agentState.isStreaming && agentState.messages.length > 0) {
+          return { title: 'Planning your work...', subtitle: 'Analyzing the codebase' };
+        }
         return { title: 'Working...', subtitle: '' };
     }
   });
 
-  // Track if we've seen streaming start - prevents false transitions on mount
-  let hasSeenStreaming = $state(false);
+  // Note: Plan status transition logic has been moved to App.svelte
+  // so it works even when EmptyState is not mounted (e.g., when there are files)
 
-  // Watch agent streaming to update plan content
-  // We track messages length and isStreaming to ensure reactivity
+  // When implementation completes, auto-commit and create artifact
   $effect(() => {
-    const isStreaming = agentState.isStreaming;
-    const messagesLength = agentState.messages.length;
-    const status = planState.plan?.status;
-
-    if (isStreaming) {
-      hasSeenStreaming = true;
-    }
-
-    // When agent is streaming and we're in a planning state, update plan content
-    if (isStreaming && (status === 'drafting' || status === 'refining')) {
-      const assistantMessages = agentState.messages.filter((m) => m.role === 'assistant');
-      if (assistantMessages.length > 0) {
-        const latestContent = assistantMessages[assistantMessages.length - 1].content;
-        console.log('[EmptyState] Updating plan content, length:', latestContent.length);
-        updatePlanContent(latestContent);
-      }
-    }
-  });
-
-  // Watch for streaming completion to transition plan status
-  // Only transition if we've actually seen streaming happen (not on initial mount)
-  $effect(() => {
-    const isStreaming = agentState.isStreaming;
-    const currentPlan = planState.plan;
-    const seenStreaming = hasSeenStreaming;
-
-    if (!isStreaming && currentPlan && seenStreaming) {
-      console.log('[EmptyState] Streaming complete, transitioning from:', currentPlan.status);
-      if (currentPlan.status === 'drafting') {
-        markPlanReady();
-        hasSeenStreaming = false;
-      } else if (currentPlan.status === 'refining') {
-        markRefiningComplete();
-        hasSeenStreaming = false;
-      } else if (currentPlan.status === 'implementing') {
-        markImplementationComplete();
-        hasSeenStreaming = false;
-      }
-    }
-  });
-
-  // Watch for agent errors
-  $effect(() => {
-    const error = agentState.error;
     const currentPlan = planState.plan;
 
-    if (error && currentPlan) {
-      setPlanError(error);
+    if (currentPlan?.status === 'complete') {
+      // Open chat panel so user can see what the agent did
+      setChatPanelVisible(true);
+
+      // Auto-commit and create implementation artifact
+      handleImplementationComplete(currentPlan);
     }
   });
+
+  async function handleImplementationComplete(currentPlan: typeof planState.plan) {
+    if (!currentPlan || !repoState.currentPath) return;
+
+    try {
+      const repoPath = repoState.currentPath;
+
+      // Check if there are changes to commit
+      const { invoke } = await import('@tauri-apps/api/core');
+      const status: string = await invoke('git_status_short', { repoPath });
+
+      if (!status.trim()) {
+        console.log('[EmptyState] No changes to commit');
+        return;
+      }
+
+      // Stage all changes
+      await invoke('git_add_all', { repoPath });
+
+      // Get list of changed files
+      const filesChanged: string[] = status
+        .split('\n')
+        .filter((line) => line.trim())
+        .map((line) => line.slice(3).trim());
+
+      // Create commit message from plan
+      const title = currentPlan.description.slice(0, 50) + (currentPlan.description.length > 50 ? '...' : '');
+      const commitMessage = `${title}\n\nCo-Authored-By: ${currentPlan.implementAgent} <noreply@anthropic.com>`;
+
+      // Commit
+      await invoke('git_commit', { repoPath, message: commitMessage });
+
+      // Get the commit hash
+      const commitHash: string = await invoke('git_get_head_sha', { repoPath });
+
+      // Create implementation artifact
+      const artifactTitle = currentPlan.description.slice(0, 60) + (currentPlan.description.length > 60 ? '...' : '');
+      const artifactId = addImplementationArtifact(
+        artifactTitle,
+        commitHash.slice(0, 7), // Short hash
+        commitMessage,
+        filesChanged,
+        currentPlan.implementAgent,
+        currentPlanArtifactId ?? undefined
+      );
+
+      console.log('[EmptyState] Created implementation artifact:', artifactId, 'commit:', commitHash.slice(0, 7));
+
+      // Clear the plan ID after creating the implementation
+      currentPlanArtifactId = null;
+    } catch (error) {
+      console.error('[EmptyState] Failed to commit implementation:', error);
+    }
+  }
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -263,12 +285,13 @@ Return the complete updated plan as markdown (Files and Steps sections). No code
     startImplementing();
 
     // Clear the agent session to start fresh for implementation
-    clearSession();
+    // Note: We keep messages so user can see both planning and implementation conversation
+    clearSessionKeepMessages();
     if (tabAgentState) {
       tabAgentState.sessionId = null;
       tabAgentState.agentId = null;
       tabAgentState.status = 'disconnected';
-      tabAgentState.messages = [];
+      // Don't clear messages - preserve planning conversation
       tabAgentState.currentMessageId = null;
       tabAgentState.currentToolCall = null;
       tabAgentState.error = null;
@@ -292,25 +315,7 @@ Important:
 </script>
 
 <div class="empty-state-container">
-  {#if isImplementing}
-    <!-- Implementing loader - shows plan with overlay -->
-    <div class="plan-view implementing">
-      <div class="plan-header">
-        <h2 class="plan-title">
-          <Sparkles size={20} />
-          Your Plan
-        </h2>
-      </div>
-      <div class="plan-content faded">
-        {@html renderMarkdown(planContent)}
-      </div>
-      <div class="implementing-overlay">
-        <Loader2 size={24} class="spinning" />
-        <p class="loading-text">{loadingMessage.title}</p>
-        <p class="loading-subtext">{loadingMessage.subtitle}</p>
-      </div>
-    </div>
-  {:else if showPlan}
+  {#if showPlan}
     <!-- Plan display view -->
     <div class="plan-view">
       <div class="plan-header">
@@ -382,37 +387,46 @@ Important:
     <!-- Initial planning input view -->
     <GitTreeAnimation />
 
-    <div class="planning-section">
-      <p class="title">Ready to start something new?</p>
-      <p class="subtitle">Describe what you want to build and let AI help you plan</p>
+    {#if chatPanelVisible}
+      <!-- Chat panel is visible - direct user there -->
+      <div class="planning-section">
+        <p class="title">Ready to start something new?</p>
+        <p class="subtitle">Use the chat panel below to describe what you want to build</p>
+      </div>
+    {:else}
+      <!-- No chat panel - show inline form -->
+      <div class="planning-section">
+        <p class="title">Ready to start something new?</p>
+        <p class="subtitle">Describe what you want to build and let AI help you plan</p>
 
-      <form class="planning-form" onsubmit={handleSubmit}>
-        <div class="input-wrapper">
-          <textarea
-            class="planning-input"
-            placeholder="Describe the feature or change you want to make..."
-            bind:value={planDescription}
-            onkeydown={handleKeydown}
-            oninput={handleInput}
-            rows="3"
-          ></textarea>
-          {#if submitError || planError}
-            <p class="error-message">{submitError || planError}</p>
-          {/if}
-        </div>
+        <form class="planning-form" onsubmit={handleSubmit}>
+          <div class="input-wrapper">
+            <textarea
+              class="planning-input"
+              placeholder="Describe the feature or change you want to make..."
+              bind:value={planDescription}
+              onkeydown={handleKeydown}
+              oninput={handleInput}
+              rows="3"
+            ></textarea>
+            {#if submitError || planError}
+              <p class="error-message">{submitError || planError}</p>
+            {/if}
+          </div>
 
-        <div class="form-actions">
-          <AgentSelector value={selectedAgent} onchange={(agent) => (selectedAgent = agent)} />
+          <div class="form-actions">
+            <AgentSelector value={selectedAgent} onchange={(agent) => (selectedAgent = agent)} />
 
-          <button type="submit" class="planning-submit" disabled={!planDescription.trim()}>
-            <Sparkles size={16} />
-            <span>Plan with AI</span>
-          </button>
-        </div>
-      </form>
+            <button type="submit" class="planning-submit" disabled={!planDescription.trim()}>
+              <Sparkles size={16} />
+              <span>Plan with AI</span>
+            </button>
+          </div>
+        </form>
 
-      <p class="hint">Press <kbd>⌘</kbd><kbd>Enter</kbd> to submit</p>
-    </div>
+        <p class="hint">Press <kbd>⌘</kbd><kbd>Enter</kbd> to submit</p>
+      </div>
+    {/if}
   {/if}
 </div>
 
@@ -592,31 +606,6 @@ Important:
     max-width: 800px;
     overflow: hidden;
     position: relative;
-  }
-
-  .plan-view.implementing .plan-header {
-    opacity: 0.5;
-  }
-
-  .plan-content.faded {
-    opacity: 0.3;
-    pointer-events: none;
-  }
-
-  .implementing-overlay {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 32px;
-    background: var(--bg-primary);
-    border-radius: 12px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
-    z-index: 10;
   }
 
   .plan-header {

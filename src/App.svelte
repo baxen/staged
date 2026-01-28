@@ -10,6 +10,8 @@
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import TabBar from './lib/TabBar.svelte';
   import ChatPanel from './lib/ChatPanel.svelte';
+  import ArtifactsPanel from './lib/ArtifactsPanel.svelte';
+  import ArtifactDetailView from './lib/ArtifactDetailView.svelte';
   import { listRefs, getMergeBase } from './lib/services/git';
   import { getWindowLabel } from './lib/services/window';
   import {
@@ -45,8 +47,6 @@
     loadSavedSidebarPosition,
     loadSavedSidebarWidth,
     loadSavedChatPanelVisible,
-    setSidebarWidth,
-    resetSidebarWidth,
     getCustomKeyboardBindings,
     registerPreferenceShortcuts,
   } from './lib/stores/preferences.svelte';
@@ -93,13 +93,32 @@
     cleanupAgentEventListener,
     registerSession,
     unregisterSession,
+    clearSession,
   } from './lib/stores/agent.svelte';
   import {
     planState,
     createPlanState,
     syncFromTab as syncPlanFromTab,
     syncToTab as syncPlanToTab,
+    markPlanReady,
+    markRefiningComplete,
+    markImplementationComplete,
+    updatePlanContent,
+    setPlanError,
+    clearPlan,
   } from './lib/stores/plan.svelte';
+  import { addPlanArtifact } from './lib/stores/artifacts.svelte';
+  import {
+    artifactsState,
+    createArtifactsState,
+    syncFromTab as syncArtifactsFromTab,
+    syncToTab as syncArtifactsToTab,
+    selectedArtifactId,
+    upsertSessionArtifact,
+    removeSessionArtifact,
+    selectArtifact,
+  } from './lib/stores/artifacts.svelte';
+  import { setChatPanelVisible } from './lib/stores/preferences.svelte';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -108,43 +127,14 @@
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
 
-  // Sidebar resize state
-  let isDraggingSidebar = $state(false);
-  let dragStartX = $state(0);
-  let dragStartWidth = $state(0);
+  // Implementation artifact state (for RHS file list)
+  let implementationState = $state({
+    files: [] as any[],
+    loading: false,
+    selectedFile: null as string | null,
+    onFileSelect: (_path: string) => {}
+  });
 
-  // Sidebar resize handlers
-  function handleSidebarResizeStart(e: MouseEvent) {
-    if (e.button !== 0) return;
-    e.preventDefault();
-
-    isDraggingSidebar = true;
-    dragStartX = e.clientX;
-    dragStartWidth = preferences.sidebarWidth;
-
-    document.addEventListener('mousemove', handleSidebarResizeMove);
-    document.addEventListener('mouseup', handleSidebarResizeEnd);
-  }
-
-  function handleSidebarResizeMove(e: MouseEvent) {
-    if (!isDraggingSidebar) return;
-
-    const delta =
-      preferences.sidebarPosition === 'left' ? e.clientX - dragStartX : dragStartX - e.clientX;
-
-    const newWidth = dragStartWidth + delta;
-    setSidebarWidth(newWidth);
-  }
-
-  function handleSidebarResizeEnd() {
-    isDraggingSidebar = false;
-    document.removeEventListener('mousemove', handleSidebarResizeMove);
-    document.removeEventListener('mouseup', handleSidebarResizeEnd);
-  }
-
-  function handleSidebarResizeDoubleClick() {
-    resetSidebarWidth();
-  }
 
   // Load files, comments, and AI analysis for current spec
   async function loadAll() {
@@ -401,6 +391,9 @@
     // Sync plan state
     syncPlanFromTab(tab.planState);
 
+    // Sync artifacts state
+    syncArtifactsFromTab(tab.artifactsState);
+
     // Update repo state
     setCurrentRepo(tab.repoPath);
   }
@@ -449,6 +442,9 @@
 
     // Sync plan state back to tab
     syncPlanToTab(tab.planState);
+
+    // Sync artifacts state back to tab
+    syncArtifactsToTab(tab.artifactsState);
   }
 
   /**
@@ -529,7 +525,8 @@
       createCommentsState,
       createDiffSelection,
       createAgentState,
-      createPlanState
+      createPlanState,
+      createArtifactsState
     );
 
     // Start watching the new repo (idempotent - won't restart if already watching)
@@ -588,11 +585,160 @@
   }
 
   // Show empty state when we have a repo, finished loading, no error, but no files
+  // Exception: Don't show empty state if we just finished implementing (show diff viewer instead)
   let showEmptyState = $derived(
-    repoState.currentPath && !diffState.loading && !diffState.error && diffState.files.length === 0
+    repoState.currentPath &&
+      !diffState.loading &&
+      !diffState.error &&
+      diffState.files.length === 0 &&
+      planState.plan?.status !== 'complete'
   );
 
   let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
+
+  // Track session artifacts for active sessions (always active)
+  $effect(() => {
+    const sessionId = agentState.sessionId;
+    const currentPlan = planState.plan;
+    const messages = agentState.messages;
+    const agentId = agentState.agentId;
+
+    if (sessionId) {
+      let artifactId: string;
+
+      // If there's a plan, use plan-based info
+      if (currentPlan && (currentPlan.status === 'drafting' || currentPlan.status === 'refining' || currentPlan.status === 'implementing')) {
+        const title = currentPlan.description.slice(0, 60) + (currentPlan.description.length > 60 ? '...' : '');
+        const artifactStatus = currentPlan.status === 'drafting' ? 'planning' : currentPlan.status;
+
+        artifactId = upsertSessionArtifact(
+          sessionId,
+          title,
+          artifactStatus,
+          currentPlan.description,
+          currentPlan.status === 'implementing' ? currentPlan.implementAgent : currentPlan.planningAgent
+        );
+      } else {
+        // No plan yet - create a generic session artifact based on first message
+        const userMessages = messages.filter((m) => m.role === 'user');
+        const firstUserMessage = userMessages.length > 0 ? userMessages[0].content : 'New session';
+        const title = firstUserMessage.slice(0, 60) + (firstUserMessage.length > 60 ? '...' : '');
+
+        artifactId = upsertSessionArtifact(
+          sessionId,
+          title,
+          'active',
+          firstUserMessage,
+          agentId ?? 'goose'
+        );
+      }
+
+      // Auto-select the session artifact and show chat panel
+      selectArtifact(artifactId);
+      setChatPanelVisible(true);
+    }
+  });
+
+  // Track if we've seen streaming start - prevents false transitions on mount
+  let hasSeenStreaming = $state(false);
+
+  // Watch agent streaming to update plan content (must be always active)
+  $effect(() => {
+    const isStreaming = agentState.isStreaming;
+    const messagesLength = agentState.messages.length;
+    const status = planState.plan?.status;
+
+    if (isStreaming) {
+      hasSeenStreaming = true;
+    }
+
+    // When agent is streaming and we're in a planning state, update plan content
+    if (isStreaming && (status === 'drafting' || status === 'refining')) {
+      const assistantMessages = agentState.messages.filter((m) => m.role === 'assistant');
+      if (assistantMessages.length > 0) {
+        const latestContent = assistantMessages[assistantMessages.length - 1].content;
+        updatePlanContent(latestContent);
+      }
+    }
+  });
+
+  // Watch for streaming completion to transition plan status (must be always active)
+  $effect(() => {
+    const isStreaming = agentState.isStreaming;
+    const currentPlan = planState.plan;
+    const seenStreaming = hasSeenStreaming;
+    const sessionId = agentState.sessionId;
+
+    if (!isStreaming && currentPlan && seenStreaming) {
+      console.log('[App] Streaming complete, transitioning from:', currentPlan.status);
+      if (currentPlan.status === 'drafting') {
+        markPlanReady();
+        // Create plan artifact
+        const title = currentPlan.description.slice(0, 60) + (currentPlan.description.length > 60 ? '...' : '');
+        addPlanArtifact(
+          title,
+          currentPlan.content,
+          currentPlan.description,
+          currentPlan.planningAgent
+        );
+        console.log('[App] Created plan artifact');
+
+        // Remove session artifact after completion
+        if (sessionId) {
+          removeSessionArtifact(sessionId);
+        }
+
+        hasSeenStreaming = false;
+      } else if (currentPlan.status === 'refining') {
+        markRefiningComplete();
+
+        // Remove session artifact after completion
+        if (sessionId) {
+          removeSessionArtifact(sessionId);
+        }
+
+        hasSeenStreaming = false;
+      } else if (currentPlan.status === 'implementing') {
+        markImplementationComplete();
+
+        // Remove session artifact after completion
+        if (sessionId) {
+          removeSessionArtifact(sessionId);
+        }
+
+        hasSeenStreaming = false;
+      }
+    }
+  });
+
+  // Watch for agent errors (must be always active)
+  $effect(() => {
+    const error = agentState.error;
+    if (error && planState.plan) {
+      console.error('[App] Agent error during plan operation:', error);
+      setPlanError(error);
+    }
+  });
+
+  /**
+   * Handle starting a new session from the artifacts panel
+   */
+  function handleStartNewSession() {
+    // Remove any existing session artifact
+    if (agentState.sessionId) {
+      removeSessionArtifact(agentState.sessionId);
+    }
+
+    // Clear the current session and plan
+    clearSession();
+    clearPlan();
+
+    // Clear any artifact selection
+    selectArtifact(null);
+
+    // Show the chat panel
+    setChatPanelVisible(true);
+  }
 
   // Lifecycle
   let unregisterPreferenceShortcuts: (() => void) | null = null;
@@ -643,7 +789,8 @@
         createCommentsState,
         createDiffSelection,
         createAgentState,
-        createPlanState
+        createPlanState,
+        createArtifactsState
       );
 
       // Initialize watcher listener once (handles all repos)
@@ -673,7 +820,8 @@
             createCommentsState,
             createDiffSelection,
             createAgentState,
-            createPlanState
+            createPlanState,
+            createArtifactsState
           );
         }
 
@@ -701,9 +849,6 @@
     unsubscribeMenuCloseWindow?.();
     // Cleanup agent event listener
     cleanupAgentEventListener();
-    // Cleanup sidebar resize listeners
-    document.removeEventListener('mousemove', handleSidebarResizeMove);
-    document.removeEventListener('mouseup', handleSidebarResizeEnd);
   });
 </script>
 
@@ -721,63 +866,69 @@
     }}
   />
 
-  <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
-    {#if showEmptyState}
-      <!-- Full-width empty state -->
-      <section class="main-content full-width">
-        <EmptyState />
-      </section>
-    {:else}
-      <section class="main-content">
-        {#if diffState.loading}
-          <div class="loading-state">
-            <p>Loading...</p>
-          </div>
-        {:else if diffState.error}
-          <div class="error-state">
-            <AlertCircle size={18} />
-            <p class="error-message">{diffState.error}</p>
-          </div>
+  <div class="layout-container">
+    <!-- Left side: main content + chat panel -->
+    <div class="left-side">
+      <div class="app-container">
+        {#if showEmptyState}
+          <!-- Full-width empty state -->
+          <section class="main-content full-width">
+            <EmptyState />
+          </section>
         {:else}
-          <DiffViewer
-            diff={currentDiff}
-            sizeBase={preferences.sizeBase}
-            syntaxThemeVersion={preferences.syntaxThemeVersion}
-            loading={diffState.loadingFile !== null}
-            isReferenceFile={isCurrentFileReference}
-          />
+          <!-- Main content area -->
+          <section class="main-content">
+            {#if selectedArtifactId.value}
+              <!-- Artifact detail view -->
+              <ArtifactDetailView
+                sizeBase={preferences.sizeBase}
+                syntaxThemeVersion={preferences.syntaxThemeVersion}
+                onImplementationStateChange={(state) => { implementationState = state; }}
+              />
+            {:else if diffState.loading}
+              <div class="loading-state">
+                <p>Loading...</p>
+              </div>
+            {:else if diffState.error}
+              <div class="error-state">
+                <AlertCircle size={18} />
+                <p class="error-message">{diffState.error}</p>
+              </div>
+            {:else}
+              <!-- Regular diff view - full width -->
+              <DiffViewer
+                diff={currentDiff}
+                sizeBase={preferences.sizeBase}
+                syntaxThemeVersion={preferences.syntaxThemeVersion}
+                loading={diffState.loadingFile !== null}
+                isReferenceFile={isCurrentFileReference}
+              />
+            {/if}
+          </section>
         {/if}
-      </section>
-      <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
-        <!-- Resize handle -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="sidebar-resize-handle"
-          class:left={preferences.sidebarPosition === 'left'}
-          class:dragging={isDraggingSidebar}
-          onmousedown={handleSidebarResizeStart}
-          ondblclick={handleSidebarResizeDoubleClick}
-        >
-          <div class="resize-handle-bar"></div>
-        </div>
+      </div>
 
-        <Sidebar
-          files={diffState.files}
-          loading={diffState.loading}
-          onFileSelect={selectFile}
-          selectedFile={diffState.selectedFile}
-          {isWorkingTree}
+      <!-- Bottom chat panel (only on left side) -->
+      {#if repoState.currentPath && preferences.chatPanelVisible}
+        <ChatPanel hasActiveSession={agentState.sessionId !== null} />
+      {/if}
+    </div>
+
+    <!-- Right side: Artifacts panel (full height) -->
+    {#if repoState.currentPath}
+      <aside class="artifacts-sidebar">
+        <ArtifactsPanel
+          onStartNewSession={handleStartNewSession}
           onAddReferenceFile={() => (showFileSearch = true)}
           onRemoveReferenceFile={handleRemoveReferenceFile}
+          implementationFiles={implementationState.files}
+          implementationLoading={implementationState.loading}
+          selectedImplementationFile={implementationState.selectedFile}
+          onImplementationFileSelect={implementationState.onFileSelect}
         />
       </aside>
     {/if}
   </div>
-
-  <!-- Bottom chat panel -->
-  {#if repoState.currentPath && preferences.chatPanelVisible}
-    <ChatPanel />
-  {/if}
 </main>
 
 {#if showFileSearch}
@@ -813,7 +964,7 @@
     background-color: var(--bg-chrome);
   }
 
-  .app-container {
+  .layout-container {
     display: flex;
     flex: 1;
     overflow: hidden;
@@ -821,65 +972,18 @@
     gap: 8px;
   }
 
-  .app-container.sidebar-left .main-content {
-    order: 1;
-  }
-
-  .app-container.sidebar-left .sidebar {
-    order: 0;
-  }
-
-  .sidebar {
-    width: calc(var(--sidebar-width) * 1px);
-    min-width: 180px;
-    background-color: transparent;
+  .left-side {
     display: flex;
     flex-direction: column;
+    flex: 1;
     overflow: hidden;
-    position: relative;
+    gap: 8px;
   }
 
-  .sidebar-resize-handle {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 8px;
-    cursor: col-resize;
-    z-index: 100;
+  .app-container {
     display: flex;
-    align-items: stretch;
-  }
-
-  .sidebar-resize-handle.left {
-    right: 0;
-  }
-
-  .sidebar-resize-handle:not(.left) {
-    left: 0;
-  }
-
-  .resize-handle-bar {
-    margin: auto;
-    width: 4px;
-    height: 100%;
-    background-color: var(--border-muted);
-    border-radius: 2px;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-    pointer-events: none;
-  }
-
-  .sidebar-resize-handle:hover .resize-handle-bar,
-  .sidebar-resize-handle.dragging .resize-handle-bar {
-    opacity: 1;
-  }
-
-  .sidebar-resize-handle.dragging .resize-handle-bar {
-    background-color: var(--accent-primary);
-  }
-
-  .app-container:has(.sidebar-resize-handle.dragging) {
-    user-select: none;
+    flex: 1;
+    overflow: hidden;
   }
 
   .main-content {
@@ -887,6 +991,16 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  .artifacts-sidebar {
+    width: 320px;
+    min-width: 280px;
+    max-width: 400px;
+    background-color: transparent;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .loading-state {

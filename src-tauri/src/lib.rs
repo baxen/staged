@@ -148,6 +148,34 @@ fn commit(
     git::commit(path, &paths, &message).map_err(|e| e.to_string())
 }
 
+/// Get git status --short output.
+#[tauri::command(rename_all = "camelCase")]
+fn git_status_short(repo_path: Option<String>) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::status_short(path).map_err(|e| e.to_string())
+}
+
+/// Stage all changes (git add --all).
+#[tauri::command(rename_all = "camelCase")]
+fn git_add_all(repo_path: Option<String>) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::add_all(path).map_err(|e| e.to_string())
+}
+
+/// Create a commit with a message (assumes files are already staged).
+#[tauri::command(rename_all = "camelCase")]
+fn git_commit(repo_path: Option<String>, message: String) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::commit_with_message(path, &message).map_err(|e| e.to_string())
+}
+
+/// Get the full SHA of HEAD.
+#[tauri::command(rename_all = "camelCase")]
+fn git_get_head_sha(repo_path: Option<String>) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    git::get_head_sha(path).map_err(|e| e.to_string())
+}
+
 // =============================================================================
 // GitHub Commands
 // =============================================================================
@@ -726,6 +754,10 @@ pub fn run() {
             list_diff_files,
             get_file_diff,
             commit,
+            git_status_short,
+            git_add_all,
+            git_commit,
+            git_get_head_sha,
             // GitHub commands
             check_github_auth,
             list_pull_requests,

@@ -12,6 +12,14 @@
   import { getActiveTab } from './stores/tabState.svelte';
   import { renderMarkdown } from './services/markdown';
   import AgentSelector, { type AgentId } from './AgentSelector.svelte';
+  import { planState, startDrafting } from './stores/plan.svelte';
+
+  interface Props {
+    /** Whether there's an active session (hides mode selector) */
+    hasActiveSession?: boolean;
+  }
+
+  let { hasActiveSession = false }: Props = $props();
 
   type AgentMode = 'plan' | 'implement' | 'review';
 
@@ -81,11 +89,44 @@
     const activeTab = getActiveTab();
     const tabAgentState = activeTab?.agentState;
 
-    // Prepend mode context to the message
-    const modeContext = `[Mode: ${modeLabels[selectedMode]}] `;
-    const message = modeContext + chatInput;
-    chatInput = '';
-    await sendAgentMessage(message, repoState.currentPath, selectedAgent, tabAgentState);
+    // If planning mode and no active plan in progress, start drafting
+    const hasActivePlan = planState.plan && (
+      planState.plan.status === 'drafting' ||
+      planState.plan.status === 'refining' ||
+      planState.plan.status === 'ready'
+    );
+
+    if (selectedMode === 'plan' && !hasActivePlan) {
+      startDrafting(chatInput.trim(), selectedAgent);
+
+      // Create a planning-focused prompt
+      const planningPrompt = `I want to plan some work in this repository. Here's what I want to accomplish:
+
+${chatInput.trim()}
+
+Create a brief implementation plan as markdown:
+
+## Files
+List each file to modify or create (one per line, prefix new files with "new:")
+
+## Steps
+Numbered list of what to do (be specific but concise)
+
+Keep it short - just enough detail to implement. No code changes yet.`;
+
+      chatInput = '';
+      await sendAgentMessage(planningPrompt, repoState.currentPath, selectedAgent, tabAgentState);
+    } else {
+      // Regular message or non-planning mode
+      let message = chatInput;
+      if (!hasActiveSession) {
+        const modeContext = `[Mode: ${modeLabels[selectedMode]}] `;
+        message = modeContext + chatInput;
+      }
+
+      chatInput = '';
+      await sendAgentMessage(message, repoState.currentPath, selectedAgent, tabAgentState);
+    }
   }
 
   function handleChatKeydown(e: KeyboardEvent) {
@@ -124,46 +165,48 @@
     </div>
   {/if}
   <form class="chat-input-form" onsubmit={handleChatSubmit}>
-    <div class="input-actions">
-      <!-- Agent selector -->
-      <AgentSelector
-        value={selectedAgent}
-        onchange={(agent) => (selectedAgent = agent)}
-        disabled={agentState.isStreaming}
-      />
-      <!-- Mode selector dropdown -->
-      <div class="dropdown" bind:this={modeDropdownEl}>
-        <button
-          type="button"
-          class="dropdown-trigger"
-          class:open={modeDropdownOpen}
-          onclick={() => (modeDropdownOpen = !modeDropdownOpen)}
-          title={modeDescriptions[selectedMode]}
-        >
-          <span class="dropdown-label">{modeLabels[selectedMode]}</span>
-          <ChevronDown size={12} />
-        </button>
-        {#if modeDropdownOpen}
-          <div class="dropdown-menu">
-            {#each Object.entries(modeLabels) as [mode, label]}
-              <button
-                type="button"
-                class="dropdown-option"
-                class:selected={selectedMode === mode}
-                onclick={() => selectMode(mode as AgentMode)}
-              >
-                <span class="dropdown-option-label">{label}</span>
-                <span class="dropdown-option-desc">{modeDescriptions[mode as AgentMode]}</span>
-              </button>
-            {/each}
-          </div>
-        {/if}
+    {#if !hasActiveSession}
+      <div class="input-actions">
+        <!-- Agent selector -->
+        <AgentSelector
+          value={selectedAgent}
+          onchange={(agent) => (selectedAgent = agent)}
+          disabled={agentState.isStreaming}
+        />
+        <!-- Mode selector dropdown -->
+        <div class="dropdown" bind:this={modeDropdownEl}>
+          <button
+            type="button"
+            class="dropdown-trigger"
+            class:open={modeDropdownOpen}
+            onclick={() => (modeDropdownOpen = !modeDropdownOpen)}
+            title={modeDescriptions[selectedMode]}
+          >
+            <span class="dropdown-label">{modeLabels[selectedMode]}</span>
+            <ChevronDown size={12} />
+          </button>
+          {#if modeDropdownOpen}
+            <div class="dropdown-menu">
+              {#each Object.entries(modeLabels) as [mode, label]}
+                <button
+                  type="button"
+                  class="dropdown-option"
+                  class:selected={selectedMode === mode}
+                  onclick={() => selectMode(mode as AgentMode)}
+                >
+                  <span class="dropdown-option-label">{label}</span>
+                  <span class="dropdown-option-desc">{modeDescriptions[mode as AgentMode]}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
-    </div>
+    {/if}
     <input
       type="text"
       class="chat-input"
-      placeholder="Ask the agent..."
+      placeholder={hasActiveSession ? 'Continue the conversation...' : 'Start a new session...'}
       bind:value={chatInput}
       onkeydown={handleChatKeydown}
       disabled={agentState.isStreaming}

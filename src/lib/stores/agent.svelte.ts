@@ -400,3 +400,20 @@ export function clearSession(): void {
   agentState.currentToolCall = null;
   agentState.error = null;
 }
+
+/**
+ * Clear the agent session but preserve message history.
+ * Useful when starting a new session that continues the conversation.
+ */
+export function clearSessionKeepMessages(): void {
+  if (agentState.sessionId) {
+    unregisterSession(agentState.sessionId);
+  }
+  agentState.sessionId = null;
+  agentState.agentId = null;
+  agentState.status = 'disconnected';
+  // Keep messages
+  agentState.currentMessageId = null;
+  agentState.currentToolCall = null;
+  agentState.error = null;
+}

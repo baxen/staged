@@ -11,9 +11,10 @@ import type { CommentsState } from './comments.svelte';
 import type { DiffSelection } from './diffSelection.svelte';
 import type { AgentState } from './agent.svelte';
 import type { PlanState } from './plan.svelte';
+import type { ArtifactsState } from './artifacts.svelte';
 
 // Re-export types for convenience
-export type { DiffState, CommentsState, DiffSelection, AgentState, PlanState };
+export type { DiffState, CommentsState, DiffSelection, AgentState, PlanState, ArtifactsState };
 
 /**
  * State for a single tab
@@ -32,6 +33,7 @@ export interface TabState {
   diffSelection: DiffSelection;
   agentState: AgentState;
   planState: PlanState;
+  artifactsState: ArtifactsState;
 
   /** True if files changed while this tab was not active (needs refresh on switch) */
   needsRefresh: boolean;
@@ -86,7 +88,8 @@ export function addTab(
   createCommentsState: () => CommentsState,
   createDiffSelection: () => DiffSelection,
   createAgentState: () => AgentState,
-  createPlanState: () => PlanState
+  createPlanState: () => PlanState,
+  createArtifactsState: () => ArtifactsState
 ): void {
   // Check if tab already exists
   const existingIndex = windowState.tabs.findIndex((t) => t.id === repoPath);
@@ -107,6 +110,7 @@ export function addTab(
     diffSelection: createDiffSelection(),
     agentState: createAgentState(),
     planState: createPlanState(),
+    artifactsState: createArtifactsState(),
     needsRefresh: false,
   };
 
@@ -214,7 +218,8 @@ export function loadTabsFromStorage(
   createCommentsState: () => CommentsState,
   createDiffSelection: () => DiffSelection,
   createAgentState: () => AgentState,
-  createPlanState: () => PlanState
+  createPlanState: () => PlanState,
+  createArtifactsState: () => ArtifactsState
 ): void {
   const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
   const stored = localStorage.getItem(key);
@@ -233,6 +238,7 @@ export function loadTabsFromStorage(
         diffSelection: createDiffSelection(),
         agentState: createAgentState(),
         planState: createPlanState(),
+        artifactsState: createArtifactsState(),
         needsRefresh: false,
       }));
       windowState.activeTabIndex = data.activeTabIndex;
