@@ -1,6 +1,7 @@
 //! Tauri commands for the Staged diff viewer.
 //!
 //! This module provides the bridge between the frontend and the git/github modules.
+//! Supports CLI arguments: `staged [path]` opens the app with the specified directory.
 
 pub mod ai;
 pub mod git;
@@ -783,6 +784,82 @@ fn get_window_label(window: tauri::Window) -> String {
     window.label().to_string()
 }
 
+/// Get the initial repository path from CLI arguments.
+/// Returns the canonicalized path if a valid directory was provided, otherwise None.
+#[tauri::command]
+fn get_initial_path() -> Option<String> {
+    let args: Vec<String> = std::env::args().collect();
+
+    // Skip the binary name, look for a path argument (not starting with -)
+    for arg in args.iter().skip(1) {
+        if arg.starts_with('-') {
+            continue;
+        }
+
+        // Try to canonicalize the path
+        let path = std::path::Path::new(arg);
+        if let Ok(canonical) = path.canonicalize() {
+            if canonical.is_dir() {
+                return canonical.to_str().map(|s| s.to_string());
+            }
+        }
+    }
+    None
+}
+
+/// Install the CLI command to /usr/local/bin using a helper script with sudo.
+/// Returns Ok(path) on success, Err(message) on failure.
+#[tauri::command]
+fn install_cli() -> Result<String, String> {
+    let cli_script = include_str!("../../bin/staged");
+    let install_path = "/usr/local/bin/staged";
+
+    // Write script to a temp file first
+    let temp_path = std::env::temp_dir().join("staged-cli-install");
+    std::fs::write(&temp_path, cli_script)
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    // Use osascript to run sudo with a GUI prompt (macOS)
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            r#"do shell script "cp '{}' '{}' && chmod +x '{}'" with administrator privileges"#,
+            temp_path.display(),
+            install_path,
+            install_path
+        );
+
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| format!("Failed to run installer: {}", e))?;
+
+        // Clean up temp file
+        let _ = std::fs::remove_file(&temp_path);
+
+        if output.status.success() {
+            Ok(install_path.to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("User canceled") || stderr.contains("(-128)") {
+                Err("Installation cancelled".to_string())
+            } else {
+                Err(format!("Installation failed: {}", stderr))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = std::fs::remove_file(&temp_path);
+        Err(
+            "CLI installation is only supported on macOS. Copy bin/staged to your PATH manually."
+                .to_string(),
+        )
+    }
+}
+
 // =============================================================================
 // Menu System
 // =============================================================================
@@ -790,6 +867,24 @@ fn get_window_label(window: tauri::Window) -> String {
 /// Build the application menu bar.
 fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
+
+    // App menu (macOS only, but harmless on other platforms)
+    let app_menu = Submenu::with_items(
+        app,
+        "Staged",
+        true,
+        &[
+            &MenuItem::with_id(
+                app,
+                "install-cli",
+                "Install CLI Command...",
+                true,
+                None::<&str>,
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, None)?,
+        ],
+    )?;
 
     let file_menu = Submenu::with_items(
         app,
@@ -827,6 +922,7 @@ fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> 
         ],
     )?;
 
+    menu.append(&app_menu)?;
     menu.append(&file_menu)?;
     menu.append(&edit_menu)?;
     Ok(menu)
@@ -843,6 +939,9 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
         }
         "close-window" => {
             let _ = app.emit("menu:close-window", ());
+        }
+        "install-cli" => {
+            let _ = app.emit("menu:install-cli", ());
         }
         _ => {}
     }
@@ -939,6 +1038,9 @@ pub fn run() {
             unwatch_repo,
             // Window commands
             get_window_label,
+            // CLI commands
+            get_initial_path,
+            install_cli,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
