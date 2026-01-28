@@ -12,16 +12,17 @@ use staged_lib::{ai, git};
 use std::env;
 use std::path::Path;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
 
     println!("=== Smart Diff AI Test ===\n");
 
-    // Check for AI tool
-    match ai::find_ai_tool() {
-        Some(tool) => println!("✓ Found AI tool: {}\n", tool.name()),
+    // Check for AI agent
+    match ai::find_acp_agent() {
+        Some(agent) => println!("✓ Found AI agent: {}\n", agent.name()),
         None => {
-            eprintln!("✗ No AI tool found. Install goose or claude.");
+            eprintln!("✗ No AI agent found. Install goose: https://github.com/block/goose");
             std::process::exit(1);
         }
     }
@@ -30,7 +31,7 @@ fn main() {
         None | Some("--help") | Some("-h") => print_help(),
         Some(range) => {
             let repo_path = args.get(1).map(|s| s.as_str()).unwrap_or(".");
-            test_real_diff(range, repo_path);
+            test_real_diff(range, repo_path).await;
         }
     }
 }
@@ -50,7 +51,7 @@ Examples:
     );
 }
 
-fn test_real_diff(range: &str, repo_path: &str) {
+async fn test_real_diff(range: &str, repo_path: &str) {
     // Parse base..head
     let parts: Vec<&str> = range.split("..").collect();
     if parts.len() != 2 {
@@ -73,9 +74,9 @@ fn test_real_diff(range: &str, repo_path: &str) {
     };
 
     // Run analysis - the backend handles file listing and content loading
-    println!("Analyzing diff with AI (this may take a few seconds)...\n");
+    println!("Analyzing diff with AI via ACP (this may take a few seconds)...\n");
 
-    match ai::analyze_diff(repo, &spec) {
+    match ai::analyze_diff(repo, &spec).await {
         Ok(result) => {
             println!("═══════════════════════════════════════════════════════════════");
             println!("                     CHANGESET ANALYSIS");
