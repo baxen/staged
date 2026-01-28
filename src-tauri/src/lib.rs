@@ -810,7 +810,6 @@ fn get_initial_path() -> Option<String> {
 #[tauri::command]
 fn install_cli() -> Result<String, String> {
     let cli_script = include_str!("../../bin/staged");
-    let install_path = "/usr/local/bin/staged";
 
     // Write script to a temp file first
     let temp_path = std::env::temp_dir().join("staged-cli-install");
@@ -820,6 +819,7 @@ fn install_cli() -> Result<String, String> {
     // Use osascript to run sudo with a GUI prompt (macOS)
     #[cfg(target_os = "macos")]
     {
+        let install_path = "/usr/local/bin/staged";
         let script = format!(
             r#"do shell script "cp '{}' '{}' && chmod +x '{}'" with administrator privileges"#,
             temp_path.display(),
