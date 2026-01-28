@@ -73,12 +73,25 @@ pub async fn spawn_agent(
         cmd.env(key, value);
     }
 
-    let child = cmd.spawn().map_err(|e| {
+    let mut child = cmd.spawn().map_err(|e| {
         AgentError::new(format!(
             "Failed to spawn agent '{}': {}. Make sure '{}' is installed.",
             config.command, e, config.command
         ))
     })?;
+
+    // Start consuming stderr immediately to catch early errors
+    if let Some(stderr) = child.stderr.take() {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let session_id_clone = session_id.clone();
+        tokio::spawn(async move {
+            let reader = BufReader::new(stderr);
+            let mut lines = reader.lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                log::warn!("Agent stderr [{}]: {}", session_id_clone, line);
+            }
+        });
+    }
 
     // Create session info
     let session_info = SessionInfo {
