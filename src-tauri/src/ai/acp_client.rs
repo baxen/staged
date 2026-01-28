@@ -9,8 +9,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use agent_client_protocol::{
-    Agent, ClientSideConnection, ContentBlock as AcpContentBlock, Implementation, InitializeRequest,
-    NewSessionRequest, PermissionOptionId, PromptRequest, ProtocolVersion,
+    Agent, ClientSideConnection, ContentBlock as AcpContentBlock, Implementation,
+    InitializeRequest, NewSessionRequest, PermissionOptionId, PromptRequest, ProtocolVersion,
     RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
     Result as AcpResult, SelectedPermissionOutcome, SessionNotification, TextContent,
 };
