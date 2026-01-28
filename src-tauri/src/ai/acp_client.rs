@@ -69,7 +69,7 @@ fn find_via_login_shell(cmd: &str) -> Option<PathBuf> {
     {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(path_str) = stdout.lines().filter(|l| !l.is_empty()).last() {
+            if let Some(path_str) = stdout.lines().rfind(|l| !l.is_empty()) {
                 let path_str = path_str.trim();
                 if !path_str.is_empty() && path_str.starts_with('/') {
                     return Some(PathBuf::from(path_str));
@@ -85,7 +85,7 @@ fn find_via_login_shell(cmd: &str) -> Option<PathBuf> {
     {
         if output.status.success() {
             let stdout = String::from_utf8_lossy(&output.stdout);
-            if let Some(path_str) = stdout.lines().filter(|l| !l.is_empty()).last() {
+            if let Some(path_str) = stdout.lines().rfind(|l| !l.is_empty()) {
                 let path_str = path_str.trim();
                 if !path_str.is_empty() && path_str.starts_with('/') {
                     return Some(PathBuf::from(path_str));
