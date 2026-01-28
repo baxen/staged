@@ -25,6 +25,7 @@
     setImplementAgent,
     setPlanError,
     clearPlan,
+    clearPlanError,
   } from './stores/plan.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { getActiveTab } from './stores/tabState.svelte';
@@ -34,10 +35,12 @@
   let planDescription = $state('');
   let commentInput = $state('');
   let selectedAgent = $state<AgentId>('goose');
+  let submitError = $state<string | null>(null);
 
   // Derived state from plan store - read directly from planState for reactivity
   let plan = $derived(planState.plan);
   let implementAgent = $derived(planState.plan?.implementAgent ?? 'goose');
+  let planError = $derived(planState.error);
 
   // Plan content: prefer plan store, but during streaming also check agent messages
   let planContent = $derived.by(() => {
@@ -145,11 +148,15 @@
     if (!planDescription.trim() || isLoading) return;
     if (!repoState.currentPath) {
       console.error('No repository path available');
+      submitError = 'No repository path available';
       return;
     }
 
     const activeTab = getActiveTab();
     const tabAgentState = activeTab?.agentState;
+
+    // Clear any previous error
+    submitError = null;
 
     // Start drafting in plan store
     startDrafting(planDescription.trim(), selectedAgent);
@@ -169,14 +176,32 @@ Numbered list of what to do (be specific but concise)
 
 Keep it short - just enough detail to implement. No code changes yet.`;
 
-    planDescription = '';
-    await sendAgentMessage(planningPrompt, repoState.currentPath, selectedAgent, tabAgentState);
+    try {
+      await sendAgentMessage(planningPrompt, repoState.currentPath, selectedAgent, tabAgentState);
+      // Only clear the input after message was successfully sent
+      planDescription = '';
+    } catch (error) {
+      // If sending failed, clear the plan to return to input state and show error
+      clearPlan();
+      submitError = error instanceof Error ? error.message : 'Failed to start planning. Please try again.';
+      console.error('Failed to send message:', error);
+    }
   }
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
       e.preventDefault();
       handleSubmit(e);
+    }
+  }
+
+  function handleInput() {
+    // Clear errors when user starts typing again
+    if (submitError) {
+      submitError = null;
+    }
+    if (planError) {
+      clearPlanError();
     }
   }
 
@@ -362,13 +387,19 @@ Important:
       <p class="subtitle">Describe what you want to build and let AI help you plan</p>
 
       <form class="planning-form" onsubmit={handleSubmit}>
-        <textarea
-          class="planning-input"
-          placeholder="Describe the feature or change you want to make..."
-          bind:value={planDescription}
-          onkeydown={handleKeydown}
-          rows="3"
-        ></textarea>
+        <div class="input-wrapper">
+          <textarea
+            class="planning-input"
+            placeholder="Describe the feature or change you want to make..."
+            bind:value={planDescription}
+            onkeydown={handleKeydown}
+            oninput={handleInput}
+            rows="3"
+          ></textarea>
+          {#if submitError || planError}
+            <p class="error-message">{submitError || planError}</p>
+          {/if}
+        </div>
 
         <div class="form-actions">
           <AgentSelector value={selectedAgent} onchange={(agent) => (selectedAgent = agent)} />
@@ -426,6 +457,20 @@ Important:
     flex-direction: column;
     gap: 12px;
     width: 100%;
+  }
+
+  .input-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .error-message {
+    margin: 0;
+    font-size: var(--size-xs);
+    color: #ef4444;
+    padding: 0 4px;
   }
 
   .planning-input {
