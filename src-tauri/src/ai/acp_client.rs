@@ -23,18 +23,29 @@ use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 #[derive(Debug, Clone)]
 pub enum AcpAgent {
     Goose(PathBuf),
+    Claude(PathBuf),
 }
 
 impl AcpAgent {
     pub fn name(&self) -> &'static str {
         match self {
             AcpAgent::Goose(_) => "goose",
+            AcpAgent::Claude(_) => "claude",
         }
     }
 
     pub fn path(&self) -> &Path {
         match self {
             AcpAgent::Goose(p) => p,
+            AcpAgent::Claude(p) => p,
+        }
+    }
+
+    /// Get the arguments to start ACP mode
+    pub fn acp_args(&self) -> Vec<&str> {
+        match self {
+            AcpAgent::Goose(_) => vec!["acp"],
+            AcpAgent::Claude(_) => vec![], // claude-code-acp runs in ACP mode by default
         }
     }
 }
@@ -95,25 +106,40 @@ fn verify_command(path: &Path) -> bool {
 }
 
 /// Find an ACP-compatible AI agent
+/// Prefers Goose if available, falls back to Claude
 pub fn find_acp_agent() -> Option<AcpAgent> {
+    // Try Goose first (default)
+    if let Some(agent) = find_agent("goose", AcpAgent::Goose) {
+        return Some(agent);
+    }
+
+    // Fall back to Claude (claude-code-acp)
+    find_agent("claude-code-acp", AcpAgent::Claude)
+}
+
+/// Find a specific agent by command name
+fn find_agent<F>(cmd: &str, constructor: F) -> Option<AcpAgent>
+where
+    F: Fn(PathBuf) -> AcpAgent,
+{
     // Strategy 1: Login shell which
-    if let Some(path) = find_via_login_shell("goose") {
+    if let Some(path) = find_via_login_shell(cmd) {
         if verify_command(&path) {
-            return Some(AcpAgent::Goose(path));
+            return Some(constructor(path));
         }
     }
 
     // Strategy 2: Direct command
-    let goose_path = PathBuf::from("goose");
-    if verify_command(&goose_path) {
-        return Some(AcpAgent::Goose(goose_path));
+    let direct_path = PathBuf::from(cmd);
+    if verify_command(&direct_path) {
+        return Some(constructor(direct_path));
     }
 
     // Strategy 3: Common paths
     for dir in COMMON_PATHS {
-        let path = PathBuf::from(dir).join("goose");
+        let path = PathBuf::from(dir).join(cmd);
         if path.exists() && verify_command(&path) {
-            return Some(AcpAgent::Goose(path));
+            return Some(constructor(path));
         }
     }
 
@@ -182,6 +208,7 @@ pub async fn run_acp_prompt(
 ) -> Result<String, String> {
     let agent_path = agent.path().to_path_buf();
     let agent_name = agent.name().to_string();
+    let agent_args: Vec<String> = agent.acp_args().iter().map(|s| s.to_string()).collect();
     let working_dir = working_dir.to_path_buf();
     let prompt = prompt.to_string();
 
@@ -197,7 +224,8 @@ pub async fn run_acp_prompt(
         // Run the ACP session on a LocalSet
         let local = tokio::task::LocalSet::new();
         local.block_on(&rt, async move {
-            run_acp_session_inner(&agent_path, &agent_name, &working_dir, &prompt).await
+            run_acp_session_inner(&agent_path, &agent_name, &agent_args, &working_dir, &prompt)
+                .await
         })
     })
     .await
@@ -208,16 +236,18 @@ pub async fn run_acp_prompt(
 async fn run_acp_session_inner(
     agent_path: &Path,
     agent_name: &str,
+    agent_args: &[String],
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
     // Spawn the agent process with ACP mode
     let mut cmd = Command::new(agent_path);
-    cmd.arg("acp")
+    cmd.args(agent_args)
         .current_dir(working_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+        .stderr(Stdio::piped())
+        .kill_on_drop(true); // Ensure child is killed if we exit early
 
     let mut child = cmd
         .spawn()
