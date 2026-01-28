@@ -490,16 +490,16 @@ async fn sync_review_to_github(
 
 use ai::{ChangesetAnalysis, ChangesetSummary, SmartDiffResult};
 
-/// Check if an AI CLI tool is available.
+/// Check if an AI agent is available (via ACP).
 #[tauri::command(rename_all = "camelCase")]
 fn check_ai_available() -> Result<String, String> {
-    match ai::find_ai_tool() {
-        Some(tool) => Ok(tool.name().to_string()),
-        None => Err("No AI CLI found. Install goose or claude.".to_string()),
+    match ai::find_acp_agent() {
+        Some(agent) => Ok(agent.name().to_string()),
+        None => Err("No AI agent found. Install Goose: https://github.com/block/goose".to_string()),
     }
 }
 
-/// Analyze a diff using AI.
+/// Analyze a diff using AI via ACP.
 ///
 /// This is the main AI entry point - handles file listing, content loading,
 /// and AI analysis in one call. Frontend just provides the diff spec.
@@ -510,10 +510,8 @@ async fn analyze_diff(
 ) -> Result<ChangesetAnalysis, String> {
     let path = get_repo_path(repo_path.as_deref()).to_path_buf();
 
-    // Run on blocking thread pool since this does file I/O and spawns a subprocess
-    tokio::task::spawn_blocking(move || ai::analyze_diff(&path, &spec))
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    // analyze_diff is now async (uses ACP)
+    ai::analyze_diff(&path, &spec).await
 }
 
 // =============================================================================
