@@ -56,6 +56,7 @@ This project uses [Hermit](https://github.com/cashapp/hermit) to manage developm
 ```bash
 source bin/activate-hermit   # Activate hermit environment
 rustup default stable        # Set the default Rust toolchain
+lefthook install             # Install git hooks for pre-push checks
 ```
 
 After activation, `cargo`, `node`, `npm`, and `just` are all available from the hermit-managed versions.
