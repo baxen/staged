@@ -791,6 +791,28 @@ fn get_window_label(window: tauri::Window) -> String {
 fn build_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::Error>> {
     let menu = Menu::new(app)?;
 
+    // macOS app menu (required for Cmd+Q, Cmd+H, etc.)
+    #[cfg(target_os = "macos")]
+    {
+        let app_menu = Submenu::with_items(
+            app,
+            "Staged",
+            true,
+            &[
+                &PredefinedMenuItem::about(app, Some("About Staged"), None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::services(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::hide(app, None)?,
+                &PredefinedMenuItem::hide_others(app, None)?,
+                &PredefinedMenuItem::show_all(app, None)?,
+                &PredefinedMenuItem::separator(app)?,
+                &PredefinedMenuItem::quit(app, None)?,
+            ],
+        )?;
+        menu.append(&app_menu)?;
+    }
+
     let file_menu = Submenu::with_items(
         app,
         "File",
@@ -857,6 +879,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
             // Initialize the review store with app data directory
             review::init_store(app.handle()).map_err(|e| e.0)?;
