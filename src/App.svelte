@@ -8,8 +8,9 @@
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
+  import FolderPickerModal from './lib/FolderPickerModal.svelte';
   import TabBar from './lib/TabBar.svelte';
-  import { listRefs, getMergeBase } from './lib/services/git';
+  import { listRefs } from './lib/services/git';
   import { getWindowLabel } from './lib/services/window';
   import {
     windowState,
@@ -25,7 +26,7 @@
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
   import { createDiffSelection } from './lib/stores/diffSelection.svelte';
-  import { DiffSpec, inferRefType } from './lib/types';
+  import { DiffSpec, gitRefName } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
   import { referenceFileAsDiff } from './lib/diffUtils';
@@ -55,8 +56,6 @@
     selectPreset,
     selectCustomDiff,
     resetDiffSelection,
-    setDefaultBranch,
-    getDefaultBranch,
     type DiffPreset,
   } from './lib/stores/diffSelection.svelte';
   import {
@@ -78,7 +77,8 @@
     repoState,
     initRepoState,
     setCurrentRepo,
-    openRepoPicker,
+    openRepo,
+    getRecentRepos,
   } from './lib/stores/repoState.svelte';
   import {
     clearResults as clearSmartDiffResults,
@@ -88,6 +88,7 @@
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
+  let showFolderPicker = $state(false);
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
@@ -177,28 +178,7 @@
     clearReferenceFiles();
     clearSmartDiffResults();
 
-    // Branch Changes uses merge-base for cleaner diffs
-    if (preset.label === 'Branch Changes') {
-      try {
-        const mergeBaseSha = await getMergeBase(
-          getDefaultBranch(),
-          'HEAD',
-          repoState.currentPath ?? undefined
-        );
-        const spec: DiffSpecType = {
-          base: { type: 'Rev', value: mergeBaseSha },
-          head: { type: 'WorkingTree' },
-        };
-        selectCustomDiff(spec, preset.label);
-      } catch (e) {
-        console.error('Failed to compute merge-base:', e);
-        diffState.error = `Failed to compute merge base: ${e}`;
-        diffState.loading = false;
-        return;
-      }
-    } else {
-      selectPreset(preset);
-    }
+    selectPreset(preset);
 
     await loadAll();
 
@@ -236,11 +216,9 @@
     if (repoState.currentPath) {
       watchRepo(repoState.currentPath);
 
-      // Load refs and detect default branch for new repo
+      // Validate repo by loading refs
       try {
-        const refs = await listRefs(repoState.currentPath);
-        const defaultBranch = detectDefaultBranch(refs);
-        setDefaultBranch(defaultBranch);
+        await listRefs(repoState.currentPath);
         // Mark repo as valid since we got refs
         setCurrentRepo(repoState.currentPath);
       } catch (e) {
@@ -301,25 +279,6 @@
     // Close the current window
     const window = getCurrentWindow();
     await window.close();
-  }
-
-  /**
-   * Detect the default branch (main, master, etc.) from available refs.
-   */
-  function detectDefaultBranch(refs: string[]): string {
-    // Filter to likely branch names (not remotes, not tags)
-    const branchNames = refs.filter((r) => inferRefType(r) === 'branch');
-
-    // Check common default branch names in order of preference
-    const candidates = ['main', 'master', 'develop', 'trunk'];
-    for (const name of candidates) {
-      if (branchNames.includes(name)) {
-        return name;
-      }
-    }
-
-    // Fallback to first branch, or 'main' if no branches
-    return branchNames[0] ?? 'main';
   }
 
   /**
@@ -404,10 +363,8 @@
    */
   async function initializeNewTab(tab: any) {
     try {
-      // Load refs and detect default branch
-      const refs = await listRefs(tab.repoPath);
-      const defaultBranch = detectDefaultBranch(refs);
-      setDefaultBranch(defaultBranch);
+      // Validate repo by loading refs
+      await listRefs(tab.repoPath);
 
       // Reset to uncommitted preset
       resetDiffSelection();
@@ -460,11 +417,20 @@
   }
 
   /**
-   * Handle new tab creation.
+   * Handle new tab creation - show the folder picker modal.
    */
-  async function handleNewTab() {
-    const repoPath = await openRepoPicker();
-    if (!repoPath) return;
+  function handleNewTab() {
+    showFolderPicker = true;
+  }
+
+  /**
+   * Handle folder selection from the picker modal.
+   */
+  async function handleFolderSelect(repoPath: string) {
+    showFolderPicker = false;
+
+    // Update repo state
+    openRepo(repoPath);
 
     // Save current tab state before creating new one
     syncGlobalToTab();
@@ -510,8 +476,7 @@
     try {
       // Determine which ref to use for loading the file
       // Use the "head" ref of the current diff
-      const headRef = diffSelection.spec.head;
-      const refName = headRef.type === 'WorkingTree' ? 'HEAD' : headRef.value;
+      const refName = gitRefName(diffSelection.spec.head);
       await addReferenceFile(refName, path, diffSelection.spec, repoState.currentPath ?? undefined);
       showFileSearch = false;
       // Select the newly added file
@@ -696,9 +661,8 @@
 </main>
 
 {#if showFileSearch}
-  {@const headRef = diffSelection.spec.head}
   <FileSearchModal
-    refName={headRef.type === 'WorkingTree' ? 'HEAD' : headRef.value}
+    refName={gitRefName(diffSelection.spec.head)}
     repoPath={repoState.currentPath ?? undefined}
     existingPaths={[
       ...diffState.files
@@ -708,6 +672,15 @@
     ]}
     onSelect={handleReferenceFileSelect}
     onClose={() => (showFileSearch = false)}
+  />
+{/if}
+
+{#if showFolderPicker}
+  <FolderPickerModal
+    recentRepos={getRecentRepos()}
+    currentPath={repoState.currentPath}
+    onSelect={handleFolderSelect}
+    onClose={() => (showFolderPicker = false)}
   />
 {/if}
 

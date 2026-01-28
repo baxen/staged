@@ -5,7 +5,6 @@
  * Persists recent repos to localStorage.
  */
 
-import { open } from '@tauri-apps/plugin-dialog';
 import { getRepoRoot } from '../services/git';
 
 // =============================================================================
@@ -137,22 +136,10 @@ export function openRepo(path: string): void {
 }
 
 /**
- * Open a directory picker and set the selected directory as current repo.
- * Returns the selected path, or null if cancelled.
+ * Get recent repos for display in the folder picker modal.
  */
-export async function openRepoPicker(): Promise<string | null> {
-  const selected = await open({
-    directory: true,
-    multiple: false,
-    title: 'Select Repository',
-  });
-
-  if (selected && typeof selected === 'string') {
-    openRepo(selected);
-    return selected;
-  }
-
-  return null;
+export function getRecentRepos(): RepoEntry[] {
+  return repoState.recentRepos;
 }
 
 /**

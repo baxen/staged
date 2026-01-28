@@ -2,6 +2,55 @@ import { invoke } from '@tauri-apps/api/core';
 import type { File } from '../types';
 
 // =============================================================================
+// Directory Browsing API
+// =============================================================================
+
+/**
+ * Entry in a directory listing.
+ */
+export interface DirEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+  isRepo: boolean;
+}
+
+/**
+ * List contents of a directory.
+ * Returns directories first (sorted), then files (sorted).
+ * Hidden files (starting with .) are excluded.
+ */
+export async function listDirectory(path: string): Promise<DirEntry[]> {
+  return invoke<DirEntry[]>('list_directory', { path });
+}
+
+/**
+ * Search for directories matching a query, recursively.
+ * Uses prefix/substring matching. Skips system folders and prioritizes dev locations.
+ * Returns up to `limit` matches sorted by relevance.
+ */
+export async function searchDirectories(
+  path: string,
+  query: string,
+  maxDepth?: number,
+  limit?: number
+): Promise<DirEntry[]> {
+  return invoke<DirEntry[]>('search_directories', {
+    path,
+    query,
+    maxDepth: maxDepth ?? 3,
+    limit: limit ?? 20,
+  });
+}
+
+/**
+ * Get the user's home directory path.
+ */
+export async function getHomeDir(): Promise<string> {
+  return invoke<string>('get_home_dir');
+}
+
+// =============================================================================
 // File Browsing API
 // =============================================================================
 
