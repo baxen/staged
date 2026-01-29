@@ -35,6 +35,7 @@
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { sendAgentPrompt } from './services/ai';
   import { agentState } from './stores/agent.svelte';
+  import { preferences } from './stores/preferences.svelte';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -648,56 +649,58 @@
         </ul>
       {/if}
 
-      <!-- Agent Chat section -->
-      <div class="section-header agent-header">
-        <div class="section-divider">
-          <span class="divider-label">AGENT</span>
-        </div>
-      </div>
-      <div class="agent-section">
-        <div class="agent-input-wrapper">
-          <input
-            type="text"
-            class="agent-input"
-            placeholder="Ask the agent..."
-            bind:value={agentState.input}
-            onkeydown={handleAgentKeydown}
-            disabled={agentState.loading}
-          />
-          <button
-            class="agent-send-btn"
-            onclick={handleAgentSubmit}
-            disabled={agentState.loading || !agentState.input.trim()}
-            title="Send to agent"
-          >
-            {#if agentState.loading}
-              <Loader2 size={14} class="spinning" />
-            {:else}
-              <Send size={14} />
-            {/if}
-          </button>
-        </div>
-        {#if agentState.error}
-          <div class="agent-error">
-            {agentState.error}
+      <!-- Agent Chat section (feature-gated) -->
+      {#if preferences.features.agentPanel}
+        <div class="section-header agent-header">
+          <div class="section-divider">
+            <span class="divider-label">AGENT</span>
           </div>
-        {/if}
-        {#if agentState.loading || agentState.response}
-          <div class="agent-response">
-            <div class="agent-response-header">
-              <Bot size={12} />
-              <span>Agent</span>
-            </div>
-            <div class="agent-response-content" class:loading={agentState.loading}>
+        </div>
+        <div class="agent-section">
+          <div class="agent-input-wrapper">
+            <input
+              type="text"
+              class="agent-input"
+              placeholder="Ask the agent..."
+              bind:value={agentState.input}
+              onkeydown={handleAgentKeydown}
+              disabled={agentState.loading}
+            />
+            <button
+              class="agent-send-btn"
+              onclick={handleAgentSubmit}
+              disabled={agentState.loading || !agentState.input.trim()}
+              title="Send to agent"
+            >
               {#if agentState.loading}
-                <Loader2 size={14} class="spinning" /> Thinking...
+                <Loader2 size={14} class="spinning" />
               {:else}
-                {agentState.response}
+                <Send size={14} />
               {/if}
-            </div>
+            </button>
           </div>
-        {/if}
-      </div>
+          {#if agentState.error}
+            <div class="agent-error">
+              {agentState.error}
+            </div>
+          {/if}
+          {#if agentState.loading || agentState.response}
+            <div class="agent-response">
+              <div class="agent-response-header">
+                <Bot size={12} />
+                <span>Agent</span>
+              </div>
+              <div class="agent-response-content" class:loading={agentState.loading}>
+                {#if agentState.loading}
+                  <Loader2 size={14} class="spinning" /> Thinking...
+                {:else}
+                  {agentState.response}
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
