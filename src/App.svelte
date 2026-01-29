@@ -45,6 +45,7 @@
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
     loadSavedSidebarWidth,
+    loadSavedFeatures,
     setSidebarWidth,
     resetSidebarWidth,
     getCustomKeyboardBindings,
@@ -524,6 +525,7 @@
     loadSavedSize();
     loadSavedSidebarPosition();
     loadSavedSidebarWidth();
+    loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     // Pre-load suggested repos (Spotlight search runs in background)

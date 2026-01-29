@@ -40,6 +40,7 @@ const SYNTAX_THEME_STORAGE_KEY = 'staged-syntax-theme';
 const SIDEBAR_POSITION_STORAGE_KEY = 'staged-sidebar-position';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'staged-sidebar-width';
 const KEYBOARD_BINDINGS_STORAGE_KEY = 'staged-keyboard-bindings';
+const FEATURES_STORAGE_KEY = 'staged-features';
 const DEFAULT_SYNTAX_THEME: SyntaxThemeName = 'laserwave';
 const DEFAULT_SIDEBAR_POSITION: SidebarPosition = 'right';
 
@@ -68,6 +69,16 @@ export interface KeyboardBinding {
 // =============================================================================
 
 /**
+ * Known feature flags with their default values.
+ * Add new flags here as the app evolves.
+ */
+export const DEFAULT_FEATURES = {
+  agentPanel: false,
+} as const;
+
+export type FeatureFlag = keyof typeof DEFAULT_FEATURES;
+
+/**
  * Preferences state object.
  * Use this directly in components - it's reactive!
  */
@@ -82,6 +93,8 @@ export const preferences = $state({
   sidebarPosition: DEFAULT_SIDEBAR_POSITION as SidebarPosition,
   /** Sidebar width in pixels */
   sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
+  /** Feature flags for experimental/optional features */
+  features: { ...DEFAULT_FEATURES } as Record<string, boolean>,
 });
 
 // =============================================================================
@@ -377,6 +390,58 @@ export function removeCustomKeyboardBinding(id: string): void {
  */
 export function resetAllKeyboardBindings(): void {
   localStorage.removeItem(KEYBOARD_BINDINGS_STORAGE_KEY);
+}
+
+// =============================================================================
+// Feature Flags
+// =============================================================================
+
+/**
+ * Check if a feature flag is enabled.
+ */
+export function isFeatureEnabled(flag: string): boolean {
+  return preferences.features[flag] ?? false;
+}
+
+/**
+ * Enable or disable a feature flag.
+ */
+export function setFeatureFlag(flag: string, enabled: boolean): void {
+  preferences.features[flag] = enabled;
+  localStorage.setItem(FEATURES_STORAGE_KEY, JSON.stringify(preferences.features));
+}
+
+/**
+ * Toggle a feature flag.
+ */
+export function toggleFeatureFlag(flag: string): void {
+  setFeatureFlag(flag, !isFeatureEnabled(flag));
+}
+
+/**
+ * Load saved feature flags from localStorage.
+ * Merges with defaults so new flags get their default values.
+ */
+export function loadSavedFeatures(): void {
+  const saved = localStorage.getItem(FEATURES_STORAGE_KEY);
+  if (saved) {
+    try {
+      const parsed = JSON.parse(saved);
+      // Merge: defaults first, then saved values override
+      preferences.features = { ...DEFAULT_FEATURES, ...parsed };
+    } catch {
+      // Invalid JSON, use defaults
+      preferences.features = { ...DEFAULT_FEATURES };
+    }
+  }
+}
+
+/**
+ * Reset all feature flags to defaults.
+ */
+export function resetFeatureFlags(): void {
+  preferences.features = { ...DEFAULT_FEATURES };
+  localStorage.removeItem(FEATURES_STORAGE_KEY);
 }
 
 // =============================================================================
