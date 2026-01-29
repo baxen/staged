@@ -3,13 +3,20 @@
   
   Provides a simple chat input for asking questions about the current diff/changeset.
   Maintains session state for multi-turn conversations.
+  Supports saving responses as artifacts for later reference.
   
   Each tab has its own AgentState, passed as a prop to ensure chat sessions are isolated.
 -->
 <script lang="ts">
-  import { Send, Bot, Loader2, ChevronDown } from 'lucide-svelte';
+  import { Send, Bot, Loader2, ChevronDown, ChevronRight, Save, FileText, X } from 'lucide-svelte';
   import { sendAgentPrompt, discoverAcpProviders, type AcpProviderInfo } from '../../services/ai';
-  import { agentGlobalState, type AcpProvider, type AgentState } from '../../stores/agent.svelte';
+  import {
+    agentGlobalState,
+    generateArtifactId,
+    type AcpProvider,
+    type AgentState,
+    type Artifact,
+  } from '../../stores/agent.svelte';
   import type { FileDiffSummary } from '../../types';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -36,6 +43,9 @@
   let { repoPath = null, files = [], selectedFile = null, agentState }: Props = $props();
 
   let showProviderDropdown = $state(false);
+  let responseExpanded = $state(true);
+  let expandedArtifactId = $state<string | null>(null);
+  let confirmingDeleteId = $state<string | null>(null);
 
   /** Type guard to validate provider ID */
   function isValidProvider(id: string): id is AcpProvider {
@@ -135,6 +145,7 @@
     tabState.loading = true;
     tabState.error = '';
     tabState.response = '';
+    responseExpanded = false; // Collapse while loading
     const inputToSend = tabState.input;
     tabState.input = '';
 
@@ -150,8 +161,10 @@
       // Write response to the captured tab state, not the current prop
       tabState.response = result.response;
       tabState.sessionId = result.sessionId;
+      responseExpanded = true; // Expand when done
     } catch (e) {
       tabState.error = e instanceof Error ? e.message : String(e);
+      responseExpanded = true; // Show error expanded
     } finally {
       tabState.loading = false;
     }
@@ -165,6 +178,54 @@
       event.preventDefault();
       handleSubmit();
     }
+  }
+
+  /**
+   * Save the current response as an artifact.
+   */
+  function saveAsArtifact() {
+    if (!agentState.response) return;
+
+    // Generate title from first line of response (strip markdown)
+    const firstLine = agentState.response.split('\n')[0] || 'Untitled';
+    const title = firstLine.replace(/^#+\s*/, '').slice(0, 50);
+
+    const artifact: Artifact = {
+      id: generateArtifactId(),
+      title,
+      content: agentState.response,
+      createdAt: new Date().toISOString(),
+    };
+
+    agentState.artifacts.push(artifact);
+    agentState.response = ''; // Clear response after saving
+  }
+
+  /**
+   * Delete an artifact.
+   */
+  function deleteArtifact(id: string) {
+    const index = agentState.artifacts.findIndex((a) => a.id === id);
+    if (index !== -1) {
+      agentState.artifacts.splice(index, 1);
+      if (expandedArtifactId === id) {
+        expandedArtifactId = null;
+      }
+    }
+  }
+
+  /**
+   * Toggle artifact expansion.
+   */
+  function toggleArtifact(id: string) {
+    expandedArtifactId = expandedArtifactId === id ? null : id;
+  }
+
+  /**
+   * Render artifact content as HTML.
+   */
+  function renderArtifactContent(content: string): string {
+    return DOMPurify.sanitize(marked.parse(content) as string);
   }
 
   let textareaEl: HTMLTextAreaElement | null = $state(null);
@@ -192,21 +253,121 @@
         {agentState.error}
       </div>
     {/if}
+
+    <!-- Saved artifacts list -->
+    {#each agentState.artifacts as artifact (artifact.id)}
+      <div class="artifact-item">
+        <div
+          class="artifact-header"
+          role="button"
+          tabindex="0"
+          onclick={() => toggleArtifact(artifact.id)}
+          onkeydown={(e) => e.key === 'Enter' && toggleArtifact(artifact.id)}
+        >
+          <span class="artifact-chevron">
+            {#if expandedArtifactId === artifact.id}
+              <ChevronDown size={12} />
+            {:else}
+              <ChevronRight size={12} />
+            {/if}
+          </span>
+          <FileText size={12} />
+          <span class="artifact-title">{artifact.title}</span>
+          {#if confirmingDeleteId === artifact.id}
+            <div class="delete-confirm">
+              <button
+                class="delete-confirm-btn"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  deleteArtifact(artifact.id);
+                  confirmingDeleteId = null;
+                }}
+                title="Confirm delete"
+              >
+                Delete
+              </button>
+              <button
+                class="delete-cancel-btn"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  confirmingDeleteId = null;
+                }}
+                title="Cancel"
+              >
+                Cancel
+              </button>
+            </div>
+          {:else}
+            <button
+              class="artifact-delete"
+              onclick={(e) => {
+                e.stopPropagation();
+                confirmingDeleteId = artifact.id;
+              }}
+              title="Delete artifact"
+            >
+              <X size={12} />
+            </button>
+          {/if}
+        </div>
+        {#if expandedArtifactId === artifact.id}
+          <div class="artifact-content markdown-content">
+            {@html renderArtifactContent(artifact.content)}
+          </div>
+        {/if}
+      </div>
+    {/each}
+
+    <!-- Current response area -->
     {#if agentState.loading || agentState.response}
       <div class="agent-response">
-        <div class="agent-response-header">
+        <div
+          class="agent-response-header"
+          role="button"
+          tabindex="0"
+          onclick={() => !agentState.loading && (responseExpanded = !responseExpanded)}
+          onkeydown={(e) =>
+            e.key === 'Enter' && !agentState.loading && (responseExpanded = !responseExpanded)}
+          class:disabled={agentState.loading}
+        >
+          <span class="response-chevron">
+            {#if agentState.loading}
+              <Loader2 size={12} class="spinning" />
+            {:else if responseExpanded}
+              <ChevronDown size={12} />
+            {:else}
+              <ChevronRight size={12} />
+            {/if}
+          </span>
           <Bot size={12} />
-          <span>Agent</span>
+          <span class="response-label">
+            {#if agentState.loading}
+              Working on it...
+            {:else}
+              Response
+            {/if}
+          </span>
+          {#if !agentState.loading && agentState.response}
+            <button
+              class="save-btn"
+              onclick={(e) => {
+                e.stopPropagation();
+                saveAsArtifact();
+              }}
+              title="Save as artifact"
+            >
+              <Save size={12} />
+              <span>Save</span>
+            </button>
+          {/if}
         </div>
-        <div class="agent-response-content" class:loading={agentState.loading}>
-          {#if agentState.loading}
-            <Loader2 size={14} class="spinning" /> Thinking...
-          {:else}
+        {#if responseExpanded && !agentState.loading}
+          <div class="agent-response-content">
             <div class="markdown-content">
               {@html renderedResponse}
             </div>
-          {/if}
-        </div>
+          </div>
+        {/if}
       </div>
     {/if}
   </div>
@@ -431,7 +592,8 @@
     cursor: not-allowed;
   }
 
-  .agent-send-btn :global(.spinning) {
+  .agent-send-btn :global(.spinning),
+  .agent-response-header :global(.spinning) {
     animation: spin 1s linear infinite;
   }
 
@@ -454,6 +616,125 @@
     word-break: break-word;
   }
 
+  /* Artifact items */
+  .artifact-item {
+    margin-bottom: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .artifact-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 8px 10px;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: var(--size-sm);
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .artifact-header:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .artifact-chevron {
+    display: flex;
+    align-items: center;
+    color: var(--text-muted);
+  }
+
+  .artifact-title {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .artifact-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 0.1s,
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .artifact-header:hover .artifact-delete {
+    opacity: 1;
+  }
+
+  .artifact-delete:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  /* Delete confirmation inline */
+  .delete-confirm {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .delete-confirm-btn {
+    padding: 2px 8px;
+    background: var(--ui-danger);
+    border: none;
+    border-radius: 3px;
+    color: white;
+    font-size: var(--size-xs);
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .delete-confirm-btn:hover {
+    background: var(--ui-danger-hover, #c53030);
+  }
+
+  .delete-cancel-btn {
+    padding: 2px 8px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .delete-cancel-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .artifact-content {
+    padding: 10px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: var(--size-sm);
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* Agent response */
   .agent-response {
     margin-bottom: 8px;
     background: var(--bg-primary);
@@ -466,12 +747,59 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 10px;
+    width: 100%;
+    padding: 8px 10px;
     background: var(--bg-hover);
+    border: none;
     border-bottom: 1px solid var(--border-subtle);
     color: var(--text-muted);
     font-size: var(--size-xs);
     font-weight: 500;
+    font-family: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .agent-response-header.disabled {
+    cursor: default;
+  }
+
+  .agent-response-header:not(.disabled):hover {
+    background-color: var(--bg-primary);
+  }
+
+  .response-chevron {
+    display: flex;
+    align-items: center;
+  }
+
+  .response-label {
+    flex: 1;
+  }
+
+  .save-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      border-color 0.1s,
+      color 0.1s;
+  }
+
+  .save-btn:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--text-accent);
+    color: var(--text-accent);
   }
 
   .agent-response-content {
@@ -481,14 +809,6 @@
     word-break: break-word;
     max-height: 200px;
     overflow-y: auto;
-  }
-
-  .agent-response-content.loading {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-muted);
-    font-style: italic;
   }
 
   /* Markdown content styles */
