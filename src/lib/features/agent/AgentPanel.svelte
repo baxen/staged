@@ -19,6 +19,8 @@
     FileText,
     X,
     Trash2,
+    Circle,
+    CheckCircle2,
   } from 'lucide-svelte';
   import { sendAgentPrompt, discoverAcpProviders, type AcpProviderInfo } from '../../services/ai';
   import {
@@ -68,9 +70,14 @@
 
   let showProviderDropdown = $state(false);
   let responseExpanded = $state(true);
-  let expandedArtifactId = $state<string | null>(null);
   let confirmingDeleteId = $state<string | null>(null);
   let artifactsLoaded = $state(false);
+
+  // Modal state for viewing artifact content
+  let viewingArtifact = $state<Artifact | null>(null);
+
+  // Track which artifacts are selected for context in the next session
+  let selectedArtifactIds = $state<Set<string>>(new Set());
 
   /** Type guard to validate provider ID */
   function isValidProvider(id: string): id is AcpProvider {
@@ -93,6 +100,8 @@
       // Replace the artifacts array with loaded ones
       agentState.artifacts.length = 0;
       agentState.artifacts.push(...artifacts);
+      // Default all loaded artifacts to selected
+      selectedArtifactIds = new Set(artifacts.map((a) => a.id));
       artifactsLoaded = true;
     } catch (e) {
       console.error('Failed to load artifacts:', e);
@@ -176,6 +185,7 @@
   /**
    * Build context-aware prompt with file information.
    * For follow-up messages, includes the original task to keep the agent focused.
+   * For new sessions, includes selected artifacts as context.
    */
   function buildPromptWithContext(userPrompt: string, isNewSession: boolean): string {
     let context = '';
@@ -190,6 +200,18 @@
     // Always include current file context
     if (selectedFile) {
       context += `[Viewing: ${selectedFile}]\n`;
+    }
+
+    // For new sessions, include selected artifacts as context
+    if (isNewSession && selectedArtifactIds.size > 0) {
+      const selectedArtifacts = agentState.artifacts.filter((a) => selectedArtifactIds.has(a.id));
+      if (selectedArtifacts.length > 0) {
+        context += '\n[Reference artifacts:]\n';
+        for (const artifact of selectedArtifacts) {
+          context += `\n--- ${artifact.title} ---\n${artifact.content}\n`;
+        }
+        context += '\n';
+      }
     }
 
     // For follow-up messages, remind the agent of the original task
@@ -275,6 +297,9 @@
 
     // Add to local state immediately for responsiveness
     agentState.artifacts.push(artifact);
+    // Default new artifacts to selected
+    selectedArtifactIds.add(artifact.id);
+    selectedArtifactIds = new Set(selectedArtifactIds); // Trigger reactivity
     agentState.response = ''; // Clear response after saving (session stays alive)
 
     // Persist to database (fire-and-forget, errors logged)
@@ -303,8 +328,14 @@
     const index = agentState.artifacts.findIndex((a) => a.id === id);
     if (index !== -1) {
       agentState.artifacts.splice(index, 1);
-      if (expandedArtifactId === id) {
-        expandedArtifactId = null;
+      // Close modal if viewing this artifact
+      if (viewingArtifact?.id === id) {
+        viewingArtifact = null;
+      }
+      // Remove from selection if selected
+      if (selectedArtifactIds.has(id)) {
+        selectedArtifactIds.delete(id);
+        selectedArtifactIds = new Set(selectedArtifactIds); // Trigger reactivity
       }
 
       // Delete from database (fire-and-forget, errors logged)
@@ -317,10 +348,38 @@
   }
 
   /**
-   * Toggle artifact expansion.
+   * Toggle artifact selection for context inclusion.
    */
-  function toggleArtifact(id: string) {
-    expandedArtifactId = expandedArtifactId === id ? null : id;
+  function toggleArtifactSelection(id: string) {
+    if (selectedArtifactIds.has(id)) {
+      selectedArtifactIds.delete(id);
+    } else {
+      selectedArtifactIds.add(id);
+    }
+    selectedArtifactIds = new Set(selectedArtifactIds); // Trigger reactivity
+  }
+
+  /**
+   * Open artifact viewer modal.
+   */
+  function openArtifactViewer(artifact: Artifact) {
+    viewingArtifact = artifact;
+  }
+
+  /**
+   * Close artifact viewer modal.
+   */
+  function closeArtifactViewer() {
+    viewingArtifact = null;
+  }
+
+  /**
+   * Handle keydown on modal backdrop for Escape to close.
+   */
+  function handleModalKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      closeArtifactViewer();
+    }
   }
 
   /**
@@ -364,16 +423,24 @@
           class="artifact-header"
           role="button"
           tabindex="0"
-          onclick={() => toggleArtifact(artifact.id)}
-          onkeydown={(e) => e.key === 'Enter' && toggleArtifact(artifact.id)}
+          onclick={() => openArtifactViewer(artifact)}
+          onkeydown={(e) => e.key === 'Enter' && openArtifactViewer(artifact)}
         >
-          <span class="artifact-chevron">
-            {#if expandedArtifactId === artifact.id}
-              <ChevronDown size={12} />
+          <button
+            class="artifact-select-btn"
+            class:selected={selectedArtifactIds.has(artifact.id)}
+            onclick={(e) => {
+              e.stopPropagation();
+              toggleArtifactSelection(artifact.id);
+            }}
+            title="Include in next chat context"
+          >
+            {#if selectedArtifactIds.has(artifact.id)}
+              <CheckCircle2 size={14} />
             {:else}
-              <ChevronRight size={12} />
+              <Circle size={14} />
             {/if}
-          </span>
+          </button>
           <FileText size={12} />
           <span class="artifact-title">{artifact.title}</span>
           {#if confirmingDeleteId === artifact.id}
@@ -413,11 +480,6 @@
             </button>
           {/if}
         </div>
-        {#if expandedArtifactId === artifact.id}
-          <div class="artifact-content markdown-content">
-            {@html renderArtifactContent(artifact.content)}
-          </div>
-        {/if}
       </div>
     {/each}
   </div>
@@ -546,6 +608,37 @@
     </div>
   </div>
 </div>
+
+<!-- Artifact viewer modal -->
+{#if viewingArtifact}
+  <div
+    class="artifact-modal-backdrop"
+    role="button"
+    tabindex="0"
+    onclick={closeArtifactViewer}
+    onkeydown={handleModalKeydown}
+  >
+    <div
+      class="artifact-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="artifact-modal-title"
+      tabindex="-1"
+      onclick={(e) => e.stopPropagation()}
+      onkeydown={(e) => e.stopPropagation()}
+    >
+      <div class="artifact-modal-header">
+        <h2 id="artifact-modal-title" class="artifact-modal-title">{viewingArtifact.title}</h2>
+        <button class="artifact-modal-close" onclick={closeArtifactViewer} title="Close">
+          <X size={16} />
+        </button>
+      </div>
+      <div class="artifact-modal-content markdown-content">
+        {@html renderArtifactContent(viewingArtifact.content)}
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .agent-section {
@@ -763,10 +856,27 @@
     background-color: var(--bg-hover);
   }
 
-  .artifact-chevron {
+  .artifact-select-btn {
     display: flex;
     align-items: center;
+    justify-content: center;
+    padding: 4px;
+    margin: -4px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-faint);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: color 0.1s;
+  }
+
+  .artifact-select-btn:hover {
     color: var(--text-muted);
+  }
+
+  .artifact-select-btn.selected {
+    color: var(--text-accent);
   }
 
   .artifact-title {
@@ -842,14 +952,6 @@
   .delete-cancel-btn:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
-  }
-
-  .artifact-content {
-    padding: 10px;
-    border-top: 1px solid var(--border-subtle);
-    font-size: var(--size-sm);
-    max-height: 200px;
-    overflow-y: auto;
   }
 
   /* Agent response */
@@ -1052,5 +1154,79 @@
     margin: 0.75em 0;
     border: none;
     border-top: 1px solid var(--border-subtle);
+  }
+
+  /* Artifact modal */
+  .artifact-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 40px;
+  }
+
+  .artifact-modal {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-muted);
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    max-width: 700px;
+    width: 100%;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .artifact-modal-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+  }
+
+  .artifact-modal-title {
+    flex: 1;
+    margin: 0;
+    font-size: var(--size-base);
+    font-weight: 600;
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .artifact-modal-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    background: none;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .artifact-modal-close:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .artifact-modal-content {
+    flex: 1;
+    padding: 20px;
+    overflow-y: auto;
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+    line-height: 1.6;
   }
 </style>
