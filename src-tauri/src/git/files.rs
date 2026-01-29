@@ -212,7 +212,7 @@ mod tests {
 
         // No match
         assert!(fuzzy_match("src/main.rs", "xyz").is_none());
-        assert!(fuzzy_match("src/main.rs", "srm").is_none()); // chars not in order
+        assert!(fuzzy_match("src/main.rs", "nim").is_none()); // 'n' before 'i' before 'm' - but in path it's m-a-i-n
     }
 
     #[test]

@@ -31,6 +31,10 @@ pub struct SmartDiffAnnotation {
     /// Unique identifier for this annotation
     pub id: String,
 
+    /// Description of the old state (for before_span annotations)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub before_description: Option<String>,
+
     /// File path this annotation belongs to
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file_path: Option<String>,

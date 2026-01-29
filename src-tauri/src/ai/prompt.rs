@@ -245,6 +245,8 @@ Respond with ONLY valid JSON matching this structure (no markdown code fences, n
       {
         "id": "1",
         "file_path": "path/to/file.rs",
+        "before_span": {"start": 8, "end": 15},
+        "before_description": "Previously handled errors by panicking",
         "after_span": {"start": 10, "end": 20},
         "content": "Your commentary on this section",
         "category": "explanation"
@@ -263,6 +265,7 @@ Rules:
   - "id": Unique across ALL annotations (use "1", "2", "3", etc.)
   - "file_path": Must match the key exactly
   - "before_span": Line range in BEFORE content (0-indexed, exclusive end). Omit if only about new code.
+  - "before_description": When before_span is provided, describe what the old code was doing (1 sentence). Required if before_span is set.
   - "after_span": Line range in AFTER content (0-indexed, exclusive end). Omit if only about deleted code.
   - "content": Your commentary (1-3 sentences)
   - "category": One of "explanation", "warning", "suggestion", "context""#;
