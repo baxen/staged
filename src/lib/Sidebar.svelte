@@ -34,6 +34,7 @@
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { sendAgentPrompt } from './services/ai';
+  import { agentState } from './stores/agent.svelte';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -83,13 +84,6 @@
 
   let collapsedDirs = $state(new Set<string>());
   let treeView = $state(false);
-
-  // Agent chat state
-  let agentInput = $state('');
-  let agentResponse = $state('');
-  let agentLoading = $state(false);
-  let agentError = $state('');
-  let agentSessionId = $state<string | null>(null);
 
   /**
    * Get the primary path for a file summary.
@@ -294,24 +288,34 @@
     onFileSelect?.(paths[prevIndex]);
   }
 
+  // Build context-aware prompt with file information
+  function buildPromptWithContext(userPrompt: string): string {
+    const fileContext = selectedFile
+      ? `[Context: User is viewing diff of file "${selectedFile}"]\n\n`
+      : '[Context: No file currently selected]\n\n';
+    return fileContext + userPrompt;
+  }
+
   // Send prompt to AI agent
   async function handleAgentSubmit() {
-    const prompt = agentInput.trim();
-    if (!prompt || agentLoading) return;
+    const userPrompt = agentState.input.trim();
+    if (!userPrompt || agentState.loading) return;
 
-    agentLoading = true;
-    agentError = '';
-    agentResponse = '';
+    agentState.loading = true;
+    agentState.error = '';
+    agentState.response = '';
+    const inputToSend = agentState.input;
+    agentState.input = '';
 
     try {
-      const result = await sendAgentPrompt(repoPath, prompt, agentSessionId);
-      agentResponse = result.response;
-      agentSessionId = result.sessionId; // Store for session continuity
-      agentInput = ''; // Clear input on success
+      const promptWithContext = buildPromptWithContext(inputToSend);
+      const result = await sendAgentPrompt(repoPath, promptWithContext, agentState.sessionId);
+      agentState.response = result.response;
+      agentState.sessionId = result.sessionId;
     } catch (e) {
-      agentError = e instanceof Error ? e.message : String(e);
+      agentState.error = e instanceof Error ? e.message : String(e);
     } finally {
-      agentLoading = false;
+      agentState.loading = false;
     }
   }
 
@@ -644,36 +648,40 @@
             type="text"
             class="agent-input"
             placeholder="Ask the agent..."
-            bind:value={agentInput}
+            bind:value={agentState.input}
             onkeydown={handleAgentKeydown}
-            disabled={agentLoading}
+            disabled={agentState.loading}
           />
           <button
             class="agent-send-btn"
             onclick={handleAgentSubmit}
-            disabled={agentLoading || !agentInput.trim()}
+            disabled={agentState.loading || !agentState.input.trim()}
             title="Send to agent"
           >
-            {#if agentLoading}
+            {#if agentState.loading}
               <Loader2 size={14} class="spinning" />
             {:else}
               <Send size={14} />
             {/if}
           </button>
         </div>
-        {#if agentError}
+        {#if agentState.error}
           <div class="agent-error">
-            {agentError}
+            {agentState.error}
           </div>
         {/if}
-        {#if agentResponse}
+        {#if agentState.loading || agentState.response}
           <div class="agent-response">
             <div class="agent-response-header">
               <Bot size={12} />
               <span>Agent</span>
             </div>
-            <div class="agent-response-content">
-              {agentResponse}
+            <div class="agent-response-content" class:loading={agentState.loading}>
+              {#if agentState.loading}
+                <Loader2 size={14} class="spinning" /> Thinking...
+              {:else}
+                {agentState.response}
+              {/if}
             </div>
           </div>
         {/if}
@@ -1198,5 +1206,13 @@
     word-break: break-word;
     max-height: 200px;
     overflow-y: auto;
+  }
+
+  .agent-response-content.loading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    font-style: italic;
   }
 </style>

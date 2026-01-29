@@ -381,6 +381,10 @@ async fn run_acp_session_inner(
         session_response.session_id
     };
 
+    // Clear any accumulated content from loading session history
+    // (load_session may replay old messages as AgentMessageChunk notifications)
+    collector.accumulated_content.lock().await.clear();
+
     // Send the prompt
     let prompt_request = PromptRequest::new(
         session_id.clone(),
