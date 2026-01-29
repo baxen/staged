@@ -140,7 +140,15 @@ pub fn init_store(app_handle: &AppHandle) -> Result<()> {
         .app_data_dir()
         .map_err(|e| ReviewError::new(format!("Cannot get app data dir: {}", e)))?;
 
-    let db_path = app_data_dir.join("reviews.db");
+    let db_path = app_data_dir.join("staged.db");
+
+    // Migrate from old database name if needed
+    let old_db_path = app_data_dir.join("reviews.db");
+    if old_db_path.exists() && !db_path.exists() {
+        if let Err(e) = std::fs::rename(&old_db_path, &db_path) {
+            log::warn!("Failed to migrate reviews.db to staged.db: {}", e);
+        }
+    }
 
     STORE.get_or_init(|| ReviewStore::open(db_path).map_err(|e| e.0));
 
