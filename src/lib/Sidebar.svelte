@@ -289,11 +289,22 @@
   }
 
   // Build context-aware prompt with file information
-  function buildPromptWithContext(userPrompt: string): string {
-    const fileContext = selectedFile
-      ? `[Context: User is viewing diff of file "${selectedFile}"]\n\n`
-      : '[Context: No file currently selected]\n\n';
-    return fileContext + userPrompt;
+  function buildPromptWithContext(userPrompt: string, isNewSession: boolean): string {
+    let context = '';
+
+    // For new sessions, include changeset overview (up to 5 files)
+    if (isNewSession && files.length > 0) {
+      const fileNames = files.slice(0, 5).map((f) => getFilePath(f));
+      const moreCount = files.length > 5 ? ` (+${files.length - 5} more)` : '';
+      context += `[Changeset: ${fileNames.join(', ')}${moreCount}]\n`;
+    }
+
+    // Always include current file context
+    if (selectedFile) {
+      context += `[Viewing: ${selectedFile}]\n`;
+    }
+
+    return context ? context + '\n' + userPrompt : userPrompt;
   }
 
   // Send prompt to AI agent
@@ -308,7 +319,8 @@
     agentState.input = '';
 
     try {
-      const promptWithContext = buildPromptWithContext(inputToSend);
+      const isNewSession = !agentState.sessionId;
+      const promptWithContext = buildPromptWithContext(inputToSend, isNewSession);
       const result = await sendAgentPrompt(repoPath, promptWithContext, agentState.sessionId);
       agentState.response = result.response;
       agentState.sessionId = result.sessionId;
