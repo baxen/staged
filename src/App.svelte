@@ -44,6 +44,7 @@
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
     loadSavedSidebarWidth,
+    loadSavedFeatures,
     setSidebarWidth,
     resetSidebarWidth,
     getCustomKeyboardBindings,
@@ -507,6 +508,7 @@
     loadSavedSize();
     loadSavedSidebarPosition();
     loadSavedSidebarWidth();
+    loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
     // Apply custom keyboard bindings after a short delay to let shortcuts register
