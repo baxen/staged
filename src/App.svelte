@@ -724,6 +724,7 @@
           onAddReferenceFile={() => (showFileSearch = true)}
           onRemoveReferenceFile={handleRemoveReferenceFile}
           repoPath={repoState.currentPath}
+          spec={diffSelection.spec}
           agentState={getActiveTab()?.agentState}
         />
       </aside>

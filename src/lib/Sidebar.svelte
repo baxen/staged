@@ -32,7 +32,7 @@
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { preferences } from './stores/preferences.svelte';
   import AgentPanel from './features/agent/AgentPanel.svelte';
-  import type { FileDiffSummary } from './types';
+  import type { DiffSpec, FileDiffSummary } from './types';
   import type { AgentState } from './stores/agent.svelte';
 
   interface FileEntry {
@@ -67,6 +67,8 @@
     onRemoveReferenceFile?: (path: string) => void;
     /** Repository path for AI agent */
     repoPath?: string | null;
+    /** Current diff spec for artifact persistence */
+    spec?: DiffSpec | null;
     /** Agent state for this tab's chat session */
     agentState?: AgentState | null;
   }
@@ -80,6 +82,7 @@
     onAddReferenceFile,
     onRemoveReferenceFile,
     repoPath = null,
+    spec = null,
     agentState = null,
   }: Props = $props();
 
@@ -596,16 +599,20 @@
           {@render commentList()}
         </ul>
       {/if}
+
+      <!-- Agent Chat section (feature-gated) -->
+      {#if preferences.features.agentPanel && agentState}
+        <div class="section-header agent-header">
+          <div class="section-divider">
+            <span class="divider-label">AGENT</span>
+          </div>
+        </div>
+      {/if}
     </div>
 
-    <!-- Agent Chat section (feature-gated) - outside file-list for flex layout -->
+    <!-- Agent Panel outside file-list for flex layout (takes remaining space) -->
     {#if preferences.features.agentPanel && agentState}
-      <div class="section-header agent-header">
-        <div class="section-divider">
-          <span class="divider-label">AGENT</span>
-        </div>
-      </div>
-      <AgentPanel {repoPath} {files} {selectedFile} {agentState} />
+      <AgentPanel {repoPath} {spec} {files} {selectedFile} {agentState} />
     {/if}
   {/if}
 </div>
@@ -1005,8 +1012,8 @@
     color: var(--text-primary);
   }
 
-  /* Agent section header */
+  /* Agent section header - inside file-list, no extra margin needed */
   .agent-header {
-    margin-top: 8px;
+    margin-bottom: 0;
   }
 </style>

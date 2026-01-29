@@ -93,3 +93,42 @@ export async function removeReferenceFilePath(
 ): Promise<void> {
   return invoke('remove_reference_file', { repoPath: repoPath ?? null, spec, path });
 }
+
+// =============================================================================
+// Artifact Functions
+// =============================================================================
+
+/**
+ * A saved artifact from an agent conversation.
+ */
+export interface Artifact {
+  id: string;
+  title: string;
+  content: string;
+  createdAt: string;
+}
+
+/**
+ * Save an artifact to the database.
+ */
+export async function saveArtifact(
+  spec: DiffSpec,
+  artifact: Artifact,
+  repoPath?: string
+): Promise<void> {
+  return invoke('save_artifact', { repoPath: repoPath ?? null, spec, artifact });
+}
+
+/**
+ * Get all artifacts for a diff.
+ */
+export async function getArtifacts(spec: DiffSpec, repoPath?: string): Promise<Artifact[]> {
+  return invoke<Artifact[]>('get_artifacts', { repoPath: repoPath ?? null, spec });
+}
+
+/**
+ * Delete an artifact by ID.
+ */
+export async function deleteArtifactFromDb(artifactId: string): Promise<void> {
+  return invoke('delete_artifact', { artifactId });
+}

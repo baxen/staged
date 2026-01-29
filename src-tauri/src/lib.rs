@@ -767,6 +767,41 @@ fn remove_reference_file(
 }
 
 // =============================================================================
+// Artifact Commands
+// =============================================================================
+
+use review::Artifact;
+
+/// Save an artifact to the database.
+#[tauri::command(rename_all = "camelCase")]
+fn save_artifact(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    artifact: Artifact,
+) -> Result<(), String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.save_artifact(&id, &artifact).map_err(|e| e.0)
+}
+
+/// Get all artifacts for a diff.
+#[tauri::command(rename_all = "camelCase")]
+fn get_artifacts(repo_path: Option<String>, spec: DiffSpec) -> Result<Vec<Artifact>, String> {
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+    store.get_artifacts(&id).map_err(|e| e.0)
+}
+
+/// Delete an artifact by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_artifact(artifact_id: String) -> Result<(), String> {
+    let store = review::get_store().map_err(|e| e.0)?;
+    store.delete_artifact(&artifact_id).map_err(|e| e.0)
+}
+
+// =============================================================================
 // Theme Commands
 // =============================================================================
 
@@ -1204,6 +1239,10 @@ pub fn run() {
             clear_review,
             add_reference_file,
             remove_reference_file,
+            // Artifact commands
+            save_artifact,
+            get_artifacts,
+            delete_artifact,
             // Theme commands
             get_custom_themes,
             read_custom_theme,
