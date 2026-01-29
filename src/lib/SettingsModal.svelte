@@ -6,13 +6,24 @@
   2. Keyboard - Shortcut customization
 -->
 <script lang="ts">
-  import { X, Settings, PanelLeft, PanelRight, Keyboard, RotateCcw } from 'lucide-svelte';
+  import {
+    X,
+    Settings,
+    PanelLeft,
+    PanelRight,
+    Keyboard,
+    RotateCcw,
+    FlaskConical,
+  } from 'lucide-svelte';
   import {
     preferences,
     toggleSidebarPosition,
     saveCustomKeyboardBinding,
     removeCustomKeyboardBinding,
     resetAllKeyboardBindings,
+    DEFAULT_FEATURES,
+    setFeatureFlag,
+    resetFeatureFlags,
     type SidebarPosition,
   } from './stores/preferences.svelte';
   import {
@@ -34,8 +45,54 @@
   let { onClose }: Props = $props();
 
   // Active tab
-  type Tab = 'layout' | 'keyboard';
+  type Tab = 'layout' | 'keyboard' | 'features';
   let activeTab = $state<Tab>('layout');
+
+  // Feature flag metadata for display
+  const featureMeta: Record<string, { label: string; description: string }> = {
+    agentPanel: {
+      label: 'Agent Panel',
+      description: 'Show AI agent panel for code assistance',
+    },
+  };
+
+  // Get list of all feature flags with their current state
+  function getFeatureFlags(): Array<{
+    id: string;
+    label: string;
+    description: string;
+    enabled: boolean;
+  }> {
+    const flags: Array<{ id: string; label: string; description: string; enabled: boolean }> = [];
+
+    // Include all known flags from DEFAULT_FEATURES
+    for (const [id, defaultValue] of Object.entries(DEFAULT_FEATURES)) {
+      const meta = featureMeta[id] || { label: id, description: '' };
+      flags.push({
+        id,
+        label: meta.label,
+        description: meta.description,
+        enabled: preferences.features[id] ?? defaultValue,
+      });
+    }
+
+    // Also include any flags that are set but not in DEFAULT_FEATURES (for flexibility)
+    for (const [id, enabled] of Object.entries(preferences.features)) {
+      if (!(id in DEFAULT_FEATURES)) {
+        const meta = featureMeta[id] || { label: id, description: '' };
+        flags.push({
+          id,
+          label: meta.label,
+          description: meta.description,
+          enabled,
+        });
+      }
+    }
+
+    return flags;
+  }
+
+  let featureFlags = $derived(getFeatureFlags());
 
   // Keyboard rebinding state
   let editingShortcutId = $state<string | null>(null);
@@ -272,6 +329,14 @@
           <Keyboard size={14} />
           Keyboard
         </button>
+        <button
+          class="tab"
+          class:active={activeTab === 'features'}
+          onclick={() => (activeTab = 'features')}
+        >
+          <FlaskConical size={14} />
+          Features
+        </button>
       </div>
 
       <!-- Layout Tab -->
@@ -368,6 +433,52 @@
               </div>
             {/each}
           </div>
+        </div>
+      {/if}
+
+      <!-- Features Tab -->
+      {#if activeTab === 'features'}
+        <div class="tab-content features-tab">
+          {#if featureFlags.length === 0}
+            <div class="empty-state">
+              <FlaskConical size={24} />
+              <p>No feature flags available yet.</p>
+              <span class="empty-hint"
+                >Feature flags will appear here as they're added to the app.</span
+              >
+            </div>
+          {:else}
+            <div class="features-header">
+              <span class="features-hint">Enable or disable experimental features</span>
+              <button class="reset-all-btn" onclick={resetFeatureFlags}>
+                <RotateCcw size={12} />
+                Reset All
+              </button>
+            </div>
+
+            <div class="features-list">
+              {#each featureFlags as flag}
+                <div class="feature-row">
+                  <div class="setting-info">
+                    <div class="setting-label">{flag.label}</div>
+                    {#if flag.description}
+                      <div class="setting-description">{flag.description}</div>
+                    {/if}
+                  </div>
+                  <button
+                    class="toggle-switch"
+                    class:active={flag.enabled}
+                    onclick={() => setFeatureFlag(flag.id, !flag.enabled)}
+                    role="switch"
+                    aria-checked={flag.enabled}
+                    aria-label="Toggle {flag.label}"
+                  >
+                    <span class="toggle-knob"></span>
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
         </div>
       {/if}
     </div>
@@ -740,5 +851,96 @@
   .action-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* Features Tab */
+  .features-tab {
+    padding: 12px 20px 20px;
+  }
+
+  .features-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .features-hint {
+    font-size: var(--size-xs);
+    color: var(--text-faint);
+  }
+
+  .features-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .feature-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border-radius: 8px;
+  }
+
+  .toggle-switch {
+    position: relative;
+    width: 44px;
+    height: 24px;
+    background: var(--border-muted);
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+  }
+
+  .toggle-switch.active {
+    background: var(--ui-accent);
+  }
+
+  .toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+
+  .toggle-switch.active .toggle-knob {
+    transform: translateX(20px);
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+    color: var(--text-muted);
+    text-align: center;
+  }
+
+  .empty-state :global(svg) {
+    color: var(--text-faint);
+    margin-bottom: 12px;
+  }
+
+  .empty-state p {
+    margin: 0 0 4px 0;
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+  }
+
+  .empty-hint {
+    font-size: var(--size-xs);
+    color: var(--text-faint);
   }
 </style>

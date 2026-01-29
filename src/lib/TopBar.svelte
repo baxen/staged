@@ -245,9 +245,21 @@
       },
     });
 
+    const unregisterSettings = registerShortcut({
+      id: 'open-settings',
+      keys: [','],
+      modifiers: { meta: true },
+      description: 'Open settings',
+      category: 'view',
+      handler: () => {
+        showSettingsModal = !showSettingsModal;
+      },
+    });
+
     return () => {
       unregisterCopy();
       unregisterTheme();
+      unregisterSettings();
     };
   });
 </script>

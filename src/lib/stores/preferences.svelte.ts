@@ -73,9 +73,7 @@ export interface KeyboardBinding {
  * Add new flags here as the app evolves.
  */
 export const DEFAULT_FEATURES = {
-  // Example flags (add real ones as needed):
-  // experimentalSmartDiff: false,
-  // showDebugInfo: false,
+  agentPanel: false,
 } as const;
 
 export type FeatureFlag = keyof typeof DEFAULT_FEATURES;
