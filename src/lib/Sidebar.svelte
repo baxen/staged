@@ -33,6 +33,7 @@
   import { preferences } from './stores/preferences.svelte';
   import AgentPanel from './features/agent/AgentPanel.svelte';
   import type { FileDiffSummary } from './types';
+  import type { AgentState } from './stores/agent.svelte';
 
   interface FileEntry {
     path: string;
@@ -66,6 +67,8 @@
     onRemoveReferenceFile?: (path: string) => void;
     /** Repository path for AI agent */
     repoPath?: string | null;
+    /** Agent state for this tab's chat session */
+    agentState?: AgentState | null;
   }
 
   let {
@@ -77,6 +80,7 @@
     onAddReferenceFile,
     onRemoveReferenceFile,
     repoPath = null,
+    agentState = null,
   }: Props = $props();
 
   let collapsedDirs = $state(new Set<string>());
@@ -595,13 +599,13 @@
     </div>
 
     <!-- Agent Chat section (feature-gated) - outside file-list for flex layout -->
-    {#if preferences.features.agentPanel}
+    {#if preferences.features.agentPanel && agentState}
       <div class="section-header agent-header">
         <div class="section-divider">
           <span class="divider-label">AGENT</span>
         </div>
       </div>
-      <AgentPanel {repoPath} {files} {selectedFile} />
+      <AgentPanel {repoPath} {files} {selectedFile} {agentState} />
     {/if}
   {/if}
 </div>

@@ -59,7 +59,7 @@
   import AnnotationOverlay from './AnnotationOverlay.svelte';
   import BeforeAnnotationOverlay from './BeforeAnnotationOverlay.svelte';
   import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
-  import { agentState } from './stores/agent.svelte';
+  import type { AgentState } from './stores/agent.svelte';
   import { sendAgentPrompt } from './services/ai';
   import { repoState } from './stores/repoState.svelte';
   import { preferences } from './stores/preferences.svelte';

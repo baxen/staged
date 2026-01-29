@@ -3,11 +3,13 @@
   
   Provides a simple chat input for asking questions about the current diff/changeset.
   Maintains session state for multi-turn conversations.
+  
+  Each tab has its own AgentState, passed as a prop to ensure chat sessions are isolated.
 -->
 <script lang="ts">
   import { Send, Bot, Loader2, ChevronDown } from 'lucide-svelte';
   import { sendAgentPrompt, discoverAcpProviders } from '../../services/ai';
-  import { agentState, type AcpProvider } from '../../stores/agent.svelte';
+  import { agentGlobalState, type AcpProvider, type AgentState } from '../../stores/agent.svelte';
   import type { FileDiffSummary } from '../../types';
   import { marked } from 'marked';
 
@@ -26,9 +28,11 @@
     files?: FileDiffSummary[];
     /** Currently selected file path */
     selectedFile?: string | null;
+    /** Agent state for this tab's chat session (required) */
+    agentState: AgentState;
   }
 
-  let { repoPath = null, files = [], selectedFile = null }: Props = $props();
+  let { repoPath = null, files = [], selectedFile = null, agentState }: Props = $props();
 
   let showProviderDropdown = $state(false);
 
@@ -39,11 +43,11 @@
 
   // Discover available providers on mount
   onMount(async () => {
-    if (!agentState.providersLoaded) {
+    if (!agentGlobalState.providersLoaded) {
       try {
         const providers = await discoverAcpProviders();
-        agentState.availableProviders = providers;
-        agentState.providersLoaded = true;
+        agentGlobalState.availableProviders = providers;
+        agentGlobalState.providersLoaded = true;
 
         // If current provider is not available, switch to first available
         if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
@@ -109,32 +113,37 @@
 
   /**
    * Send prompt to AI agent.
+   * Captures the agentState reference at call time to ensure responses go to the correct tab.
    */
   async function handleSubmit() {
     const userPrompt = agentState.input.trim();
     if (!userPrompt || agentState.loading) return;
 
-    agentState.loading = true;
-    agentState.error = '';
-    agentState.response = '';
-    const inputToSend = agentState.input;
-    agentState.input = '';
+    // Capture reference to this tab's state - ensures async response goes to correct tab
+    const tabState = agentState;
+
+    tabState.loading = true;
+    tabState.error = '';
+    tabState.response = '';
+    const inputToSend = tabState.input;
+    tabState.input = '';
 
     try {
-      const isNewSession = !agentState.sessionId;
+      const isNewSession = !tabState.sessionId;
       const promptWithContext = buildPromptWithContext(inputToSend, isNewSession);
       const result = await sendAgentPrompt(
         repoPath,
         promptWithContext,
-        agentState.sessionId,
-        agentState.provider
+        tabState.sessionId,
+        tabState.provider
       );
-      agentState.response = result.response;
-      agentState.sessionId = result.sessionId;
+      // Write response to the captured tab state, not the current prop
+      tabState.response = result.response;
+      tabState.sessionId = result.sessionId;
     } catch (e) {
-      agentState.error = e instanceof Error ? e.message : String(e);
+      tabState.error = e instanceof Error ? e.message : String(e);
     } finally {
-      agentState.loading = false;
+      tabState.loading = false;
     }
   }
 
@@ -203,7 +212,7 @@
         rows="1"
       ></textarea>
       <div class="agent-input-actions">
-        {#if agentState.availableProviders.length > 0}
+        {#if agentGlobalState.availableProviders.length > 0}
           <div class="provider-picker">
             <button
               class="provider-btn"
@@ -212,14 +221,14 @@
               title="Select AI provider"
             >
               <span class="provider-label"
-                >{agentState.availableProviders.find((p) => p.id === agentState.provider)?.label ??
-                  agentState.provider}</span
+                >{agentGlobalState.availableProviders.find((p) => p.id === agentState.provider)
+                  ?.label ?? agentState.provider}</span
               >
               <ChevronDown size={12} />
             </button>
             {#if showProviderDropdown}
               <div class="provider-dropdown">
-                {#each agentState.availableProviders as provider (provider.id)}
+                {#each agentGlobalState.availableProviders as provider (provider.id)}
                   <button
                     class="provider-option"
                     class:selected={agentState.provider === provider.id}
