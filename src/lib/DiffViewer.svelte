@@ -1972,8 +1972,7 @@
   }
 
   .lines-wrapper {
-    display: inline-block;
-    min-width: 100%;
+    display: block;
     will-change: transform;
     position: relative; /* For AI annotation overlays */
   }

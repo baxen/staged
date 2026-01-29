@@ -1,76 +1,34 @@
-//! AI tool discovery and execution.
+//! AI tool discovery and execution via ACP (Agent Client Protocol).
+//!
+//! This module handles AI-powered diff analysis by communicating with
+//! ACP-compatible agents like Goose.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
+use super::acp_client::{find_acp_agent, run_acp_prompt, AcpAgent};
 use super::prompt::{build_prompt_with_strategy, FileAnalysisInput, LARGE_FILE_THRESHOLD};
 use super::types::ChangesetAnalysis;
 use crate::git::{self, DiffSpec, FileContent};
 
-/// Supported AI CLI tools.
-#[derive(Debug, Clone)]
-pub enum AiTool {
-    Goose(PathBuf),
-    Claude(PathBuf),
-}
-
-impl AiTool {
-    pub fn name(&self) -> &'static str {
-        match self {
-            AiTool::Goose(_) => "goose",
-            AiTool::Claude(_) => "claude",
-        }
-    }
-}
-
-/// Find an available AI CLI tool.
-pub fn find_ai_tool() -> Option<AiTool> {
-    if let Some(path) = find_in_path("goose") {
-        return Some(AiTool::Goose(path));
-    }
-    if let Some(path) = find_in_path("claude") {
-        return Some(AiTool::Claude(path));
-    }
-    None
-}
-
-fn find_in_path(cmd: &str) -> Option<PathBuf> {
-    let output = Command::new("which").arg(cmd).output().ok()?;
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
-        }
-    }
-    None
+/// Find an available AI agent.
+///
+/// Currently supports Goose via ACP.
+pub fn find_ai_tool() -> Option<AcpAgent> {
+    find_acp_agent()
 }
 
 /// Check if output contains a context window error.
-///
-/// We need to be careful here - the AI's response might legitimately mention
-/// "context window" when analyzing code that deals with context windows.
-/// So we look for specific error phrases, not just any mention.
-fn detect_context_error(output: &str, tool: &AiTool) -> Option<String> {
+fn detect_context_error(output: &str) -> Option<String> {
     let output_lower = output.to_lowercase();
 
-    // These patterns should be specific error messages, not general phrases
-    // that might appear in code or analysis
-    let error_patterns: &[&str] = match tool {
-        AiTool::Goose(_) => &[
-            "context limit reached",
-            "context length exceeded",
-            "maximum context length exceeded",
-            "prompt is too long",
-            "input too long",
-        ],
-        AiTool::Claude(_) => &[
-            "context length exceeded",
-            "prompt is too long",
-            "input too long",
-            "exceeds the maximum number of tokens",
-            "maximum context length",
-        ],
-    };
+    let error_patterns = &[
+        "context limit reached",
+        "context length exceeded",
+        "maximum context length exceeded",
+        "prompt is too long",
+        "input too long",
+        "exceeds the maximum number of tokens",
+    ];
 
     for pattern in error_patterns {
         if output_lower.contains(pattern) {
@@ -82,42 +40,6 @@ fn detect_context_error(output: &str, tool: &AiTool) -> Option<String> {
         }
     }
     None
-}
-
-fn run_tool(tool: &AiTool, prompt: &str) -> Result<String, String> {
-    let output = match tool {
-        AiTool::Goose(path) => Command::new(path)
-            .args(["run", "-t", prompt])
-            .output()
-            .map_err(|e| format!("Failed to run goose: {}", e))?,
-
-        AiTool::Claude(path) => Command::new(path)
-            .args(["--dangerously-skip-permissions", "-p", prompt])
-            .output()
-            .map_err(|e| format!("Failed to run claude: {}", e))?,
-    };
-
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-    // Check for context window errors in both stdout and stderr
-    if let Some(error_msg) = detect_context_error(&stdout, tool) {
-        return Err(error_msg);
-    }
-    if let Some(error_msg) = detect_context_error(&stderr, tool) {
-        return Err(error_msg);
-    }
-
-    if !output.status.success() {
-        return Err(format!(
-            "{} failed (exit {}): {}",
-            tool.name(),
-            output.status.code().unwrap_or(-1),
-            stderr
-        ));
-    }
-
-    Ok(stdout)
 }
 
 /// Parse AI response into ChangesetAnalysis
@@ -161,23 +83,20 @@ fn load_after_content_if_small(
     Ok((content, line_count))
 }
 
-/// Analyze a diff using AI.
+/// Analyze a diff using AI via ACP.
 ///
 /// This is the main entry point - it handles:
 /// 1. Listing files in the diff
 /// 2. Loading unified diffs and after content for each file
 /// 3. Building an appropriately-sized prompt (with automatic tier selection)
-/// 4. Running AI analysis
+/// 4. Running AI analysis via ACP
 /// 5. Returning the complete result
 ///
 /// The frontend just needs to provide the diff spec.
-pub fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalysis, String> {
-    // Find AI tool first (fail fast)
-    let tool = find_ai_tool().ok_or_else(|| {
-        "No AI CLI found. Install one of:\n\
-         - goose: https://github.com/block/goose\n\
-         - claude: npm install -g @anthropic-ai/claude-code"
-            .to_string()
+pub async fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalysis, String> {
+    // Find AI agent first (fail fast)
+    let agent = find_ai_tool().ok_or_else(|| {
+        "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
     })?;
 
     // List files in the diff
@@ -242,13 +161,19 @@ pub fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalys
     // Build prompt with automatic tier selection
     let (prompt, strategy) = build_prompt_with_strategy(&inputs);
 
-    log::info!("=== DIFF ANALYSIS ===");
+    log::info!("=== DIFF ANALYSIS (ACP) ===");
     log::info!("Files: {}", inputs.len());
     log::info!("Strategy: {:?}", strategy);
-    log::info!("Using: {}", tool.name());
+    log::info!("Using: {}", agent.name());
     log::debug!("Prompt:\n{}", prompt);
 
-    let response = run_tool(&tool, &prompt)?;
+    // Run the prompt via ACP
+    let response = run_acp_prompt(&agent, repo_path, &prompt).await?;
+
+    // Check for context window errors
+    if let Some(error_msg) = detect_context_error(&response) {
+        return Err(error_msg);
+    }
 
     log::debug!("Raw response:\n{}", response);
 
@@ -306,30 +231,11 @@ mod tests {
     }
 
     #[test]
-    fn test_find_in_path() {
-        assert!(find_in_path("ls").is_some());
-        assert!(find_in_path("nonexistent_command_xyz").is_none());
-    }
-
-    #[test]
-    fn test_detect_context_error_goose() {
-        let tool = AiTool::Goose(PathBuf::from("/usr/bin/goose"));
-
-        assert!(detect_context_error("Error: context limit reached", &tool).is_some());
-        assert!(detect_context_error("Error: prompt is too long", &tool).is_some());
-        assert!(detect_context_error("Normal output here", &tool).is_none());
+    fn test_detect_context_error() {
+        assert!(detect_context_error("Error: context limit reached").is_some());
+        assert!(detect_context_error("Error: prompt is too long").is_some());
+        assert!(detect_context_error("Normal output here").is_none());
         // Should NOT match general mentions of "context window" in analysis
-        assert!(detect_context_error("This code handles context window errors", &tool).is_none());
-    }
-
-    #[test]
-    fn test_detect_context_error_claude() {
-        let tool = AiTool::Claude(PathBuf::from("/usr/bin/claude"));
-
-        assert!(detect_context_error("Error: context length exceeded", &tool).is_some());
-        assert!(detect_context_error("Error: input too long", &tool).is_some());
-        assert!(detect_context_error("Normal output here", &tool).is_none());
-        // Should NOT match general mentions in analysis
-        assert!(detect_context_error("The code checks for token limits", &tool).is_none());
+        assert!(detect_context_error("This code handles context window errors").is_none());
     }
 }

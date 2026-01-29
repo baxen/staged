@@ -1,11 +1,13 @@
-//! AI-powered diff analysis.
+//! AI-powered diff analysis via ACP (Agent Client Protocol).
 //!
-//! Shells out to AI CLI tools (goose or claude) to generate contextual
+//! Communicates with ACP-compatible agents like Goose to generate contextual
 //! annotations for code changes.
 
+mod acp_client;
 mod prompt;
 mod runner;
 mod types;
 
-pub use runner::{analyze_diff, find_ai_tool, AiTool};
+pub use acp_client::{find_acp_agent, AcpAgent};
+pub use runner::analyze_diff;
 pub use types::{ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult};
