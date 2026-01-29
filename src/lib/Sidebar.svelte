@@ -26,10 +26,14 @@
     Eye,
     X,
     Plus,
+    Send,
+    Bot,
+    Loader2,
   } from 'lucide-svelte';
   import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
+  import { sendAgentPrompt } from './services/ai';
   import type { FileDiffSummary } from './types';
 
   interface FileEntry {
@@ -62,6 +66,8 @@
     onAddReferenceFile?: () => void;
     /** Called when user wants to remove a reference file */
     onRemoveReferenceFile?: (path: string) => void;
+    /** Repository path for AI agent */
+    repoPath?: string | null;
   }
 
   let {
@@ -72,10 +78,18 @@
     isWorkingTree = true,
     onAddReferenceFile,
     onRemoveReferenceFile,
+    repoPath = null,
   }: Props = $props();
 
   let collapsedDirs = $state(new Set<string>());
   let treeView = $state(false);
+
+  // Agent chat state
+  let agentInput = $state('');
+  let agentResponse = $state('');
+  let agentLoading = $state(false);
+  let agentError = $state('');
+  let agentSessionId = $state<string | null>(null);
 
   /**
    * Get the primary path for a file summary.
@@ -278,6 +292,35 @@
     const currentIndex = selectedFile ? paths.indexOf(selectedFile) : 0;
     const prevIndex = currentIndex > 0 ? currentIndex - 1 : paths.length - 1;
     onFileSelect?.(paths[prevIndex]);
+  }
+
+  // Send prompt to AI agent
+  async function handleAgentSubmit() {
+    const prompt = agentInput.trim();
+    if (!prompt || agentLoading) return;
+
+    agentLoading = true;
+    agentError = '';
+    agentResponse = '';
+
+    try {
+      const result = await sendAgentPrompt(repoPath, prompt, agentSessionId);
+      agentResponse = result.response;
+      agentSessionId = result.sessionId; // Store for session continuity
+      agentInput = ''; // Clear input on success
+    } catch (e) {
+      agentError = e instanceof Error ? e.message : String(e);
+    } finally {
+      agentLoading = false;
+    }
+  }
+
+  // Handle Enter key in agent input
+  function handleAgentKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      handleAgentSubmit();
+    }
   }
 
   // Register keyboard shortcuts
@@ -588,6 +631,53 @@
           {@render commentList()}
         </ul>
       {/if}
+
+      <!-- Agent Chat section -->
+      <div class="section-header agent-header">
+        <div class="section-divider">
+          <span class="divider-label">AGENT</span>
+        </div>
+      </div>
+      <div class="agent-section">
+        <div class="agent-input-wrapper">
+          <input
+            type="text"
+            class="agent-input"
+            placeholder="Ask the agent..."
+            bind:value={agentInput}
+            onkeydown={handleAgentKeydown}
+            disabled={agentLoading}
+          />
+          <button
+            class="agent-send-btn"
+            onclick={handleAgentSubmit}
+            disabled={agentLoading || !agentInput.trim()}
+            title="Send to agent"
+          >
+            {#if agentLoading}
+              <Loader2 size={14} class="spinning" />
+            {:else}
+              <Send size={14} />
+            {/if}
+          </button>
+        </div>
+        {#if agentError}
+          <div class="agent-error">
+            {agentError}
+          </div>
+        {/if}
+        {#if agentResponse}
+          <div class="agent-response">
+            <div class="agent-response-header">
+              <Bot size={12} />
+              <span>Agent</span>
+            </div>
+            <div class="agent-response-content">
+              {agentResponse}
+            </div>
+          </div>
+        {/if}
+      </div>
     </div>
   {/if}
 </div>
@@ -985,5 +1075,128 @@
   .remove-btn:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
+  }
+
+  /* Agent section */
+  .agent-header {
+    margin-top: 8px;
+  }
+
+  .agent-section {
+    padding: 0 12px 12px;
+  }
+
+  .agent-input-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    padding: 4px 8px;
+    transition: border-color 0.1s;
+  }
+
+  .agent-input-wrapper:focus-within {
+    border-color: var(--text-accent);
+  }
+
+  .agent-input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: var(--size-sm);
+    font-family: inherit;
+    padding: 4px 0;
+    outline: none;
+    min-width: 0;
+  }
+
+  .agent-input::placeholder {
+    color: var(--text-faint);
+  }
+
+  .agent-input:disabled {
+    opacity: 0.6;
+  }
+
+  .agent-send-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+    flex-shrink: 0;
+  }
+
+  .agent-send-btn:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-accent);
+  }
+
+  .agent-send-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .agent-send-btn :global(.spinning) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .agent-error {
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--ui-danger-bg);
+    border-radius: 4px;
+    color: var(--ui-danger);
+    font-size: var(--size-xs);
+    word-break: break-word;
+  }
+
+  .agent-response {
+    margin-top: 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+  }
+
+  .agent-response-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    font-weight: 500;
+  }
+
+  .agent-response-content {
+    padding: 10px;
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 200px;
+    overflow-y: auto;
   }
 </style>
