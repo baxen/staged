@@ -35,6 +35,8 @@ export class AgentState {
   sessionId = $state<string | null>(null);
   provider = $state<AcpProvider>('goose');
   artifacts = $state<Artifact[]>([]);
+  /** The original task/request that started this session (used for context in follow-ups) */
+  task = $state<string | null>(null);
 }
 
 /**

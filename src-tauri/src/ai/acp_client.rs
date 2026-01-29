@@ -19,6 +19,23 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
 
+/// System context prepended to the first message in new sessions.
+/// This guides the agent's behavior for Staged's code review use case.
+const STAGED_SYSTEM_CONTEXT: &str = r#"[System Context for Staged - Code Review Assistant]
+
+You are helping with code review in Staged, a diff viewer application. Your role is to help users understand, plan changes to, and research code in their changesets.
+
+Output Guidelines:
+- When asked to create a PLAN: produce a structured markdown document with clear objectives, step-by-step tasks, and file references
+- When asked to do RESEARCH: produce a research document with summary of findings, relevant code references, and recommendations
+- When answering QUESTIONS: be concise and focused on the code changes
+
+The user is viewing a diff. Context tags like [Changeset: ...], [Viewing: ...], and [Original task: ...] provide information about what they're looking at.
+
+---
+
+"#;
+
 /// Supported ACP-compatible AI agents
 #[derive(Debug, Clone)]
 pub enum AcpAgent {
@@ -382,50 +399,58 @@ async fn run_acp_session_inner(
         );
     }
 
-    // Get or create session
-    let session_id: SessionId = if let Some(existing_id) = existing_session_id {
-        // Try to load existing session
-        log::info!("Attempting to load session: {}", existing_id);
-        let load_request =
-            LoadSessionRequest::new(SessionId::new(existing_id), working_dir.to_path_buf());
+    // Get or create session, track if this is a new session
+    let (session_id, is_new_session): (SessionId, bool) =
+        if let Some(existing_id) = existing_session_id {
+            // Try to load existing session
+            log::info!("Attempting to load session: {}", existing_id);
+            let load_request =
+                LoadSessionRequest::new(SessionId::new(existing_id), working_dir.to_path_buf());
 
-        match connection.load_session(load_request).await {
-            Ok(_) => {
-                log::info!("Resumed session: {}", existing_id);
-                SessionId::new(existing_id)
+            match connection.load_session(load_request).await {
+                Ok(_) => {
+                    log::info!("Resumed session: {}", existing_id);
+                    (SessionId::new(existing_id), false)
+                }
+                Err(e) => {
+                    // Session not found or error - create a new one
+                    log::warn!(
+                        "Failed to load session {}: {:?}, creating new session",
+                        existing_id,
+                        e
+                    );
+                    let session_response = connection
+                        .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
+                        .await
+                        .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
+                    (session_response.session_id, true)
+                }
             }
-            Err(e) => {
-                // Session not found or error - create a new one
-                log::warn!(
-                    "Failed to load session {}: {:?}, creating new session",
-                    existing_id,
-                    e
-                );
-                let session_response = connection
-                    .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
-                    .await
-                    .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
-                session_response.session_id
-            }
-        }
-    } else {
-        // Create new session
-        let session_response = connection
-            .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
-            .await
-            .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
-        log::info!("Created new session: {}", session_response.session_id.0);
-        session_response.session_id
-    };
+        } else {
+            // Create new session
+            let session_response = connection
+                .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
+                .await
+                .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
+            log::info!("Created new session: {}", session_response.session_id.0);
+            (session_response.session_id, true)
+        };
 
     // Clear any accumulated content from loading session history
     // (load_session may replay old messages as AgentMessageChunk notifications)
     collector.accumulated_content.lock().await.clear();
 
+    // For new sessions, prepend system context to guide the agent's behavior
+    let full_prompt = if is_new_session {
+        format!("{}{}", STAGED_SYSTEM_CONTEXT, prompt)
+    } else {
+        prompt.to_string()
+    };
+
     // Send the prompt
     let prompt_request = PromptRequest::new(
         session_id.clone(),
-        vec![AcpContentBlock::Text(TextContent::new(prompt.to_string()))],
+        vec![AcpContentBlock::Text(TextContent::new(full_prompt))],
     );
 
     connection

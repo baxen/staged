@@ -9,7 +9,17 @@
   Each tab has its own AgentState, passed as a prop to ensure chat sessions are isolated.
 -->
 <script lang="ts">
-  import { Send, Bot, Loader2, ChevronDown, ChevronRight, Save, FileText, X } from 'lucide-svelte';
+  import {
+    Send,
+    Bot,
+    Loader2,
+    ChevronDown,
+    ChevronRight,
+    Save,
+    FileText,
+    X,
+    Trash2,
+  } from 'lucide-svelte';
   import { sendAgentPrompt, discoverAcpProviders, type AcpProviderInfo } from '../../services/ai';
   import {
     saveArtifact,
@@ -147,6 +157,7 @@
     showProviderDropdown = false;
     // Reset session when switching providers
     agentState.sessionId = null;
+    agentState.task = null;
     agentState.response = '';
     agentState.error = '';
   }
@@ -164,6 +175,7 @@
 
   /**
    * Build context-aware prompt with file information.
+   * For follow-up messages, includes the original task to keep the agent focused.
    */
   function buildPromptWithContext(userPrompt: string, isNewSession: boolean): string {
     let context = '';
@@ -180,6 +192,11 @@
       context += `[Viewing: ${selectedFile}]\n`;
     }
 
+    // For follow-up messages, remind the agent of the original task
+    if (!isNewSession && agentState.task) {
+      context += `[Original task: ${agentState.task}]\n`;
+    }
+
     return context ? context + '\n' + userPrompt : userPrompt;
   }
 
@@ -194,6 +211,13 @@
     // Capture reference to this tab's state - ensures async response goes to correct tab
     const tabState = agentState;
 
+    const isNewSession = !tabState.sessionId;
+
+    // Store the original task on new sessions
+    if (isNewSession) {
+      tabState.task = userPrompt;
+    }
+
     tabState.loading = true;
     tabState.error = '';
     tabState.response = '';
@@ -202,7 +226,6 @@
     tabState.input = '';
 
     try {
-      const isNewSession = !tabState.sessionId;
       const promptWithContext = buildPromptWithContext(inputToSend, isNewSession);
       const result = await sendAgentPrompt(
         repoPath,
@@ -234,6 +257,7 @@
 
   /**
    * Save the current response as an artifact.
+   * Keeps the session alive so user can continue the conversation.
    */
   async function saveAsArtifact() {
     if (!agentState.response || !spec) return;
@@ -251,7 +275,7 @@
 
     // Add to local state immediately for responsiveness
     agentState.artifacts.push(artifact);
-    agentState.response = ''; // Clear response after saving
+    agentState.response = ''; // Clear response after saving (session stays alive)
 
     // Persist to database (fire-and-forget, errors logged)
     try {
@@ -259,6 +283,17 @@
     } catch (e) {
       console.error('Failed to save artifact to database:', e);
     }
+  }
+
+  /**
+   * Discard the current response and end the session.
+   * Use this when the response isn't what you want and you want to start fresh.
+   */
+  function discardResponse() {
+    agentState.response = '';
+    agentState.sessionId = null; // End the session
+    agentState.task = null; // Clear the original task
+    agentState.error = '';
   }
 
   /**
@@ -314,6 +349,7 @@
 </script>
 
 <div class="agent-section">
+  <!-- Top area: errors and saved artifacts (scrollable) -->
   <div class="agent-top">
     {#if agentState.error}
       <div class="agent-error">
@@ -384,7 +420,10 @@
         {/if}
       </div>
     {/each}
+  </div>
 
+  <!-- Bottom area: current response + input (anchored at bottom) -->
+  <div class="agent-bottom">
     <!-- Current response area -->
     {#if agentState.loading || agentState.response}
       <div class="agent-response">
@@ -415,17 +454,30 @@
             {/if}
           </span>
           {#if !agentState.loading && agentState.response}
-            <button
-              class="save-btn"
-              onclick={(e) => {
-                e.stopPropagation();
-                saveAsArtifact();
-              }}
-              title="Save as artifact"
-            >
-              <Save size={12} />
-              <span>Save</span>
-            </button>
+            <div class="response-actions">
+              <button
+                class="save-btn"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  saveAsArtifact();
+                }}
+                title="Save as artifact"
+              >
+                <Save size={12} />
+                <span>Save</span>
+              </button>
+              <button
+                class="discard-btn"
+                onclick={(e) => {
+                  e.stopPropagation();
+                  discardResponse();
+                }}
+                title="Discard and end session"
+              >
+                <Trash2 size={12} />
+                <span>Discard</span>
+              </button>
+            </div>
           {/if}
         </div>
         {#if responseExpanded && !agentState.loading}
@@ -437,8 +489,7 @@
         {/if}
       </div>
     {/if}
-  </div>
-  <div class="agent-bottom">
+
     <div class="agent-input-wrapper">
       <textarea
         class="agent-input"
@@ -803,7 +854,7 @@
 
   /* Agent response */
   .agent-response {
-    margin-bottom: 8px;
+    margin-bottom: 12px;
     background: var(--bg-primary);
     border: 1px solid var(--border-subtle);
     border-radius: 6px;
@@ -845,6 +896,12 @@
     flex: 1;
   }
 
+  .response-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
   .save-btn {
     display: flex;
     align-items: center;
@@ -867,6 +924,30 @@
     background-color: var(--bg-hover);
     border-color: var(--text-accent);
     color: var(--text-accent);
+  }
+
+  .discard-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      border-color 0.1s,
+      color 0.1s;
+  }
+
+  .discard-btn:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--ui-danger);
+    color: var(--ui-danger);
   }
 
   .agent-response-content {
