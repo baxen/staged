@@ -651,14 +651,16 @@
   />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
-    {#if showEmptyState}
-      <!-- Full-width empty state -->
+    {#if showEmptyState && !preferences.features.agentPanel}
+      <!-- Full-width empty state (only when agent panel disabled) -->
       <section class="main-content full-width">
         <EmptyState />
       </section>
     {:else}
       <section class="main-content">
-        {#if diffState.loading}
+        {#if showEmptyState}
+          <EmptyState />
+        {:else if diffState.loading}
           <div class="loading-state">
             <p>Loading...</p>
           </div>

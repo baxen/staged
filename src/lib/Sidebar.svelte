@@ -520,7 +520,7 @@
     <div class="loading-state">
       <p>Loading...</p>
     </div>
-  {:else if files.length === 0}
+  {:else if files.length === 0 && !preferences.features.agentPanel}
     <div class="empty-state">
       <p>No changes</p>
       {#if isWorkingTree}
