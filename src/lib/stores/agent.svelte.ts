@@ -25,16 +25,16 @@ export interface Artifact {
 /**
  * State for a single agent chat session.
  * Each tab gets its own instance.
+ * Using a class allows $state fields to work correctly with Svelte's ownership model.
  */
-export interface AgentState {
-  input: string;
-  response: string;
-  loading: boolean;
-  error: string;
-  sessionId: string | null;
-  provider: AcpProvider;
-  /** Saved artifacts from this session */
-  artifacts: Artifact[];
+export class AgentState {
+  input = $state('');
+  response = $state('');
+  loading = $state(false);
+  error = $state('');
+  sessionId = $state<string | null>(null);
+  provider = $state<AcpProvider>('goose');
+  artifacts = $state<Artifact[]>([]);
 }
 
 /**
@@ -49,15 +49,7 @@ export const agentGlobalState = $state({
  * Create a fresh agent state for a new tab.
  */
 export function createAgentState(): AgentState {
-  return {
-    input: '',
-    response: '',
-    loading: false,
-    error: '',
-    sessionId: null,
-    provider: 'goose',
-    artifacts: [],
-  };
+  return new AgentState();
 }
 
 /**
