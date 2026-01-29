@@ -698,6 +698,7 @@
             syntaxThemeVersion={preferences.syntaxThemeVersion}
             loading={diffState.loadingFile !== null}
             isReferenceFile={isCurrentFileReference}
+            agentState={getActiveTab()?.agentState}
           />
         {/if}
       </section>

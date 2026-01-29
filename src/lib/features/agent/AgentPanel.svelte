@@ -8,10 +8,11 @@
 -->
 <script lang="ts">
   import { Send, Bot, Loader2, ChevronDown } from 'lucide-svelte';
-  import { sendAgentPrompt, discoverAcpProviders } from '../../services/ai';
+  import { sendAgentPrompt, discoverAcpProviders, type AcpProviderInfo } from '../../services/ai';
   import { agentGlobalState, type AcpProvider, type AgentState } from '../../stores/agent.svelte';
   import type { FileDiffSummary } from '../../types';
   import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
 
   import { onMount } from 'svelte';
 
@@ -36,43 +37,39 @@
 
   let showProviderDropdown = $state(false);
 
-  // Parse markdown response
+  /** Type guard to validate provider ID */
+  function isValidProvider(id: string): id is AcpProvider {
+    return id === 'goose' || id === 'claude';
+  }
+
+  // Parse markdown response and sanitize to prevent XSS
   let renderedResponse = $derived(
-    agentState.response ? (marked.parse(agentState.response) as string) : ''
+    agentState.response ? DOMPurify.sanitize(marked.parse(agentState.response) as string) : ''
   );
 
-  // Discover available providers on mount
-  onMount(async () => {
-    if (!agentGlobalState.providersLoaded) {
-      try {
-        const providers = await discoverAcpProviders();
-        agentGlobalState.availableProviders = providers;
-        agentGlobalState.providersLoaded = true;
-
-        // If current provider is not available, switch to first available
-        if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
-          agentState.provider = providers[0].id as AcpProvider;
-        }
-      } catch (e) {
-        console.error('Failed to discover ACP providers:', e);
-      }
-    }
-  });
-
-  function selectProvider(provider: AcpProvider) {
-    agentState.provider = provider;
-    showProviderDropdown = false;
-    // Reset session when switching providers
-    agentState.sessionId = null;
-    agentState.response = '';
-  }
-
-  function toggleProviderDropdown() {
-    showProviderDropdown = !showProviderDropdown;
-  }
-
-  // Close dropdown when clicking outside
+  // Initialize on mount: discover providers and set up click-outside handler
   onMount(() => {
+    // Discover available providers (only once globally)
+    if (!agentGlobalState.providersLoaded) {
+      discoverAcpProviders()
+        .then((providers) => {
+          agentGlobalState.availableProviders = providers;
+          agentGlobalState.providersLoaded = true;
+
+          // If current provider is not available, switch to first available valid one
+          if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
+            const firstValidId = providers.map((p) => p.id).find(isValidProvider);
+            if (firstValidId) {
+              agentState.provider = firstValidId;
+            }
+          }
+        })
+        .catch((e) => {
+          console.error('Failed to discover ACP providers:', e);
+        });
+    }
+
+    // Close dropdown when clicking outside
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as HTMLElement;
       if (showProviderDropdown && !target.closest('.provider-picker')) {
@@ -82,6 +79,19 @@
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
   });
+
+  function selectProvider(provider: AcpProvider) {
+    agentState.provider = provider;
+    showProviderDropdown = false;
+    // Reset session when switching providers
+    agentState.sessionId = null;
+    agentState.response = '';
+    agentState.error = '';
+  }
+
+  function toggleProviderDropdown() {
+    showProviderDropdown = !showProviderDropdown;
+  }
 
   /**
    * Get the primary path for a file summary.
@@ -232,7 +242,7 @@
                   <button
                     class="provider-option"
                     class:selected={agentState.provider === provider.id}
-                    onclick={() => selectProvider(provider.id as AcpProvider)}
+                    onclick={() => isValidProvider(provider.id) && selectProvider(provider.id)}
                   >
                     {provider.label}
                   </button>

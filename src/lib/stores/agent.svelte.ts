@@ -6,12 +6,9 @@
  * directly as a prop through the component chain.
  */
 
-export type AcpProvider = 'goose' | 'claude';
+import type { AcpProviderInfo } from '../services/ai';
 
-export interface AcpProviderInfo {
-  id: string;
-  label: string;
-}
+export type AcpProvider = 'goose' | 'claude';
 
 /**
  * State for a single agent chat session.
