@@ -1,77 +1,48 @@
-//! AI tool discovery and execution.
+//! AI tool discovery and execution via ACP (Agent Client Protocol).
+//!
+//! This module handles AI-powered diff analysis by communicating with
+//! ACP-compatible agents like Goose.
 
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::path::Path;
 
-use super::prompt::build_unified_changeset_prompt;
+use super::acp_client::{find_acp_agent, run_acp_prompt, AcpAgent};
+use super::prompt::{build_prompt_with_strategy, FileAnalysisInput, LARGE_FILE_THRESHOLD};
 use super::types::ChangesetAnalysis;
 use crate::git::{self, DiffSpec, FileContent};
 
-/// Supported AI CLI tools.
-#[derive(Debug, Clone)]
-pub enum AiTool {
-    Goose(PathBuf),
-    Claude(PathBuf),
+/// Find an available AI agent.
+///
+/// Currently supports Goose via ACP.
+pub fn find_ai_tool() -> Option<AcpAgent> {
+    find_acp_agent()
 }
 
-impl AiTool {
-    pub fn name(&self) -> &'static str {
-        match self {
-            AiTool::Goose(_) => "goose",
-            AiTool::Claude(_) => "claude",
-        }
-    }
-}
+/// Check if output contains a context window error.
+fn detect_context_error(output: &str) -> Option<String> {
+    let output_lower = output.to_lowercase();
 
-/// Find an available AI CLI tool.
-pub fn find_ai_tool() -> Option<AiTool> {
-    if let Some(path) = find_in_path("goose") {
-        return Some(AiTool::Goose(path));
-    }
-    if let Some(path) = find_in_path("claude") {
-        return Some(AiTool::Claude(path));
-    }
-    None
-}
+    let error_patterns = &[
+        "context limit reached",
+        "context length exceeded",
+        "maximum context length exceeded",
+        "prompt is too long",
+        "input too long",
+        "exceeds the maximum number of tokens",
+    ];
 
-fn find_in_path(cmd: &str) -> Option<PathBuf> {
-    let output = Command::new("which").arg(cmd).output().ok()?;
-    if output.status.success() {
-        let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        if !path.is_empty() {
-            return Some(PathBuf::from(path));
+    for pattern in error_patterns {
+        if output_lower.contains(pattern) {
+            return Some(
+                "Changeset too large for AI analysis. \
+                 Try analyzing fewer files or a smaller diff range."
+                    .to_string(),
+            );
         }
     }
     None
 }
 
-fn run_tool(tool: &AiTool, prompt: &str) -> Result<String, String> {
-    let output = match tool {
-        AiTool::Goose(path) => Command::new(path)
-            .args(["run", "-t", prompt])
-            .output()
-            .map_err(|e| format!("Failed to run goose: {}", e))?,
-
-        AiTool::Claude(path) => Command::new(path)
-            .args(["--dangerously-skip-permissions", "-p", prompt])
-            .output()
-            .map_err(|e| format!("Failed to run claude: {}", e))?,
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "{} failed (exit {}): {}",
-            tool.name(),
-            output.status.code().unwrap_or(-1),
-            stderr
-        ));
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
-}
-
-/// Analyze an entire changeset using AI.
+/// Parse AI response into ChangesetAnalysis
 fn parse_response(response: &str) -> Result<ChangesetAnalysis, String> {
     let response = response.trim();
     let json_str = extract_json(response);
@@ -83,22 +54,49 @@ fn parse_response(response: &str) -> Result<ChangesetAnalysis, String> {
     })
 }
 
-/// Analyze a diff using AI.
+/// Load after content for a file if it's small enough.
+/// Returns None for deleted files, binary files, or files exceeding the threshold.
+fn load_after_content_if_small(
+    repo_path: &Path,
+    spec: &DiffSpec,
+    file_path: &Path,
+) -> Result<(Option<String>, usize), String> {
+    let diff = git::get_file_diff(repo_path, spec, file_path)
+        .map_err(|e| format!("Failed to get file diff: {}", e))?;
+
+    let (content, line_count) = match &diff.after {
+        Some(f) => match &f.content {
+            FileContent::Text { lines } => {
+                let count = lines.len();
+                if count <= LARGE_FILE_THRESHOLD {
+                    (Some(lines.join("\n")), count)
+                } else {
+                    // File too large, skip content but report line count
+                    (None, count)
+                }
+            }
+            FileContent::Binary => (None, 0),
+        },
+        None => (None, 0), // Deleted file
+    };
+
+    Ok((content, line_count))
+}
+
+/// Analyze a diff using AI via ACP.
 ///
 /// This is the main entry point - it handles:
 /// 1. Listing files in the diff
-/// 2. Loading before/after content for each file
-/// 3. Running AI analysis
-/// 4. Returning the complete result
+/// 2. Loading unified diffs and after content for each file
+/// 3. Building an appropriately-sized prompt (with automatic tier selection)
+/// 4. Running AI analysis via ACP
+/// 5. Returning the complete result
 ///
 /// The frontend just needs to provide the diff spec.
-pub fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalysis, String> {
-    // Find AI tool first (fail fast)
-    let tool = find_ai_tool().ok_or_else(|| {
-        "No AI CLI found. Install one of:\n\
-         - goose: https://github.com/block/goose\n\
-         - claude: npm install -g @anthropic-ai/claude-code"
-            .to_string()
+pub async fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalysis, String> {
+    // Find AI agent first (fail fast)
+    let agent = find_ai_tool().ok_or_else(|| {
+        "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
     })?;
 
     // List files in the diff
@@ -109,62 +107,73 @@ pub fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalys
         return Err("No files in diff to analyze".to_string());
     }
 
-    // Load content for each file
-    let mut file_contents: Vec<(String, String, String)> = Vec::new();
+    // Build inputs for each file
+    let mut inputs: Vec<FileAnalysisInput> = Vec::new();
 
     for file_summary in &files {
         let file_path = file_summary.path();
         let path_str = file_path.to_string_lossy().to_string();
 
-        let diff = git::get_file_diff(repo_path, spec, file_path)
+        // Get unified diff
+        let diff = git::get_unified_diff(repo_path, spec, file_path)
             .map_err(|e| format!("Failed to get diff for {}: {}", path_str, e))?;
 
-        // Extract text content
-        let before_content = match &diff.before {
-            Some(f) => match &f.content {
-                FileContent::Text { lines } => lines.join("\n"),
-                FileContent::Binary => String::new(),
-            },
-            None => String::new(),
-        };
+        // Load after content if small enough
+        let (after_content, after_line_count) =
+            load_after_content_if_small(repo_path, spec, file_path)?;
 
-        let after_content = match &diff.after {
-            Some(f) => match &f.content {
-                FileContent::Text { lines } => lines.join("\n"),
-                FileContent::Binary => String::new(),
-            },
-            None => String::new(),
-        };
+        // Determine file status
+        let is_new_file = file_summary.is_added();
+        let is_deleted = file_summary.is_deleted();
 
-        // Skip binary files (both exist but no text content)
-        if before_content.is_empty()
-            && after_content.is_empty()
-            && (diff.before.is_some() || diff.after.is_some())
-        {
-            continue;
+        // Skip binary files (no diff and no content)
+        if diff.is_empty() && after_content.is_none() && !is_new_file && !is_deleted {
+            // Check if it's actually binary by looking at the file
+            let file_diff = git::get_file_diff(repo_path, spec, file_path).ok();
+            let is_binary = file_diff.is_some_and(|d| {
+                matches!(
+                    d.after.as_ref().map(|f| &f.content),
+                    Some(FileContent::Binary)
+                ) || matches!(
+                    d.before.as_ref().map(|f| &f.content),
+                    Some(FileContent::Binary)
+                )
+            });
+            if is_binary {
+                continue;
+            }
         }
 
-        file_contents.push((path_str, before_content, after_content));
+        inputs.push(FileAnalysisInput {
+            path: path_str,
+            diff,
+            after_content,
+            is_new_file,
+            is_deleted,
+            after_line_count,
+        });
     }
 
-    if file_contents.is_empty() {
+    if inputs.is_empty() {
         return Err("No text files to analyze (all binary?)".to_string());
     }
 
-    // Build prompt and run AI
-    let file_refs: Vec<(&str, &str, &str)> = file_contents
-        .iter()
-        .map(|(p, b, a)| (p.as_str(), b.as_str(), a.as_str()))
-        .collect();
+    // Build prompt with automatic tier selection
+    let (prompt, strategy) = build_prompt_with_strategy(&inputs);
 
-    let prompt = build_unified_changeset_prompt(&file_refs);
-
-    log::info!("=== DIFF ANALYSIS ===");
-    log::info!("Files: {}", file_refs.len());
-    log::info!("Using: {}", tool.name());
+    log::info!("=== DIFF ANALYSIS (ACP) ===");
+    log::info!("Files: {}", inputs.len());
+    log::info!("Strategy: {:?}", strategy);
+    log::info!("Using: {}", agent.name());
     log::debug!("Prompt:\n{}", prompt);
 
-    let response = run_tool(&tool, &prompt)?;
+    // Run the prompt via ACP
+    let response = run_acp_prompt(&agent, repo_path, &prompt).await?;
+
+    // Check for context window errors
+    if let Some(error_msg) = detect_context_error(&response) {
+        return Err(error_msg);
+    }
 
     log::debug!("Raw response:\n{}", response);
 
@@ -222,8 +231,11 @@ mod tests {
     }
 
     #[test]
-    fn test_find_in_path() {
-        assert!(find_in_path("ls").is_some());
-        assert!(find_in_path("nonexistent_command_xyz").is_none());
+    fn test_detect_context_error() {
+        assert!(detect_context_error("Error: context limit reached").is_some());
+        assert!(detect_context_error("Error: prompt is too long").is_some());
+        assert!(detect_context_error("Normal output here").is_none());
+        // Should NOT match general mentions of "context window" in analysis
+        assert!(detect_context_error("This code handles context window errors").is_none());
     }
 }

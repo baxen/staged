@@ -25,6 +25,39 @@ fn resolve_spec(repo: &Path, spec: &DiffSpec) -> Result<DiffSpec, GitError> {
     })
 }
 
+/// Get unified diff output for a single file.
+///
+/// Returns the standard unified diff format (like `git diff`).
+/// This is used for AI analysis prompts.
+pub fn get_unified_diff(repo: &Path, spec: &DiffSpec, path: &Path) -> Result<String, GitError> {
+    // Resolve MergeBase to concrete SHA
+    let spec = resolve_spec(repo, spec)?;
+
+    let path_str = path
+        .to_str()
+        .ok_or_else(|| GitError::InvalidPath(path.display().to_string()))?;
+
+    match (&spec.base, &spec.head) {
+        (GitRef::Rev(base), GitRef::WorkingTree) => {
+            // Diff from commit to working tree
+            cli::run(repo, &["diff", base.as_str(), "--", path_str])
+        }
+        (GitRef::Rev(base), GitRef::Rev(head)) => {
+            // Diff between two commits
+            cli::run(
+                repo,
+                &["diff", base.as_str(), head.as_str(), "--", path_str],
+            )
+        }
+        (GitRef::WorkingTree, _) => Err(GitError::CommandFailed(
+            "Cannot use working tree as base".to_string(),
+        )),
+        (GitRef::MergeBase, _) | (_, GitRef::MergeBase) => {
+            unreachable!("MergeBase should have been resolved")
+        }
+    }
+}
+
 /// A hunk from git diff (0-indexed line numbers)
 #[derive(Debug, Clone, Copy)]
 struct Hunk {

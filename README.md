@@ -28,8 +28,22 @@ The installer will:
 - Install dependencies
 - Build the application
 - Install to `/Applications/staged.app`
+- Install the `staged` CLI to `/usr/local/bin`
 
 **Note**: This will build from source, which takes a few minutes. Requires git to be installed.
+
+### Command Line Usage
+
+After installation, you can launch Staged from the terminal:
+
+```bash
+staged              # Open in current directory
+staged /path/to/repo  # Open in specified directory
+```
+
+Each invocation opens a new window, so you can have multiple repos open simultaneously.
+
+If you installed manually (not via the install script), copy `bin/staged` to somewhere in your PATH (e.g., `/usr/local/bin`).
 
 ## Development
 
@@ -42,6 +56,7 @@ This project uses [Hermit](https://github.com/cashapp/hermit) to manage developm
 ```bash
 source bin/activate-hermit   # Activate hermit environment
 rustup default stable        # Set the default Rust toolchain
+lefthook install             # Install git hooks for pre-push checks
 ```
 
 After activation, `cargo`, `node`, `npm`, and `just` are all available from the hermit-managed versions.
