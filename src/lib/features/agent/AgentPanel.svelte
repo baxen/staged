@@ -6,11 +6,18 @@
 -->
 <script lang="ts">
   import { Send, Bot, Loader2, ChevronDown } from 'lucide-svelte';
-  import { sendAgentPrompt } from '../../services/ai';
+  import { sendAgentPrompt, discoverAcpProviders } from '../../services/ai';
   import { agentState, type AcpProvider } from '../../stores/agent.svelte';
   import type { FileDiffSummary } from '../../types';
+  import { marked } from 'marked';
 
   import { onMount } from 'svelte';
+
+  // Configure marked for safe rendering
+  marked.setOptions({
+    breaks: true,
+    gfm: true,
+  });
 
   interface Props {
     /** Repository path for AI agent */
@@ -25,10 +32,28 @@
 
   let showProviderDropdown = $state(false);
 
-  const providers: { id: AcpProvider; label: string }[] = [
-    { id: 'goose', label: 'Goose' },
-    { id: 'claude', label: 'Claude Code' },
-  ];
+  // Parse markdown response
+  let renderedResponse = $derived(
+    agentState.response ? (marked.parse(agentState.response) as string) : ''
+  );
+
+  // Discover available providers on mount
+  onMount(async () => {
+    if (!agentState.providersLoaded) {
+      try {
+        const providers = await discoverAcpProviders();
+        agentState.availableProviders = providers;
+        agentState.providersLoaded = true;
+
+        // If current provider is not available, switch to first available
+        if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
+          agentState.provider = providers[0].id as AcpProvider;
+        }
+      } catch (e) {
+        console.error('Failed to discover ACP providers:', e);
+      }
+    }
+  });
 
   function selectProvider(provider: AcpProvider) {
     agentState.provider = provider;
@@ -98,7 +123,12 @@
     try {
       const isNewSession = !agentState.sessionId;
       const promptWithContext = buildPromptWithContext(inputToSend, isNewSession);
-      const result = await sendAgentPrompt(repoPath, promptWithContext, agentState.sessionId);
+      const result = await sendAgentPrompt(
+        repoPath,
+        promptWithContext,
+        agentState.sessionId,
+        agentState.provider
+      );
       agentState.response = result.response;
       agentState.sessionId = result.sessionId;
     } catch (e) {
@@ -117,6 +147,23 @@
       handleSubmit();
     }
   }
+
+  let textareaEl: HTMLTextAreaElement | null = $state(null);
+
+  /**
+   * Auto-resize textarea to fit content, up to max rows.
+   */
+  function autoResize() {
+    if (!textareaEl) return;
+    textareaEl.style.height = 'auto';
+    textareaEl.style.height = textareaEl.scrollHeight + 'px';
+  }
+
+  $effect(() => {
+    // Re-run when input changes
+    agentState.input;
+    autoResize();
+  });
 </script>
 
 <div class="agent-section">
@@ -136,7 +183,9 @@
           {#if agentState.loading}
             <Loader2 size={14} class="spinning" /> Thinking...
           {:else}
-            {agentState.response}
+            <div class="markdown-content">
+              {@html renderedResponse}
+            </div>
           {/if}
         </div>
       </div>
@@ -148,35 +197,41 @@
         class="agent-input"
         placeholder="Ask the agent..."
         bind:value={agentState.input}
+        bind:this={textareaEl}
         onkeydown={handleKeydown}
         disabled={agentState.loading}
-        rows="3"
+        rows="1"
       ></textarea>
       <div class="agent-input-actions">
-        <div class="provider-picker">
-          <button
-            class="provider-btn"
-            onclick={toggleProviderDropdown}
-            disabled={agentState.loading}
-            title="Select AI provider"
-          >
-            <span class="provider-label">{providers.find((p) => p.id === agentState.provider)?.label}</span>
-            <ChevronDown size={12} />
-          </button>
-          {#if showProviderDropdown}
-            <div class="provider-dropdown">
-              {#each providers as provider (provider.id)}
-                <button
-                  class="provider-option"
-                  class:selected={agentState.provider === provider.id}
-                  onclick={() => selectProvider(provider.id)}
-                >
-                  {provider.label}
-                </button>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        {#if agentState.availableProviders.length > 0}
+          <div class="provider-picker">
+            <button
+              class="provider-btn"
+              onclick={toggleProviderDropdown}
+              disabled={agentState.loading}
+              title="Select AI provider"
+            >
+              <span class="provider-label"
+                >{agentState.availableProviders.find((p) => p.id === agentState.provider)?.label ??
+                  agentState.provider}</span
+              >
+              <ChevronDown size={12} />
+            </button>
+            {#if showProviderDropdown}
+              <div class="provider-dropdown">
+                {#each agentState.availableProviders as provider (provider.id)}
+                  <button
+                    class="provider-option"
+                    class:selected={agentState.provider === provider.id}
+                    onclick={() => selectProvider(provider.id as AcpProvider)}
+                  >
+                    {provider.label}
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
+        {/if}
         <button
           class="agent-send-btn"
           onclick={handleSubmit}
@@ -229,7 +284,6 @@
   }
 
   .agent-input {
-    flex: 1;
     background: none;
     border: none;
     color: var(--text-primary);
@@ -240,6 +294,8 @@
     min-width: 0;
     resize: none;
     line-height: 1.4;
+    overflow-y: auto;
+    max-height: calc(1.4em * 4);
   }
 
   .agent-input::placeholder {
@@ -255,7 +311,6 @@
     justify-content: flex-end;
     align-items: center;
     gap: 6px;
-    margin-top: 8px;
   }
 
   /* Provider picker */
@@ -267,22 +322,22 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 8px;
+    padding: 4px 6px;
     background: none;
-    border: 1px solid var(--border-subtle);
+    border: none;
     border-radius: 4px;
-    color: var(--text-muted);
+    color: var(--text-faint);
     font-size: var(--size-xs);
     font-family: inherit;
     cursor: pointer;
     transition:
       background-color 0.1s,
-      border-color 0.1s;
+      color 0.1s;
   }
 
   .provider-btn:hover:not(:disabled) {
     background-color: var(--bg-hover);
-    border-color: var(--border-muted);
+    color: var(--text-muted);
   }
 
   .provider-btn:disabled {
@@ -345,7 +400,6 @@
       background-color 0.1s,
       color 0.1s;
     flex-shrink: 0;
-    margin-left: auto;
   }
 
   .agent-send-btn:hover:not(:disabled) {
@@ -405,7 +459,6 @@
     padding: 10px;
     font-size: var(--size-sm);
     color: var(--text-primary);
-    white-space: pre-wrap;
     word-break: break-word;
     max-height: 200px;
     overflow-y: auto;
@@ -417,5 +470,100 @@
     gap: 8px;
     color: var(--text-muted);
     font-style: italic;
+  }
+
+  /* Markdown content styles */
+  .markdown-content :global(p) {
+    margin: 0 0 0.5em 0;
+  }
+
+  .markdown-content :global(p:last-child) {
+    margin-bottom: 0;
+  }
+
+  .markdown-content :global(h1),
+  .markdown-content :global(h2),
+  .markdown-content :global(h3),
+  .markdown-content :global(h4) {
+    margin: 0.75em 0 0.5em 0;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .markdown-content :global(h1:first-child),
+  .markdown-content :global(h2:first-child),
+  .markdown-content :global(h3:first-child),
+  .markdown-content :global(h4:first-child) {
+    margin-top: 0;
+  }
+
+  .markdown-content :global(h1) {
+    font-size: 1.25em;
+  }
+
+  .markdown-content :global(h2) {
+    font-size: 1.15em;
+  }
+
+  .markdown-content :global(h3) {
+    font-size: 1.05em;
+  }
+
+  .markdown-content :global(ul),
+  .markdown-content :global(ol) {
+    margin: 0.5em 0;
+    padding-left: 1.5em;
+  }
+
+  .markdown-content :global(li) {
+    margin: 0.25em 0;
+  }
+
+  .markdown-content :global(code) {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    background: var(--bg-hover);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+
+  .markdown-content :global(pre) {
+    margin: 0.5em 0;
+    padding: 0.75em;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    overflow-x: auto;
+  }
+
+  .markdown-content :global(pre code) {
+    background: none;
+    padding: 0;
+    font-size: 0.85em;
+  }
+
+  .markdown-content :global(blockquote) {
+    margin: 0.5em 0;
+    padding-left: 0.75em;
+    border-left: 3px solid var(--border-muted);
+    color: var(--text-muted);
+  }
+
+  .markdown-content :global(a) {
+    color: var(--text-accent);
+    text-decoration: none;
+  }
+
+  .markdown-content :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .markdown-content :global(strong) {
+    font-weight: 600;
+  }
+
+  .markdown-content :global(hr) {
+    margin: 0.75em 0;
+    border: none;
+    border-top: 1px solid var(--border-subtle);
   }
 </style>

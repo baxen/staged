@@ -4,6 +4,11 @@
 
 export type AcpProvider = 'goose' | 'claude';
 
+export interface AcpProviderInfo {
+  id: string;
+  label: string;
+}
+
 export const agentState = $state({
   input: '',
   response: '',
@@ -11,6 +16,8 @@ export const agentState = $state({
   error: '',
   sessionId: null as string | null,
   provider: 'goose' as AcpProvider,
+  availableProviders: [] as AcpProviderInfo[],
+  providersLoaded: false,
 });
 
 export function resetAgentState() {
@@ -19,5 +26,5 @@ export function resetAgentState() {
   agentState.loading = false;
   agentState.error = '';
   agentState.sessionId = null;
-  // Don't reset provider - keep user's preference
+  // Don't reset provider or availableProviders - keep user's preference and cached discovery
 }
