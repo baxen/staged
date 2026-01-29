@@ -4,6 +4,7 @@
   Provides a simple chat input for asking questions about the current diff/changeset.
   Maintains session state for multi-turn conversations.
   Supports saving responses as artifacts for later reference.
+  Artifacts are persisted to the database and restored on mount.
   
   Each tab has its own AgentState, passed as a prop to ensure chat sessions are isolated.
 -->
@@ -11,13 +12,18 @@
   import { Send, Bot, Loader2, ChevronDown, ChevronRight, Save, FileText, X } from 'lucide-svelte';
   import { sendAgentPrompt, discoverAcpProviders, type AcpProviderInfo } from '../../services/ai';
   import {
+    saveArtifact,
+    getArtifacts,
+    deleteArtifactFromDb,
+    type Artifact,
+  } from '../../services/review';
+  import {
     agentGlobalState,
     generateArtifactId,
     type AcpProvider,
     type AgentState,
-    type Artifact,
   } from '../../stores/agent.svelte';
-  import type { FileDiffSummary } from '../../types';
+  import type { DiffSpec, FileDiffSummary } from '../../types';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
 
@@ -32,6 +38,8 @@
   interface Props {
     /** Repository path for AI agent */
     repoPath?: string | null;
+    /** Current diff spec for artifact persistence */
+    spec?: DiffSpec | null;
     /** File summaries from the current diff */
     files?: FileDiffSummary[];
     /** Currently selected file path */
@@ -40,12 +48,19 @@
     agentState: AgentState;
   }
 
-  let { repoPath = null, files = [], selectedFile = null, agentState }: Props = $props();
+  let {
+    repoPath = null,
+    spec = null,
+    files = [],
+    selectedFile = null,
+    agentState,
+  }: Props = $props();
 
   let showProviderDropdown = $state(false);
   let responseExpanded = $state(true);
   let expandedArtifactId = $state<string | null>(null);
   let confirmingDeleteId = $state<string | null>(null);
+  let artifactsLoaded = $state(false);
 
   /** Type guard to validate provider ID */
   function isValidProvider(id: string): id is AcpProvider {
@@ -57,7 +72,24 @@
     agentState.response ? DOMPurify.sanitize(marked.parse(agentState.response) as string) : ''
   );
 
-  // Initialize on mount: discover providers and set up click-outside handler
+  /**
+   * Load artifacts from the database for the current diff spec.
+   */
+  async function loadArtifactsFromDb() {
+    if (!spec || artifactsLoaded) return;
+
+    try {
+      const artifacts = await getArtifacts(spec, repoPath ?? undefined);
+      // Replace the artifacts array with loaded ones
+      agentState.artifacts.length = 0;
+      agentState.artifacts.push(...artifacts);
+      artifactsLoaded = true;
+    } catch (e) {
+      console.error('Failed to load artifacts:', e);
+    }
+  }
+
+  // Initialize on mount: discover providers, load artifacts, and set up click-outside handler
   onMount(() => {
     // Discover available providers (only once globally)
     if (!agentGlobalState.providersLoaded) {
@@ -79,6 +111,9 @@
         });
     }
 
+    // Load artifacts from database
+    loadArtifactsFromDb();
+
     // Close dropdown when clicking outside
     function handleClickOutside(event: MouseEvent) {
       const target = event.target as HTMLElement;
@@ -88,6 +123,23 @@
     }
     document.addEventListener('click', handleClickOutside);
     return () => document.removeEventListener('click', handleClickOutside);
+  });
+
+  // Track the spec string to detect actual changes (not just object reference changes)
+  let lastSpecKey = $state<string | null>(null);
+
+  // Reload artifacts when spec actually changes (comparing by value, not reference)
+  $effect(() => {
+    if (!spec) return;
+
+    // Create a stable key from the spec to detect actual changes
+    const specKey = `${spec.base.type}:${spec.base.type === 'Rev' ? spec.base.value : ''}::${spec.head.type}:${spec.head.type === 'Rev' ? spec.head.value : ''}`;
+
+    if (specKey !== lastSpecKey) {
+      lastSpecKey = specKey;
+      artifactsLoaded = false;
+      loadArtifactsFromDb();
+    }
   });
 
   function selectProvider(provider: AcpProvider) {
@@ -183,8 +235,8 @@
   /**
    * Save the current response as an artifact.
    */
-  function saveAsArtifact() {
-    if (!agentState.response) return;
+  async function saveAsArtifact() {
+    if (!agentState.response || !spec) return;
 
     // Generate title from first line of response (strip markdown)
     const firstLine = agentState.response.split('\n')[0] || 'Untitled';
@@ -197,19 +249,34 @@
       createdAt: new Date().toISOString(),
     };
 
+    // Add to local state immediately for responsiveness
     agentState.artifacts.push(artifact);
     agentState.response = ''; // Clear response after saving
+
+    // Persist to database (fire-and-forget, errors logged)
+    try {
+      await saveArtifact(spec, artifact, repoPath ?? undefined);
+    } catch (e) {
+      console.error('Failed to save artifact to database:', e);
+    }
   }
 
   /**
    * Delete an artifact.
    */
-  function deleteArtifact(id: string) {
+  async function deleteArtifact(id: string) {
     const index = agentState.artifacts.findIndex((a) => a.id === id);
     if (index !== -1) {
       agentState.artifacts.splice(index, 1);
       if (expandedArtifactId === id) {
         expandedArtifactId = null;
+      }
+
+      // Delete from database (fire-and-forget, errors logged)
+      try {
+        await deleteArtifactFromDb(id);
+      } catch (e) {
+        console.error('Failed to delete artifact from database:', e);
       }
     }
   }
