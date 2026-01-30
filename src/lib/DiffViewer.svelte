@@ -163,6 +163,7 @@
 
   // Range-based commenting (from alignment hover)
   let commentingOnRange: number | null = $state(null);
+  let editingRangeCommentId: string | null = $state(null);
   let commentEditorStyle: {
     top: number;
     left: number;
@@ -1074,6 +1075,8 @@
   function handleStartLineComment() {
     if (!selectedLineRange) return;
     commentingOnLines = { ...selectedLineRange };
+    // Clear any previously-viewed comment so the editor starts empty
+    editingCommentId = null;
     updateLineCommentEditorPosition();
   }
 
@@ -1853,14 +1856,15 @@
 
     <!-- Range comment editor (two-pane mode only) -->
     {#if commentingOnRange !== null && commentEditorStyle}
-      {@const existingComments = getCommentsForAlignment(commentingOnRange)}
-      {@const existingComment = existingComments[0] ?? null}
+      {@const existingComment = editingRangeCommentId
+        ? findCommentById(editingRangeCommentId)
+        : null}
       <CommentEditor
         top={commentEditorStyle.top}
         left={commentEditorStyle.left}
         width={commentEditorStyle.width}
         visible={commentEditorStyle.visible}
-        {existingComment}
+        existingComment={existingComment ?? null}
         onSubmit={(content) => {
           if (existingComment) {
             handleCommentEdit(existingComment.id, content);
