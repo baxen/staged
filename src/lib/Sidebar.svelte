@@ -29,7 +29,11 @@
     Wand2,
     Trash2,
   } from 'lucide-svelte';
-  import { commentsState, toggleReviewed as toggleReviewedAction, getAiComments, getUserComments, deleteComment } from './stores/comments.svelte';
+  import {
+    commentsState,
+    toggleReviewed as toggleReviewedAction,
+    deleteComment,
+  } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { preferences } from './stores/preferences.svelte';
@@ -451,87 +455,44 @@
 {/snippet}
 
 {#snippet commentList()}
-  <!-- AI Feedback -->
-  {#if getAiComments().length > 0}
-    <li class="comment-group-header">
-      <div class="group-header-content">
-        <Wand2 size={12} />
-        <span>AI Feedback ({getAiComments().length})</span>
-      </div>
-    </li>
-    {#each getAiComments() as comment (comment.id)}
-      <li class="tree-item-wrapper">
-        <div class="comment-item-container">
-          <button
-            class="tree-item comment-item ai-comment"
-            class:category-warning={comment.category === 'warning'}
-            class:category-suggestion={comment.category === 'suggestion'}
-            class:category-explanation={comment.category === 'explanation'}
-            class:category-context={comment.category === 'context'}
-            style="padding-left: 8px"
-            onclick={() => onFileSelect?.(comment.path, comment.span.start, comment.id)}
-          >
-            <span class="comment-icon">
+  {#each commentsState.comments as comment (comment.id)}
+    <li class="tree-item-wrapper">
+      <div class="comment-item-container">
+        <button
+          class="tree-item comment-item"
+          class:ai-comment={comment.author === 'ai'}
+          class:category-warning={comment.category === 'warning'}
+          class:category-suggestion={comment.category === 'suggestion'}
+          class:category-explanation={comment.category === 'explanation'}
+          class:category-context={comment.category === 'context'}
+          style="padding-left: 8px"
+          onclick={() => onFileSelect?.(comment.path, comment.span.start, comment.id)}
+        >
+          <span class="comment-icon">
+            {#if comment.author === 'ai'}
               <Wand2 size={12} />
+            {:else}
+              <MessageSquare size={12} />
+            {/if}
+          </span>
+          <span class="comment-details">
+            <span class="comment-location">
+              <span class="comment-file">{getFileName(comment.path)}</span>
+              <span class="comment-line">{formatLineRange(comment.span)}</span>
             </span>
-            <span class="comment-details">
-              <span class="comment-location">
-                <span class="comment-file">{getFileName(comment.path)}</span>
-                <span class="comment-line">{formatLineRange(comment.span)}</span>
-              </span>
-              <span class="comment-preview">{truncateText(comment.content)}</span>
-            </span>
-          </button>
-          <button
-            class="comment-delete-btn"
-            onclick={(e) => handleDeleteComment(e, comment.id)}
-            title="Delete comment"
-          >
-            <Trash2 size={12} />
-          </button>
-        </div>
-      </li>
-    {/each}
-  {/if}
-
-  <!-- My Comments -->
-  {#if getUserComments().length > 0}
-    <li class="comment-group-header">
-      <div class="group-header-content">
-        <MessageSquare size={12} />
-        <span>My Comments ({getUserComments().length})</span>
+            <span class="comment-preview">{truncateText(comment.content)}</span>
+          </span>
+        </button>
+        <button
+          class="comment-delete-btn"
+          onclick={(e) => handleDeleteComment(e, comment.id)}
+          title="Delete comment"
+        >
+          <Trash2 size={12} />
+        </button>
       </div>
     </li>
-    {#each getUserComments() as comment (comment.id)}
-      <li class="tree-item-wrapper">
-        <div class="comment-item-container">
-          <button
-            class="tree-item comment-item user-comment"
-            style="padding-left: 8px"
-            onclick={() => onFileSelect?.(comment.path, comment.span.start, comment.id)}
-          >
-            <span class="comment-icon">
-              <MessageSquare size={12} />
-            </span>
-            <span class="comment-details">
-              <span class="comment-location">
-                <span class="comment-file">{getFileName(comment.path)}</span>
-                <span class="comment-line">{formatLineRange(comment.span)}</span>
-              </span>
-              <span class="comment-preview">{truncateText(comment.content)}</span>
-            </span>
-          </button>
-          <button
-            class="comment-delete-btn"
-            onclick={(e) => handleDeleteComment(e, comment.id)}
-            title="Delete comment"
-          >
-            <Trash2 size={12} />
-          </button>
-        </div>
-      </li>
-    {/each}
-  {/if}
+  {/each}
 {/snippet}
 
 <div class="sidebar-content">
@@ -1047,23 +1008,6 @@
   .comment-delete-btn:hover {
     color: var(--status-deleted);
     background-color: var(--bg-hover);
-  }
-
-  /* Comment groups */
-  .comment-group-header {
-    padding: 4px 8px;
-    margin-top: 4px;
-  }
-
-  .group-header-content {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: var(--size-xs);
-    font-weight: 600;
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
 
   /* AI comment styling */

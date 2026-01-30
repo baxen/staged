@@ -502,7 +502,9 @@ async fn sync_review_to_github(
 // AI Commands
 // =============================================================================
 
-use ai::{AcpProviderInfo, ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult};
+use ai::{
+    AcpProviderInfo, ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult,
+};
 
 /// Discover available ACP providers on the system.
 /// Returns a list of providers that are installed and working.
@@ -682,7 +684,10 @@ fn save_ai_comments(
     for ann in annotations {
         // Only convert warnings and suggestions to comments
         // Keep explanations and context as blur overlays
-        let is_actionable = matches!(ann.category, AnnotationCategory::Warning | AnnotationCategory::Suggestion);
+        let is_actionable = matches!(
+            ann.category,
+            AnnotationCategory::Warning | AnnotationCategory::Suggestion
+        );
 
         if !is_actionable {
             continue;
@@ -695,7 +700,7 @@ fn save_ai_comments(
                 path: file_path,
                 span: git::Span::new(
                     after_span.start.try_into().unwrap_or(0),
-                    after_span.end.try_into().unwrap_or(0)
+                    after_span.end.try_into().unwrap_or(0),
                 ),
                 content: ann.content,
                 author: CommentAuthor::Ai,

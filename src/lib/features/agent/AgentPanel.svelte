@@ -554,7 +554,8 @@
           </button>
           <MessageSquare size={12} />
           <span class="artifact-title">
-            All {totalCommentsCount} {totalCommentsCount === 1 ? 'comment' : 'comments'}
+            All {totalCommentsCount}
+            {totalCommentsCount === 1 ? 'comment' : 'comments'}
           </span>
         </div>
       </div>
@@ -721,7 +722,8 @@
   .agent-section {
     display: flex;
     flex-direction: column;
-    flex-shrink: 0;
+    flex: 1;
+    min-height: 0;
     padding: 0 12px;
   }
 
@@ -732,10 +734,7 @@
   .agent-bottom {
     flex-shrink: 0;
     padding: 12px 0;
-    position: sticky;
-    bottom: 0;
-    background: var(--bg-chrome);
-    z-index: 10;
+    margin-top: auto;
   }
 
   .agent-input-wrapper {

@@ -40,7 +40,7 @@
 
     // Generate title from summary (first 50 chars)
     const title = summary.summary
-      .replace(/^#+\s*/, '')  // Strip markdown headers
+      .replace(/^#+\s*/, '') // Strip markdown headers
       .substring(0, 50)
       .trim();
 

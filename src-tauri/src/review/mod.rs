@@ -347,7 +347,10 @@ impl ReviewStore {
 
         if !columns.contains(&column.to_string()) {
             conn.execute(
-                &format!("ALTER TABLE {} ADD COLUMN {} {}", table, column, column_type),
+                &format!(
+                    "ALTER TABLE {} ADD COLUMN {} {}",
+                    table, column, column_type
+                ),
                 [],
             )?;
         }

@@ -53,7 +53,11 @@
   } from './diffUtils';
   import { setupDiffKeyboardNav } from './diffKeyboard';
   import { diffSelection } from './stores/diffSelection.svelte';
-  import { diffState, clearScrollTarget, clearScrollTargetCommentId } from './stores/diffState.svelte';
+  import {
+    diffState,
+    clearScrollTarget,
+    clearScrollTargetCommentId,
+  } from './stores/diffState.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
   import CommentEditor from './CommentEditor.svelte';
   import AnnotationOverlay from './AnnotationOverlay.svelte';

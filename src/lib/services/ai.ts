@@ -3,7 +3,14 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { SmartDiffResult, ChangesetSummary, ChangesetAnalysis, DiffSpec, SmartDiffAnnotation, Comment } from '../types';
+import type {
+  SmartDiffResult,
+  ChangesetSummary,
+  ChangesetAnalysis,
+  DiffSpec,
+  SmartDiffAnnotation,
+  Comment,
+} from '../types';
 
 /**
  * Check if an AI CLI tool is available.
