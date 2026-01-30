@@ -31,8 +31,8 @@
     workOnBranchProbability: 0.6, // prefer working on branches over main
   };
 
-  // Calculate scroll speed to match commit rate
-  const SCROLL_SPEED = (CONFIG.commitSpacing / CONFIG.commitInterval) * (1000 / 60) * 1.1;
+  // Scroll speed: pixels per millisecond to match commit rate
+  const SCROLL_SPEED_PER_MS = CONFIG.commitSpacing / CONFIG.commitInterval;
 
   // Color from theme
   let strokeColor = 'rgba(128, 128, 128, 0.6)';
@@ -73,6 +73,8 @@
   let nextCommitX = 0;
   let scrollOffset = 0;
   let lastCommitTime = 0;
+  let lastFrameTime = 0;
+  let scrolling = false;
   let canvasWidth = 0;
   let canvasHeight = 0;
 
@@ -519,9 +521,15 @@
     nextCommitX += CONFIG.commitSpacing;
 
     lastCommitTime = performance.now();
+    lastFrameTime = performance.now();
+    scrolling = false;
 
     function animate(currentTime: number) {
       if (!canvas || !ctx) return;
+
+      // Calculate delta time for frame-rate independent animation
+      const deltaTime = currentTime - lastFrameTime;
+      lastFrameTime = currentTime;
 
       // Handle high DPI displays
       const dpr = window.devicePixelRatio || 1;
@@ -541,14 +549,24 @@
         lastCommitTime = currentTime;
       }
 
-      // Scroll left to keep the newest commit at ~3/4 of the screen width
+      // Scroll logic: fill the screen first, then keep newest commit at 75% position
       const rightmostCommitX = nextCommitX - CONFIG.commitSpacing;
-      const targetX = canvasWidth * 0.75; // commits should appear at 3/4 across
+      const targetX = canvasWidth * 0.75;
       const targetScrollOffset = Math.max(0, rightmostCommitX - targetX);
 
-      // Smooth constant scroll - speed is calculated to match commit rate
-      if (scrollOffset < targetScrollOffset) {
-        scrollOffset = Math.min(targetScrollOffset, scrollOffset + SCROLL_SPEED);
+      if (targetScrollOffset > 0) {
+        if (!scrolling) {
+          // Start scrolling once commits have filled the view
+          scrolling = true;
+          scrollOffset = targetScrollOffset;
+        } else {
+          // Scroll at constant rate, but never past the target
+          // This provides smooth motion without oscillation
+          scrollOffset = Math.min(
+            scrollOffset + SCROLL_SPEED_PER_MS * deltaTime,
+            targetScrollOffset
+          );
+        }
       }
 
       // Prune old commits that have scrolled off
