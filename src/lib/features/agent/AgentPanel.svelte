@@ -21,6 +21,7 @@
     Trash2,
     Circle,
     CheckCircle2,
+    MessageSquare,
   } from 'lucide-svelte';
   import { sendAgentPrompt, discoverAcpProviders, type AcpProviderInfo } from '../../services/ai';
   import {
@@ -35,6 +36,7 @@
     type AcpProvider,
     type AgentState,
   } from '../../stores/agent.svelte';
+  import { commentsState } from '../../stores/comments.svelte';
   import type { DiffSpec, FileDiffSummary } from '../../types';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -72,12 +74,19 @@
   let responseExpanded = $state(true);
   let confirmingDeleteId = $state<string | null>(null);
   let artifactsLoaded = $state(false);
+  let loadingArtifacts = $state(false);
 
   // Modal state for viewing artifact content
   let viewingArtifact = $state<Artifact | null>(null);
 
   // Track which artifacts are selected for context in the next session
   let selectedArtifactIds = $state<Set<string>>(new Set());
+
+  // Track whether to include all comments in context (default: true)
+  let includeCommentsInContext = $state(true);
+
+  // Count total comments for display
+  let totalCommentsCount = $derived(commentsState.comments.length);
 
   /** Type guard to validate provider ID */
   function isValidProvider(id: string): id is AcpProvider {
@@ -93,8 +102,9 @@
    * Load artifacts from the database for the current diff spec.
    */
   async function loadArtifactsFromDb() {
-    if (!spec || artifactsLoaded) return;
+    if (!spec || artifactsLoaded || loadingArtifacts) return;
 
+    loadingArtifacts = true;
     try {
       const artifacts = await getArtifacts(spec, repoPath ?? undefined);
       // Replace the artifacts array with loaded ones
@@ -105,6 +115,8 @@
       artifactsLoaded = true;
     } catch (e) {
       console.error('Failed to load artifacts:', e);
+    } finally {
+      loadingArtifacts = false;
     }
   }
 
@@ -185,7 +197,7 @@
   /**
    * Build context-aware prompt with file information.
    * For follow-up messages, includes the original task to keep the agent focused.
-   * For new sessions, includes selected artifacts as context.
+   * For new sessions, includes selected artifacts and comments as context.
    */
   function buildPromptWithContext(userPrompt: string, isNewSession: boolean): string {
     let context = '';
@@ -212,6 +224,40 @@
         }
         context += '\n';
       }
+    }
+
+    // For new sessions, include all comments if selected
+    if (isNewSession && includeCommentsInContext && commentsState.comments.length > 0) {
+      context += '\n[Code Comments from Review:]\n';
+      context += 'Here are comments left on the code during review:\n\n';
+
+      // Group comments by file
+      const commentsByFile = new Map<string, typeof commentsState.comments>();
+      for (const comment of commentsState.comments) {
+        if (!commentsByFile.has(comment.path)) {
+          commentsByFile.set(comment.path, []);
+        }
+        commentsByFile.get(comment.path)!.push(comment);
+      }
+
+      // Format comments by file
+      for (const [filePath, comments] of commentsByFile) {
+        context += `File: ${filePath}\n`;
+        for (const comment of comments) {
+          const lineInfo =
+            comment.span.end - comment.span.start === 1
+              ? `line ${comment.span.start + 1}`
+              : `lines ${comment.span.start + 1}-${comment.span.end}`;
+
+          const authorLabel = comment.author === 'ai' ? '[AI]' : '[User]';
+          const categoryLabel = comment.category ? ` (${comment.category})` : '';
+
+          context += `  ${authorLabel}${categoryLabel} @ ${lineInfo}: ${comment.content}\n`;
+        }
+        context += '\n';
+      }
+
+      context += 'Use these comments to understand concerns and feedback about the code.\n\n';
     }
 
     // For follow-up messages, remind the agent of the original task
@@ -360,6 +406,13 @@
   }
 
   /**
+   * Toggle comments inclusion in context.
+   */
+  function toggleCommentsInContext() {
+    includeCommentsInContext = !includeCommentsInContext;
+  }
+
+  /**
    * Open artifact viewer modal.
    */
   function openArtifactViewer(artifact: Artifact) {
@@ -482,6 +535,31 @@
         </div>
       </div>
     {/each}
+
+    <!-- Comments context item -->
+    {#if totalCommentsCount > 0}
+      <div class="artifact-item comments-context-item">
+        <div class="artifact-header" role="button" tabindex="0">
+          <button
+            class="artifact-select-btn"
+            class:selected={includeCommentsInContext}
+            onclick={toggleCommentsInContext}
+            title="Include all comments in next chat context"
+          >
+            {#if includeCommentsInContext}
+              <CheckCircle2 size={14} />
+            {:else}
+              <Circle size={14} />
+            {/if}
+          </button>
+          <MessageSquare size={12} />
+          <span class="artifact-title">
+            All {totalCommentsCount}
+            {totalCommentsCount === 1 ? 'comment' : 'comments'}
+          </span>
+        </div>
+      </div>
+    {/if}
   </div>
 
   <!-- Bottom area: current response + input (anchored at bottom) -->
@@ -650,14 +728,13 @@
   }
 
   .agent-top {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
+    flex-shrink: 0;
   }
 
   .agent-bottom {
     flex-shrink: 0;
     padding: 12px 0;
+    margin-top: auto;
   }
 
   .agent-input-wrapper {
@@ -884,6 +961,15 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Comments context item (not clickable to view) */
+  .comments-context-item .artifact-header {
+    cursor: default;
+  }
+
+  .comments-context-item .artifact-header:hover {
+    background-color: var(--bg-primary);
   }
 
   .artifact-delete {

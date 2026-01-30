@@ -53,7 +53,11 @@
   } from './diffUtils';
   import { setupDiffKeyboardNav } from './diffKeyboard';
   import { diffSelection } from './stores/diffSelection.svelte';
-  import { diffState, clearScrollTarget } from './stores/diffState.svelte';
+  import {
+    diffState,
+    clearScrollTarget,
+    clearScrollTargetCommentId,
+  } from './stores/diffState.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
   import CommentEditor from './CommentEditor.svelte';
   import AnnotationOverlay from './AnnotationOverlay.svelte';
@@ -159,6 +163,7 @@
 
   // Range-based commenting (from alignment hover)
   let commentingOnRange: number | null = $state(null);
+  let editingRangeCommentId: string | null = $state(null);
   let commentEditorStyle: {
     top: number;
     left: number;
@@ -237,17 +242,21 @@
   let currentFilePath = $derived(afterPath ?? beforePath ?? '');
 
   // AI annotations for current file
+  // Only show informational annotations (explanations/context) as blur overlays
+  // Warnings and suggestions are shown as persistent comments instead
   let currentFileAnnotations = $derived.by(() => {
     if (!currentFilePath) return [];
     const result = smartDiffState.results.get(currentFilePath);
     if (!result) return [];
-    // Return annotations with after_span for the right pane
-    const annotations = result.annotations.filter((a) => a.after_span);
+    // Filter to only informational annotations with after_span
+    const annotations = result.annotations.filter(
+      (a) => a.after_span && (a.category === 'explanation' || a.category === 'context')
+    );
     if (annotations.length > 0) {
       console.log(
         '[DEBUG] Found',
         annotations.length,
-        'annotations for',
+        'informational annotations for',
         currentFilePath,
         annotations
       );
@@ -256,12 +265,15 @@
   });
 
   // AI annotations with before_span for the left pane
+  // Only show informational annotations (explanations/context) as blur overlays
   let beforeFileAnnotations = $derived.by(() => {
     if (!currentFilePath) return [];
     const result = smartDiffState.results.get(currentFilePath);
     if (!result) return [];
-    // Return annotations with before_span for the left pane
-    return result.annotations.filter((a) => a.before_span);
+    // Filter to only informational annotations with before_span
+    return result.annotations.filter(
+      (a) => a.before_span && (a.category === 'explanation' || a.category === 'context')
+    );
   });
 
   let showBeforeAnnotations = $derived(
@@ -1063,6 +1075,8 @@
   function handleStartLineComment() {
     if (!selectedLineRange) return;
     commentingOnLines = { ...selectedLineRange };
+    // Clear any previously-viewed comment so the editor starts empty
+    editingCommentId = null;
     updateLineCommentEditorPosition();
   }
 
@@ -1468,6 +1482,32 @@
       });
     }
   });
+
+  // Handle auto-expanding comments when selected from sidebar
+  $effect(() => {
+    const targetCommentId = diffState.scrollTargetCommentId;
+    if (targetCommentId !== null && afterPane && diff && alignmentsFullyLoaded) {
+      // Find the comment
+      const comment = findCommentById(targetCommentId);
+      if (comment) {
+        // Use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+          // Replicate the logic from handleCommentHighlightClick
+          scrollToLine(comment.span.start);
+
+          const start = comment.span.start;
+          const end = Math.max(comment.span.start, comment.span.end - 1);
+
+          lineSelection = { pane: 'after', anchorLine: start, focusLine: end };
+          commentingOnLines = { pane: 'after', start, end };
+          editingCommentId = comment.id;
+          updateLineCommentEditorPosition();
+
+          clearScrollTargetCommentId();
+        });
+      }
+    }
+  });
 </script>
 
 <div class="diff-viewer" class:loading bind:this={diffViewerEl}>
@@ -1816,14 +1856,15 @@
 
     <!-- Range comment editor (two-pane mode only) -->
     {#if commentingOnRange !== null && commentEditorStyle}
-      {@const existingComments = getCommentsForAlignment(commentingOnRange)}
-      {@const existingComment = existingComments[0] ?? null}
+      {@const existingComment = editingRangeCommentId
+        ? findCommentById(editingRangeCommentId)
+        : null}
       <CommentEditor
         top={commentEditorStyle.top}
         left={commentEditorStyle.left}
         width={commentEditorStyle.width}
         visible={commentEditorStyle.visible}
-        {existingComment}
+        existingComment={existingComment ?? null}
         onSubmit={(content) => {
           if (existingComment) {
             handleCommentEdit(existingComment.id, content);

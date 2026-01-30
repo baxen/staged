@@ -24,9 +24,8 @@
   import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
-  import SmartDiffModal from './SmartDiffModal.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
-  import type { DiffSpec as DiffSpecType } from './types';
+  import type { DiffSpec as DiffSpecType, ChangesetSummary } from './types';
   import {
     getPresets,
     diffSelection,
@@ -45,18 +44,39 @@
     smartDiffState,
     checkAi,
     runAnalysis,
-    deleteAnalysis,
     clearResults as clearSmartDiffState,
     setAnnotationsRevealed,
   } from './stores/smartDiff.svelte';
+  import { saveArtifact } from './services/review';
+  import type { AgentState, Artifact } from './stores/agent.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
     onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
     onCommit?: () => void;
+    agentState?: AgentState | null;
+    /**
+     * Callback to reload comments for a specific tab after AI analysis.
+     * @param spec - The diff spec to load comments for
+     * @param repoPath - The repo path
+     */
+    onReloadCommentsForTab?: (spec: DiffSpecType, repoPath: string | null) => Promise<void>;
+    /**
+     * Callback when an artifact is saved (to update the tab's artifact list).
+     * @param artifact - The saved artifact
+     * @param repoPath - The repo path where the artifact belongs
+     */
+    onArtifactSaved?: (artifact: Artifact, repoPath: string | null) => void;
   }
 
-  let { onPresetSelect, onCustomDiff, onCommit }: Props = $props();
+  let {
+    onPresetSelect,
+    onCustomDiff,
+    onCommit,
+    agentState = null,
+    onReloadCommentsForTab,
+    onArtifactSaved,
+  }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -69,7 +89,6 @@
   let showSyncModal = $state(false);
   let showShortcutsModal = $state(false);
   let showSettingsModal = $state(false);
-  let showSmartDiffModal = $state(false);
 
   // Copy feedback
   let copiedFeedback = $state(false);
@@ -133,15 +152,9 @@
 
   /**
    * Handle AI analysis button click.
-   * If results exist, show modal. Otherwise, trigger analysis.
+   * Triggers analysis if not already running.
    */
   async function handleAiAnalysis() {
-    // If we have results, just open the modal
-    if (hasAiResults) {
-      showSmartDiffModal = true;
-      return;
-    }
-
     // If already loading, do nothing (button shows progress)
     if (isAiLoading) return;
 
@@ -155,40 +168,97 @@
       return;
     }
 
-    // Start analysis in background - don't open modal yet
-    // The button will show loading state, modal opens when done
+    // Start analysis in background
+    // The button will show loading state
     runChangesetAnalysis();
   }
 
   /**
-   * Run changeset analysis in background.
-   * Opens modal automatically when complete.
+   * Create an artifact from a changeset summary.
    */
-  async function runChangesetAnalysis() {
-    try {
-      // Single call - backend handles file listing and content loading
-      const result = await runAnalysis(repoState.currentPath ?? null, diffSelection.spec);
+  function createArtifactFromSummary(summary: ChangesetSummary): Artifact {
+    // Generate title from summary (first 50 chars)
+    const title = summary.summary
+      .replace(/^#+\s*/, '') // Strip markdown headers
+      .substring(0, 50)
+      .trim();
 
-      if (result) {
-        // Analysis complete - open modal to show results
-        showSmartDiffModal = true;
-      }
-    } catch (e) {
-      console.error('Analysis failed:', e);
+    // Format as markdown document
+    let content = '';
+
+    if (summary.summary) {
+      content += `# Summary\n\n${summary.summary}\n\n`;
     }
+
+    if (summary.key_changes.length > 0) {
+      content += `# Key Changes\n\n`;
+      for (const change of summary.key_changes) {
+        content += `- ${change}\n`;
+      }
+      content += '\n';
+    }
+
+    if (summary.concerns.length > 0) {
+      content += `# Concerns\n\n`;
+      for (const concern of summary.concerns) {
+        content += `- ${concern}\n`;
+      }
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      title: `AI Review: ${title}`,
+      content: content.trim(),
+      createdAt: new Date().toISOString(),
+    };
   }
 
   /**
-   * Handle refresh button click in the AI modal.
-   * Deletes existing analysis and re-runs.
+   * Run changeset analysis in background.
+   * Automatically saves results as an artifact when complete.
+   * Sets agentState.loading to show busy indicators in AgentPanel and tab bar.
    */
-  async function handleRefreshAnalysis() {
-    // Clear existing results from memory and database
-    await deleteAnalysis(repoState.currentPath ?? null, diffSelection.spec);
-    clearSmartDiffState();
+  async function runChangesetAnalysis() {
+    // Capture context at call time for the analysis request
+    const capturedAgentState = agentState;
+    const capturedRepoPath = repoState.currentPath ?? null;
+    const capturedSpec = diffSelection.spec;
 
-    // Re-run analysis
-    await runChangesetAnalysis();
+    // Set agent loading state to show "Working on it..." and tab spinner
+    if (capturedAgentState) {
+      capturedAgentState.loading = true;
+    }
+
+    try {
+      // Single call - backend handles file listing and content loading
+      const result = await runAnalysis(capturedRepoPath, capturedSpec);
+
+      if (result) {
+        // Reload comments for the tab where analysis was started
+        await onReloadCommentsForTab?.(capturedSpec, capturedRepoPath);
+
+        // Create and save artifact from the summary
+        const artifact = createArtifactFromSummary(result);
+
+        try {
+          await saveArtifact(capturedSpec, artifact, capturedRepoPath ?? undefined);
+          // Notify the tab to update its artifact list
+          onArtifactSaved?.(artifact, capturedRepoPath);
+        } catch (e) {
+          console.error('Failed to save artifact:', e);
+        }
+
+        // Clear the in-memory analysis results (they're saved as artifact now)
+        clearSmartDiffState();
+      }
+    } catch (e) {
+      console.error('Analysis failed:', e);
+    } finally {
+      // Clear agent loading state on the captured state (correct tab)
+      if (capturedAgentState) {
+        capturedAgentState.loading = false;
+      }
+    }
   }
 
   /**
@@ -468,10 +538,6 @@
 
 {#if showSettingsModal}
   <SettingsModal onClose={() => (showSettingsModal = false)} />
-{/if}
-
-{#if showSmartDiffModal}
-  <SmartDiffModal onClose={() => (showSmartDiffModal = false)} onRefresh={handleRefreshAnalysis} />
 {/if}
 
 <style>

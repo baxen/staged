@@ -8,7 +8,7 @@
  * Results are persisted to the database and loaded when switching diffs.
  */
 
-import type { SmartDiffResult, ChangesetSummary, DiffSpec } from '../types';
+import type { SmartDiffResult, ChangesetSummary, DiffSpec, SmartDiffAnnotation } from '../types';
 import {
   analyzeDiff,
   checkAiAvailable,
@@ -17,6 +17,7 @@ import {
   saveFileAnalysis,
   getAllFileAnalyses,
   deleteAllAnalyses,
+  saveAiComments,
 } from '../services/ai';
 
 // =============================================================================
@@ -95,6 +96,9 @@ export async function checkAi(): Promise<boolean> {
  * The backend handles file listing and content loading - we just provide
  * the diff spec. Returns summary, key changes, concerns, and per-file annotations.
  *
+ * Note: This function does NOT reload comments after saving AI comments.
+ * The caller is responsible for reloading comments if needed (to handle tab switching).
+ *
  * @param repoPath - Path to the repository (null for current directory)
  * @param spec - The diff specification (base..head)
  * @returns The summary, or null if analysis failed
@@ -140,6 +144,22 @@ export async function runAnalysis(
       // Persist each file's annotations
       for (const [filePath, fileResult] of newResults) {
         await saveFileAnalysis(repoPath, spec, filePath, fileResult);
+      }
+
+      // Convert actionable annotations (warnings/suggestions) to persistent comments
+      // Informational annotations (explanations/context) remain as blur overlays only
+      const allAnnotations: SmartDiffAnnotation[] = [];
+      for (const annotations of Object.values(result.file_annotations)) {
+        allAnnotations.push(...annotations);
+      }
+
+      if (allAnnotations.length > 0) {
+        // Backend filters to only save warnings and suggestions as comments
+        await saveAiComments(repoPath, spec, allAnnotations);
+
+        // NOTE: We intentionally do NOT call loadComments here.
+        // The caller (TopBar.svelte) handles reloading comments to ensure
+        // they go to the correct tab even if the user switched tabs during analysis.
       }
     } catch (e) {
       console.error('Failed to persist analysis:', e);

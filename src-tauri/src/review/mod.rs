@@ -42,6 +42,18 @@ impl Review {
     }
 }
 
+/// Who authored a comment.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum CommentAuthor {
+    User,
+    Ai,
+}
+
+fn default_author() -> CommentAuthor {
+    CommentAuthor::User
+}
+
 /// A comment attached to a specific location in a file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Comment {
@@ -49,6 +61,12 @@ pub struct Comment {
     pub path: String,
     pub span: Span,
     pub content: String,
+    #[serde(default = "default_author")]
+    pub author: CommentAuthor,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
 }
 
 impl Comment {
@@ -58,6 +76,9 @@ impl Comment {
             path: path.into(),
             span,
             content: content.into(),
+            author: CommentAuthor::User,
+            category: None,
+            created_at: Some(chrono::Utc::now().to_rfc3339()),
         }
     }
 }
@@ -300,6 +321,40 @@ impl ReviewStore {
             PRAGMA foreign_keys = ON;
             "#,
         )?;
+
+        // Migration: Add new columns to comments table if they don't exist
+        // Note: SQLite doesn't have "IF NOT EXISTS" for ALTER TABLE, so we check each column
+        // individually to handle partial migration states gracefully.
+        Self::migrate_add_column(&conn, "comments", "author", "TEXT NOT NULL DEFAULT 'user'")?;
+        Self::migrate_add_column(&conn, "comments", "category", "TEXT")?;
+        Self::migrate_add_column(&conn, "comments", "created_at", "TEXT")?;
+
+        Ok(())
+    }
+
+    /// Helper method to add a column to a table if it doesn't already exist.
+    fn migrate_add_column(
+        conn: &Connection,
+        table: &str,
+        column: &str,
+        column_type: &str,
+    ) -> Result<()> {
+        // Check if column exists by querying table info
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+        let columns: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        if !columns.contains(&column.to_string()) {
+            conn.execute(
+                &format!(
+                    "ALTER TABLE {} ADD COLUMN {} {}",
+                    table, column, column_type
+                ),
+                [],
+            )?;
+        }
+
         Ok(())
     }
 
@@ -346,16 +401,25 @@ impl ReviewStore {
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         let mut stmt = conn.prepare(
-            "SELECT id, path, span_start, span_end, content 
+            "SELECT id, path, span_start, span_end, content, author, category, created_at
              FROM comments WHERE before_ref = ?1 AND after_ref = ?2",
         )?;
         let comments: Vec<Comment> = stmt
             .query_map(params![&id.before, &id.after], |row| {
+                let author_str: String = row.get(5).unwrap_or_else(|_| "user".to_string());
+                let author = match author_str.as_str() {
+                    "ai" => CommentAuthor::Ai,
+                    _ => CommentAuthor::User,
+                };
+
                 Ok(Comment {
                     id: row.get(0)?,
                     path: row.get(1)?,
                     span: Span::new(row.get(2)?, row.get(3)?),
                     content: row.get(4)?,
+                    author,
+                    category: row.get(6).ok(),
+                    created_at: row.get(7).ok(),
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -414,9 +478,15 @@ impl ReviewStore {
     pub fn add_comment(&self, id: &DiffId, comment: &Comment) -> Result<()> {
         self.get_or_create(id)?;
         let conn = self.conn.lock().unwrap();
+
+        let author_str = match comment.author {
+            CommentAuthor::User => "user",
+            CommentAuthor::Ai => "ai",
+        };
+
         conn.execute(
-            "INSERT INTO comments (id, before_ref, after_ref, path, span_start, span_end, content)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO comments (id, before_ref, after_ref, path, span_start, span_end, content, author, category, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 &comment.id,
                 &id.before,
@@ -424,7 +494,10 @@ impl ReviewStore {
                 &comment.path,
                 comment.span.start,
                 comment.span.end,
-                &comment.content
+                &comment.content,
+                author_str,
+                &comment.category,
+                &comment.created_at
             ],
         )?;
         Ok(())
@@ -843,6 +916,9 @@ mod tests {
             path: "src/lib.rs".into(),
             span: Span::new(10, 11),
             content: "Fix this".into(),
+            author: CommentAuthor::User,
+            category: None,
+            created_at: None,
         });
 
         review.edits.push(Edit {

@@ -26,8 +26,14 @@
     Eye,
     X,
     Plus,
+    Wand2,
+    Trash2,
   } from 'lucide-svelte';
-  import { commentsState, toggleReviewed as toggleReviewedAction } from './stores/comments.svelte';
+  import {
+    commentsState,
+    toggleReviewed as toggleReviewedAction,
+    deleteComment,
+  } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { preferences } from './stores/preferences.svelte';
@@ -55,8 +61,8 @@
     files: FileDiffSummary[];
     /** Whether the file list is loading */
     loading?: boolean;
-    /** Called when user selects a file to view, optionally scrolling to a line */
-    onFileSelect?: (path: string, scrollToLine?: number) => void;
+    /** Called when user selects a file to view, optionally scrolling to a line and/or expanding a comment */
+    onFileSelect?: (path: string, scrollToLine?: number, commentId?: string) => void;
     /** Currently selected file path */
     selectedFile?: string | null;
     /** Whether we're viewing the working tree */
@@ -225,6 +231,11 @@
   async function toggleReviewed(event: MouseEvent | KeyboardEvent, file: FileEntry) {
     event.stopPropagation();
     await toggleReviewedAction(file.path);
+  }
+
+  async function handleDeleteComment(event: MouseEvent, commentId: string) {
+    event.stopPropagation();
+    await deleteComment(commentId);
   }
 
   function toggleDir(path: string) {
@@ -446,22 +457,40 @@
 {#snippet commentList()}
   {#each commentsState.comments as comment (comment.id)}
     <li class="tree-item-wrapper">
-      <button
-        class="tree-item comment-item"
-        style="padding-left: 8px"
-        onclick={() => onFileSelect?.(comment.path, comment.span.start)}
-      >
-        <span class="comment-icon">
-          <MessageSquare size={12} />
-        </span>
-        <span class="comment-details">
-          <span class="comment-location">
-            <span class="comment-file">{getFileName(comment.path)}</span>
-            <span class="comment-line">{formatLineRange(comment.span)}</span>
+      <div class="comment-item-container">
+        <button
+          class="tree-item comment-item"
+          class:ai-comment={comment.author === 'ai'}
+          class:category-warning={comment.category === 'warning'}
+          class:category-suggestion={comment.category === 'suggestion'}
+          class:category-explanation={comment.category === 'explanation'}
+          class:category-context={comment.category === 'context'}
+          style="padding-left: 8px"
+          onclick={() => onFileSelect?.(comment.path, comment.span.start, comment.id)}
+        >
+          <span class="comment-icon">
+            {#if comment.author === 'ai'}
+              <Wand2 size={12} />
+            {:else}
+              <MessageSquare size={12} />
+            {/if}
           </span>
-          <span class="comment-preview">{truncateText(comment.content)}</span>
-        </span>
-      </button>
+          <span class="comment-details">
+            <span class="comment-location">
+              <span class="comment-file">{getFileName(comment.path)}</span>
+              <span class="comment-line">{formatLineRange(comment.span)}</span>
+            </span>
+            <span class="comment-preview">{truncateText(comment.content)}</span>
+          </span>
+        </button>
+        <button
+          class="comment-delete-btn"
+          onclick={(e) => handleDeleteComment(e, comment.id)}
+          title="Delete comment"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
     </li>
   {/each}
 {/snippet}
@@ -622,7 +651,8 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
   }
 
   .loading-state,
@@ -668,7 +698,6 @@
 
   .file-list {
     flex-shrink: 0;
-    overflow-y: auto;
     padding: 8px 0;
   }
 
@@ -888,6 +917,11 @@
     margin-bottom: 8px;
   }
 
+  .comment-item-container {
+    position: relative;
+    width: 100%;
+  }
+
   .comment-item {
     position: relative;
     flex-direction: column;
@@ -896,6 +930,7 @@
     padding-top: 6px !important;
     padding-bottom: 6px !important;
     padding-left: 28px !important;
+    width: 100%;
   }
 
   .comment-icon {
@@ -911,6 +946,7 @@
     gap: 2px;
     width: 100%;
     min-width: 0;
+    padding-right: 32px; /* Space for delete button */
   }
 
   .comment-location {
@@ -940,6 +976,59 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Delete button for comments */
+  .comment-delete-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    background: var(--bg-chrome);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 0.1s,
+      color 0.1s,
+      background-color 0.1s;
+    z-index: 1;
+  }
+
+  .comment-item-container:hover .comment-delete-btn {
+    opacity: 1;
+  }
+
+  .comment-delete-btn:hover {
+    color: var(--status-deleted);
+    background-color: var(--bg-hover);
+  }
+
+  /* AI comment styling */
+  .ai-comment .comment-icon {
+    color: var(--text-accent);
+  }
+
+  .ai-comment.category-warning .comment-icon {
+    color: var(--orange-9);
+  }
+
+  .ai-comment.category-suggestion .comment-icon {
+    color: var(--green-9);
+  }
+
+  .ai-comment.category-explanation .comment-icon {
+    color: var(--blue-9);
+  }
+
+  .ai-comment.category-context .comment-icon {
+    color: var(--text-faint);
   }
 
   /* Reference files section */
