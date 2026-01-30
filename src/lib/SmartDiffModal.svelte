@@ -6,15 +6,20 @@
   analysis runs in TopBar with loading indicator there.
 -->
 <script lang="ts">
-  import { X, AlertTriangle, Orbit, RefreshCw } from 'lucide-svelte';
-  import { smartDiffState } from './stores/smartDiff.svelte';
+  import { X, AlertTriangle, Orbit, RefreshCw, Save, Trash2 } from 'lucide-svelte';
+  import { smartDiffState, clearResults } from './stores/smartDiff.svelte';
+  import { saveArtifact, type Artifact } from './services/review';
+  import type { DiffSpec } from './types';
 
   interface Props {
     onClose: () => void;
     onRefresh?: () => void;
+    onSave?: (artifact: Artifact) => void;
+    repoPath?: string | null;
+    spec?: DiffSpec | null;
   }
 
-  let { onClose, onRefresh }: Props = $props();
+  let { onClose, onRefresh, onSave, repoPath = null, spec = null }: Props = $props();
 
   // Derived state
   let summary = $derived(smartDiffState.changesetSummary);
@@ -28,6 +33,74 @@
     if (onRefresh && !isLoading) {
       onRefresh();
     }
+  }
+
+  async function handleSave() {
+    if (!summary || !spec) return;
+
+    // Generate title from summary (first 50 chars)
+    const title = summary.summary
+      .replace(/^#+\s*/, '')  // Strip markdown headers
+      .substring(0, 50)
+      .trim();
+
+    // Format as markdown document
+    let content = '';
+
+    if (summary.summary) {
+      content += `# Summary\n\n${summary.summary}\n\n`;
+    }
+
+    if (summary.key_changes.length > 0) {
+      content += `# Key Changes\n\n`;
+      for (const change of summary.key_changes) {
+        content += `- ${change}\n`;
+      }
+      content += '\n';
+    }
+
+    if (summary.concerns.length > 0) {
+      content += `# Concerns\n\n`;
+      for (const concern of summary.concerns) {
+        content += `- ${concern}\n`;
+      }
+    }
+
+    const artifact: Artifact = {
+      id: crypto.randomUUID(),
+      title: `AI Review: ${title}`,
+      content: content.trim(),
+      createdAt: new Date().toISOString(),
+    };
+
+    try {
+      // Save to database
+      await saveArtifact(spec, artifact, repoPath ?? undefined);
+
+      // Clear analysis from memory so clicking the top button starts fresh
+      // (Keep in database as cache, but clear UI state)
+      clearResults();
+
+      // Close modal after saving
+      handleClose();
+
+      // Notify AgentPanel to add this artifact to the list (no database reload needed)
+      if (onSave) {
+        onSave(artifact);
+      }
+    } catch (err) {
+      console.error('Failed to save review summary:', err);
+      // TODO: Show error to user
+    }
+  }
+
+  function handleDiscard() {
+    // Clear analysis from memory so clicking the top button starts fresh
+    // (Keep in database as cache, but clear UI state)
+    clearResults();
+
+    // Close modal
+    handleClose();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -51,6 +124,23 @@
         <h2>AI Analysis</h2>
       </div>
       <div class="header-actions">
+        <button
+          class="action-btn save-btn"
+          onclick={handleSave}
+          disabled={!summary}
+          title="Save review summary"
+        >
+          <Save size={14} />
+          <span>Save</span>
+        </button>
+        <button
+          class="action-btn discard-btn"
+          onclick={handleDiscard}
+          title="Discard without saving"
+        >
+          <Trash2 size={14} />
+          <span>Discard</span>
+        </button>
         {#if onRefresh}
           <button
             class="refresh-btn"
@@ -159,7 +249,41 @@
   .header-actions {
     display: flex;
     align-items: center;
+    gap: 8px;
+  }
+
+  .action-btn {
+    display: flex;
+    align-items: center;
     gap: 4px;
+    padding: 4px 8px;
+    background: none;
+    border: 1px solid var(--border-subtle);
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+
+  .action-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .action-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    border-color: var(--text-accent);
+    color: var(--text-accent);
+  }
+
+  .discard-btn:hover:not(:disabled) {
+    border-color: var(--status-deleted);
+    color: var(--status-deleted);
   }
 
   .refresh-btn,

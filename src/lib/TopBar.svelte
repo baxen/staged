@@ -49,14 +49,16 @@
     clearResults as clearSmartDiffState,
     setAnnotationsRevealed,
   } from './stores/smartDiff.svelte';
+  import type { AgentState, Artifact } from './stores/agent.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
     onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
     onCommit?: () => void;
+    agentState?: AgentState | null;
   }
 
-  let { onPresetSelect, onCustomDiff, onCommit }: Props = $props();
+  let { onPresetSelect, onCustomDiff, onCommit, agentState = null }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -189,6 +191,17 @@
 
     // Re-run analysis
     await runChangesetAnalysis();
+  }
+
+  /**
+   * Handle artifact saved from SmartDiffModal.
+   * Adds the artifact directly to AgentPanel's list (no database reload needed).
+   */
+  function handleArtifactSaved(artifact: Artifact) {
+    if (agentState) {
+      // Add artifact directly to the list
+      agentState.artifacts.push(artifact);
+    }
   }
 
   /**
@@ -471,7 +484,13 @@
 {/if}
 
 {#if showSmartDiffModal}
-  <SmartDiffModal onClose={() => (showSmartDiffModal = false)} onRefresh={handleRefreshAnalysis} />
+  <SmartDiffModal
+    onClose={() => (showSmartDiffModal = false)}
+    onRefresh={handleRefreshAnalysis}
+    onSave={handleArtifactSaved}
+    repoPath={repoState.currentPath}
+    spec={diffSelection.spec}
+  />
 {/if}
 
 <style>

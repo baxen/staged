@@ -670,6 +670,7 @@
       const tab = getActiveTab();
       if (tab) handleFilesChanged(tab.repoPath);
     }}
+    agentState={getActiveTab()?.agentState}
   />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>

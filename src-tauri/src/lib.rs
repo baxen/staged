@@ -14,7 +14,7 @@ use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
 };
-use review::{Comment, Edit, NewComment, NewEdit, Review};
+use review::{Artifact, Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
@@ -502,7 +502,7 @@ async fn sync_review_to_github(
 // AI Commands
 // =============================================================================
 
-use ai::{AcpProviderInfo, ChangesetAnalysis, ChangesetSummary, SmartDiffResult};
+use ai::{AcpProviderInfo, ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult};
 
 /// Discover available ACP providers on the system.
 /// Returns a list of providers that are installed and working.
@@ -661,6 +661,56 @@ fn delete_all_analyses(repo_path: Option<String>, spec: DiffSpec) -> Result<(), 
     store.delete_all_analyses(&id).map_err(|e| e.0)
 }
 
+/// Convert AI annotations to comments and save them to the database.
+/// Only converts actionable annotations (warnings and suggestions).
+/// Informational annotations (explanations and context) remain as blur overlays.
+#[tauri::command(rename_all = "camelCase")]
+fn save_ai_comments(
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    annotations: Vec<SmartDiffAnnotation>,
+) -> Result<Vec<Comment>, String> {
+    use ai::AnnotationCategory;
+    use review::CommentAuthor;
+
+    let path = get_repo_path(repo_path.as_deref());
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(path, &spec)?;
+
+    let mut comments = Vec::new();
+
+    for ann in annotations {
+        // Only convert warnings and suggestions to comments
+        // Keep explanations and context as blur overlays
+        let is_actionable = matches!(ann.category, AnnotationCategory::Warning | AnnotationCategory::Suggestion);
+
+        if !is_actionable {
+            continue;
+        }
+
+        // Only create comments for annotations with after_span (target new code)
+        if let (Some(file_path), Some(after_span)) = (ann.file_path, ann.after_span) {
+            let comment = Comment {
+                id: uuid::Uuid::new_v4().to_string(),
+                path: file_path,
+                span: git::Span::new(
+                    after_span.start.try_into().unwrap_or(0),
+                    after_span.end.try_into().unwrap_or(0)
+                ),
+                content: ann.content,
+                author: CommentAuthor::Ai,
+                category: Some(format!("{:?}", ann.category).to_lowercase()),
+                created_at: Some(chrono::Utc::now().to_rfc3339()),
+            };
+
+            store.add_comment(&id, &comment).map_err(|e| e.0)?;
+            comments.push(comment);
+        }
+    }
+
+    Ok(comments)
+}
+
 // =============================================================================
 // Review Commands
 // =============================================================================
@@ -769,8 +819,6 @@ fn remove_reference_file(
 // =============================================================================
 // Artifact Commands
 // =============================================================================
-
-use review::Artifact;
 
 /// Save an artifact to the database.
 #[tauri::command(rename_all = "camelCase")]
@@ -1227,6 +1275,7 @@ pub fn run() {
             get_file_analysis,
             get_all_file_analyses,
             delete_all_analyses,
+            save_ai_comments,
             // Review commands
             get_review,
             add_comment,

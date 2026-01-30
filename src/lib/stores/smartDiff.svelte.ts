@@ -8,7 +8,7 @@
  * Results are persisted to the database and loaded when switching diffs.
  */
 
-import type { SmartDiffResult, ChangesetSummary, DiffSpec } from '../types';
+import type { SmartDiffResult, ChangesetSummary, DiffSpec, SmartDiffAnnotation } from '../types';
 import {
   analyzeDiff,
   checkAiAvailable,
@@ -17,7 +17,9 @@ import {
   saveFileAnalysis,
   getAllFileAnalyses,
   deleteAllAnalyses,
+  saveAiComments,
 } from '../services/ai';
+import { loadComments } from './comments.svelte';
 
 // =============================================================================
 // State
@@ -140,6 +142,21 @@ export async function runAnalysis(
       // Persist each file's annotations
       for (const [filePath, fileResult] of newResults) {
         await saveFileAnalysis(repoPath, spec, filePath, fileResult);
+      }
+
+      // Convert actionable annotations (warnings/suggestions) to persistent comments
+      // Informational annotations (explanations/context) remain as blur overlays only
+      const allAnnotations: SmartDiffAnnotation[] = [];
+      for (const annotations of Object.values(result.file_annotations)) {
+        allAnnotations.push(...annotations);
+      }
+
+      if (allAnnotations.length > 0) {
+        // Backend filters to only save warnings and suggestions as comments
+        await saveAiComments(repoPath, spec, allAnnotations);
+
+        // Reload comments to include new AI comments
+        await loadComments(spec, repoPath ?? undefined);
       }
     } catch (e) {
       console.error('Failed to persist analysis:', e);

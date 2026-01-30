@@ -35,6 +35,8 @@ export interface DiffState {
   selectedFile: string | null;
   /** Target line to scroll to after file selection (0-indexed, null = no scroll) */
   scrollTargetLine: number | null;
+  /** Target comment to expand after file selection (null = no auto-expand) */
+  scrollTargetCommentId: string | null;
   /** Whether file list is loading */
   loading: boolean;
   /** Whether a specific file diff is loading */
@@ -60,6 +62,7 @@ export function createDiffState(): DiffState {
     diffCache: new Map<string, FileDiff>(),
     selectedFile: null,
     scrollTargetLine: null,
+    scrollTargetCommentId: null,
     loading: true,
     loadingFile: null,
     error: null,
@@ -229,18 +232,30 @@ export function clearScrollTarget(): void {
   diffState.scrollTargetLine = null;
 }
 
+/**
+ * Clear the comment expansion target (called after expanding completes).
+ */
+export function clearScrollTargetCommentId(): void {
+  diffState.scrollTargetCommentId = null;
+}
+
 /** Counter to track the current selection and ignore stale async results */
 let selectionId = 0;
 
 /**
- * Select a file by path, optionally scrolling to a specific line.
+ * Select a file by path, optionally scrolling to a specific line and/or expanding a comment.
  * Triggers loading the diff if not cached.
  * Handles rapid selection changes by ignoring stale loads.
  */
-export async function selectFile(path: string | null, scrollToLine?: number): Promise<void> {
+export async function selectFile(
+  path: string | null,
+  scrollToLine?: number,
+  commentId?: string
+): Promise<void> {
   const thisSelection = ++selectionId;
   diffState.selectedFile = path;
   diffState.scrollTargetLine = scrollToLine ?? null;
+  diffState.scrollTargetCommentId = commentId ?? null;
   if (path && !diffState.diffCache.has(path)) {
     await loadFileDiff(path);
     // If user selected a different file while we were loading, don't update

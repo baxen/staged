@@ -13,4 +13,6 @@ pub use acp_client::{
     run_acp_prompt_with_session, AcpAgent, AcpPromptResult, AcpProviderInfo,
 };
 pub use runner::analyze_diff;
-pub use types::{ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult};
+pub use types::{
+    AnnotationCategory, ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult,
+};

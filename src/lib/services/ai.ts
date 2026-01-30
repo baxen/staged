@@ -3,7 +3,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import type { SmartDiffResult, ChangesetSummary, ChangesetAnalysis, DiffSpec } from '../types';
+import type { SmartDiffResult, ChangesetSummary, ChangesetAnalysis, DiffSpec, SmartDiffAnnotation, Comment } from '../types';
 
 /**
  * Check if an AI CLI tool is available.
@@ -84,6 +84,23 @@ export async function getAllFileAnalyses(
  */
 export async function deleteAllAnalyses(repoPath: string | null, spec: DiffSpec): Promise<void> {
   return invoke('delete_all_analyses', { repoPath, spec });
+}
+
+/**
+ * Convert AI annotations to comments and save them to the database.
+ * Only annotations with after_span are converted (those targeting new code).
+ *
+ * @param repoPath - Path to the repository (null for current directory)
+ * @param spec - The diff specification (base..head)
+ * @param annotations - Array of AI annotations to convert to comments
+ * @returns Array of created comments
+ */
+export async function saveAiComments(
+  repoPath: string | null,
+  spec: DiffSpec,
+  annotations: SmartDiffAnnotation[]
+): Promise<Comment[]> {
+  return invoke<Comment[]>('save_ai_comments', { repoPath, spec, annotations });
 }
 
 // =============================================================================
