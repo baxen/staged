@@ -5,6 +5,7 @@
 
 pub mod ai;
 pub mod git;
+pub mod project;
 mod recent_repos;
 pub mod review;
 mod themes;
@@ -822,10 +823,10 @@ fn remove_reference_file(
 }
 
 // =============================================================================
-// Artifact Commands
+// Artifact Commands (legacy - diff-based)
 // =============================================================================
 
-/// Save an artifact to the database.
+/// Save an artifact to the database (legacy - tied to diff).
 #[tauri::command(rename_all = "camelCase")]
 fn save_artifact(
     repo_path: Option<String>,
@@ -838,7 +839,7 @@ fn save_artifact(
     store.save_artifact(&id, &artifact).map_err(|e| e.0)
 }
 
-/// Get all artifacts for a diff.
+/// Get all artifacts for a diff (legacy - tied to diff).
 #[tauri::command(rename_all = "camelCase")]
 fn get_artifacts(repo_path: Option<String>, spec: DiffSpec) -> Result<Vec<Artifact>, String> {
     let path = get_repo_path(repo_path.as_deref());
@@ -847,11 +848,143 @@ fn get_artifacts(repo_path: Option<String>, spec: DiffSpec) -> Result<Vec<Artifa
     store.get_artifacts(&id).map_err(|e| e.0)
 }
 
-/// Delete an artifact by ID.
+/// Delete an artifact by ID (legacy).
 #[tauri::command(rename_all = "camelCase")]
 fn delete_artifact(artifact_id: String) -> Result<(), String> {
     let store = review::get_store().map_err(|e| e.0)?;
     store.delete_artifact(&artifact_id).map_err(|e| e.0)
+}
+
+// =============================================================================
+// Project Commands (new artifact-centric model)
+// =============================================================================
+
+use project::{Artifact as ProjectArtifact, ArtifactData, Project, Session};
+
+/// Create a new project.
+#[tauri::command(rename_all = "camelCase")]
+fn create_project(name: String) -> Result<Project, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    let project = Project::new(name);
+    store.create_project(&project).map_err(|e| e.0)?;
+    Ok(project)
+}
+
+/// Get a project by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_project(project_id: String) -> Result<Option<Project>, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.get_project(&project_id).map_err(|e| e.0)
+}
+
+/// List all projects.
+#[tauri::command(rename_all = "camelCase")]
+fn list_projects() -> Result<Vec<Project>, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.list_projects().map_err(|e| e.0)
+}
+
+/// Update a project's name.
+#[tauri::command(rename_all = "camelCase")]
+fn update_project(project_id: String, name: String) -> Result<(), String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.update_project(&project_id, &name).map_err(|e| e.0)
+}
+
+/// Delete a project and all its artifacts.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_project(project_id: String) -> Result<(), String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.delete_project(&project_id).map_err(|e| e.0)
+}
+
+/// Create a new artifact.
+#[tauri::command(rename_all = "camelCase")]
+fn create_artifact(
+    project_id: String,
+    title: String,
+    data: ArtifactData,
+) -> Result<ProjectArtifact, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    let now = chrono::Utc::now().to_rfc3339();
+    let artifact = ProjectArtifact {
+        id: uuid::Uuid::new_v4().to_string(),
+        project_id,
+        title,
+        created_at: now.clone(),
+        updated_at: now,
+        parent_artifact_id: None,
+        data,
+    };
+    store.create_artifact(&artifact).map_err(|e| e.0)?;
+    Ok(artifact)
+}
+
+/// Get an artifact by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_artifact(artifact_id: String) -> Result<Option<ProjectArtifact>, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.get_artifact(&artifact_id).map_err(|e| e.0)
+}
+
+/// List artifacts in a project.
+#[tauri::command(rename_all = "camelCase")]
+fn list_artifacts(project_id: String) -> Result<Vec<ProjectArtifact>, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.list_artifacts(&project_id).map_err(|e| e.0)
+}
+
+/// Update an artifact.
+#[tauri::command(rename_all = "camelCase")]
+fn update_artifact(
+    artifact_id: String,
+    title: Option<String>,
+    data: Option<ArtifactData>,
+) -> Result<(), String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store
+        .update_artifact(&artifact_id, title.as_deref(), data.as_ref())
+        .map_err(|e| e.0)
+}
+
+/// Delete an artifact from a project.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_project_artifact(artifact_id: String) -> Result<(), String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.delete_artifact(&artifact_id).map_err(|e| e.0)
+}
+
+/// Add context links to an artifact (which artifacts were used as input).
+#[tauri::command(rename_all = "camelCase")]
+fn add_artifact_context(artifact_id: String, context_artifact_ids: Vec<String>) -> Result<(), String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    for context_id in context_artifact_ids {
+        store.add_context(&artifact_id, &context_id).map_err(|e| e.0)?;
+    }
+    Ok(())
+}
+
+/// Get the artifacts that were used as context when creating an artifact.
+#[tauri::command(rename_all = "camelCase")]
+fn get_artifact_context(artifact_id: String) -> Result<Vec<String>, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.get_context_artifacts(&artifact_id).map_err(|e| e.0)
+}
+
+/// Save a session (AI conversation transcript) for an artifact.
+#[tauri::command(rename_all = "camelCase")]
+fn save_session(artifact_id: String, transcript: String) -> Result<Session, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    let session = Session::new(artifact_id, transcript);
+    store.create_session(&session).map_err(|e| e.0)?;
+    Ok(session)
+}
+
+/// Get sessions for an artifact.
+#[tauri::command(rename_all = "camelCase")]
+fn get_sessions(artifact_id: String) -> Result<Vec<Session>, String> {
+    let store = project::get_store().map_err(|e| e.0)?;
+    store.get_sessions(&artifact_id).map_err(|e| e.0)
 }
 
 // =============================================================================
@@ -1224,6 +1357,9 @@ pub fn run() {
             // Initialize the review store with app data directory
             review::init_store(app.handle()).map_err(|e| e.0)?;
 
+            // Initialize the project store with app data directory
+            project::init_store(app.handle()).map_err(|e| e.0)?;
+
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
             app.manage(watcher);
@@ -1294,10 +1430,25 @@ pub fn run() {
             clear_review,
             add_reference_file,
             remove_reference_file,
-            // Artifact commands
+            // Artifact commands (legacy - diff-based)
             save_artifact,
             get_artifacts,
             delete_artifact,
+            // Project commands (new artifact-centric model)
+            create_project,
+            get_project,
+            list_projects,
+            update_project,
+            delete_project,
+            create_artifact,
+            get_artifact,
+            list_artifacts,
+            update_artifact,
+            delete_project_artifact,
+            add_artifact_context,
+            get_artifact_context,
+            save_session,
+            get_sessions,
             // Theme commands
             get_custom_themes,
             read_custom_theme,
