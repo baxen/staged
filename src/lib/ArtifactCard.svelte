@@ -3,9 +3,18 @@
 
   Shows artifact title, type indicator, preview, and metadata.
   Supports selection and contextual actions.
+  Shows generating state with spinner when artifact is being created.
 -->
 <script lang="ts">
-  import { FileText, GitCommit, Clock, Trash2, Maximize2 } from 'lucide-svelte';
+  import {
+    FileText,
+    GitCommit,
+    Clock,
+    Trash2,
+    Maximize2,
+    Loader2,
+    AlertCircle,
+  } from 'lucide-svelte';
   import type { Artifact } from './types';
 
   interface Props {
@@ -20,6 +29,8 @@
 
   let isMarkdown = $derived(artifact.data.type === 'markdown');
   let isCommit = $derived(artifact.data.type === 'commit');
+  let isGenerating = $derived(artifact.status === 'generating');
+  let isError = $derived(artifact.status === 'error');
 
   // Get preview content for markdown artifacts
   let preview = $derived.by(() => {
@@ -62,9 +73,7 @@
 
   function handleDelete(e: MouseEvent) {
     e.stopPropagation();
-    if (confirm(`Delete "${artifact.title}"?`)) {
-      onDelete?.();
-    }
+    onDelete?.();
   }
 
   function handleOpenDetail(e: MouseEvent) {
@@ -79,13 +88,25 @@
   class:selected
   class:markdown={isMarkdown}
   class:commit={isCommit}
+  class:generating={isGenerating}
+  class:error={isError}
   onclick={onSelect}
   role="button"
   tabindex="0"
 >
   <div class="card-header">
-    <div class="type-icon" class:markdown={isMarkdown} class:commit={isCommit}>
-      {#if isMarkdown}
+    <div
+      class="type-icon"
+      class:markdown={isMarkdown}
+      class:commit={isCommit}
+      class:generating={isGenerating}
+      class:error={isError}
+    >
+      {#if isGenerating}
+        <Loader2 size={14} class="spinner" />
+      {:else if isError}
+        <AlertCircle size={14} />
+      {:else if isMarkdown}
         <FileText size={14} />
       {:else}
         <GitCommit size={14} />
@@ -103,7 +124,11 @@
   </div>
 
   <div class="card-content">
-    {#if isMarkdown && preview}
+    {#if isGenerating}
+      <p class="generating-text">Generating with AI...</p>
+    {:else if isError}
+      <p class="error-text">{artifact.errorMessage || 'Generation failed'}</p>
+    {:else if isMarkdown && preview}
       <p class="preview">{preview}</p>
     {:else if commitInfo}
       <div class="commit-info">
@@ -145,6 +170,14 @@
     box-shadow: inset 0 0 0 1px var(--ui-accent);
   }
 
+  .artifact-card.generating {
+    opacity: 0.8;
+  }
+
+  .artifact-card.error {
+    border: 1px solid var(--ui-danger);
+  }
+
   /* Header */
   .card-header {
     display: flex;
@@ -171,6 +204,30 @@
   .type-icon.commit {
     background-color: rgba(63, 185, 80, 0.15);
     color: var(--status-added);
+  }
+
+  .type-icon.generating {
+    background-color: rgba(88, 166, 255, 0.15);
+    color: var(--text-accent);
+  }
+
+  .type-icon.error {
+    background-color: var(--ui-danger-bg);
+    color: var(--ui-danger);
+  }
+
+  /* Spinner animation */
+  :global(.spinner) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   .title {
@@ -236,6 +293,25 @@
     color: var(--text-muted);
     margin: 0;
     line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .generating-text {
+    font-size: var(--size-sm);
+    color: var(--text-accent);
+    margin: 0;
+    font-style: italic;
+  }
+
+  .error-text {
+    font-size: var(--size-sm);
+    color: var(--ui-danger);
+    margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     display: -webkit-box;

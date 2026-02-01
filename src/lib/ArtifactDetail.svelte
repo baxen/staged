@@ -2,10 +2,11 @@
   ArtifactDetail.svelte - Detail view for a selected artifact
 
   Shows the full content of a markdown artifact or commit info.
+  Shows generating state with placeholder when artifact is being created.
   Supports editing and refinement actions.
 -->
 <script lang="ts">
-  import { X, FileText, GitCommit, Clock } from 'lucide-svelte';
+  import { X, FileText, GitCommit, Clock, Loader2, AlertCircle } from 'lucide-svelte';
   import type { Artifact } from './types';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -19,6 +20,8 @@
 
   let isMarkdown = $derived(artifact.data.type === 'markdown');
   let isCommit = $derived(artifact.data.type === 'commit');
+  let isGenerating = $derived(artifact.status === 'generating');
+  let isError = $derived(artifact.status === 'error');
 
   // Render markdown content
   let renderedContent = $derived.by(() => {
@@ -79,7 +82,25 @@
   </div>
 
   <div class="detail-content">
-    {#if isMarkdown}
+    {#if isGenerating}
+      <div class="generating-content">
+        <div class="generating-indicator">
+          <Loader2 size={24} class="spinner" />
+          <span>Generating with AI...</span>
+        </div>
+        <p class="generating-hint">
+          The artifact content will appear here when generation completes.
+        </p>
+      </div>
+    {:else if isError}
+      <div class="error-content">
+        <div class="error-indicator">
+          <AlertCircle size={24} />
+          <span>Generation Failed</span>
+        </div>
+        <p class="error-message">{artifact.errorMessage || 'An unknown error occurred'}</p>
+      </div>
+    {:else if isMarkdown}
       <div class="markdown-content">
         {@html renderedContent}
       </div>
@@ -200,6 +221,71 @@
     flex: 1;
     overflow: auto;
     padding: 20px;
+  }
+
+  /* Generating state */
+  .generating-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+    color: var(--text-muted);
+  }
+
+  .generating-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text-accent);
+    font-size: var(--size-lg);
+  }
+
+  .generating-hint {
+    font-size: var(--size-sm);
+    color: var(--text-faint);
+    margin: 0;
+  }
+
+  /* Spinner animation */
+  :global(.spinner) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  /* Error state */
+  .error-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 16px;
+  }
+
+  .error-indicator {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--ui-danger);
+    font-size: var(--size-lg);
+  }
+
+  .error-message {
+    font-size: var(--size-sm);
+    color: var(--ui-danger);
+    margin: 0;
+    text-align: center;
+    max-width: 400px;
   }
 
   /* Markdown content */

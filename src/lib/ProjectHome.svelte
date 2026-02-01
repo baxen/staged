@@ -15,6 +15,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { Plus, Sparkles, FolderKanban, Trash2, X } from 'lucide-svelte';
   import type { Project, Artifact } from './types';
   import * as projectService from './services/project';
@@ -164,7 +165,6 @@
   function handleArtifactCreated(artifact: Artifact) {
     artifacts = [artifact, ...artifacts];
     selectedArtifactIds = new Set([artifact.id]);
-    detailArtifactId = artifact.id;
   }
 
   async function handleDeleteArtifact(artifactId: string) {
@@ -275,12 +275,36 @@
     }
   }
 
+  // Event listener cleanup
+  let unlistenArtifactUpdated: UnlistenFn | null = null;
+
   onMount(() => {
     window.addEventListener('keydown', handleKeydown);
+
+    // Listen for artifact updates from background generation
+    listen<string>('artifact-updated', async (event) => {
+      const artifactId = event.payload;
+      // Refresh the artifact if it's in our current list
+      const existingIndex = artifacts.findIndex((a) => a.id === artifactId);
+      if (existingIndex >= 0) {
+        const updated = await projectService.getArtifact(artifactId);
+        if (updated) {
+          artifacts = artifacts.map((a) => (a.id === artifactId ? updated : a));
+          // Also update detail view if showing this artifact
+          if (detailArtifactId === artifactId) {
+            // Force reactivity by reassigning
+            detailArtifactId = artifactId;
+          }
+        }
+      }
+    }).then((unlisten) => {
+      unlistenArtifactUpdated = unlisten;
+    });
   });
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown);
+    unlistenArtifactUpdated?.();
   });
 </script>
 
