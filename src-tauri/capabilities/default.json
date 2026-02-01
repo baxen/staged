@@ -9,6 +9,7 @@
     "core:default",
     "dialog:default",
     "clipboard-manager:allow-write-text",
-    "window-state:default"
+    "window-state:default",
+    "mcp-bridge:default"
   ]
 }
