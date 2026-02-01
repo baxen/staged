@@ -1016,6 +1016,131 @@ fn get_sessions(artifact_id: String) -> Result<Vec<Session>, String> {
     store.get_sessions(&artifact_id).map_err(|e| e.0)
 }
 
+/// System prompt for artifact generation.
+/// Instructs the AI that only its final message becomes the artifact.
+const ARTIFACT_SYSTEM_PROMPT: &str = r#"You are an AI assistant helping create research documents, plans, and analysis artifacts.
+
+IMPORTANT: Only your FINAL message will become the artifact. Any intermediate reasoning, tool calls, or exploratory work you do will NOT be shown to the user. The artifact must be completely self-contained.
+
+Guidelines for your final response:
+- Write in well-structured Markdown
+- Use clear headings (##, ###) to organize content
+- Include code blocks with language tags when showing code
+- Be thorough but concise
+- The document should stand alone without needing the conversation context
+
+"#;
+
+/// Generate a new artifact using AI.
+///
+/// Calls the AI with the prompt and any context artifacts, then creates
+/// a markdown artifact from the final response.
+#[tauri::command(rename_all = "camelCase")]
+async fn generate_artifact(
+    project_id: String,
+    prompt: String,
+    context_artifact_ids: Vec<String>,
+) -> Result<ProjectArtifact, String> {
+    // Find an AI agent
+    let agent = ai::find_acp_agent().ok_or_else(|| {
+        "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
+    })?;
+
+    // Get the project store
+    let store = project::get_store().map_err(|e| e.0)?;
+
+    // Build the full prompt with context
+    let mut full_prompt = String::from(ARTIFACT_SYSTEM_PROMPT);
+
+    // Add context artifacts if any
+    if !context_artifact_ids.is_empty() {
+        full_prompt
+            .push_str("\n## Context\n\nThe following artifacts have been provided as context:\n\n");
+
+        for artifact_id in &context_artifact_ids {
+            if let Some(artifact) = store.get_artifact(artifact_id).map_err(|e| e.0)? {
+                full_prompt.push_str(&format!("### {}\n\n", artifact.title));
+                if let ArtifactData::Markdown { content } = &artifact.data {
+                    full_prompt.push_str(content);
+                    full_prompt.push_str("\n\n---\n\n");
+                }
+            }
+        }
+    }
+
+    // Add the user's request
+    full_prompt.push_str("## Request\n\n");
+    full_prompt.push_str(&prompt);
+    full_prompt.push_str("\n\nPlease create a comprehensive artifact addressing this request. Remember: only your final message becomes the artifact, so make it complete and self-contained.");
+
+    // Use current directory as working dir (artifacts aren't repo-specific)
+    let working_dir = std::env::current_dir().map_err(|e| e.to_string())?;
+
+    // Call the AI
+    let result = ai::run_acp_prompt(&agent, &working_dir, &full_prompt)
+        .await
+        .map_err(|e| format!("AI generation failed: {}", e))?;
+
+    // Extract a title from the response (first heading or first line)
+    let title = extract_title_from_markdown(&result, &prompt);
+
+    // Create the artifact
+    let now = chrono::Utc::now().to_rfc3339();
+    let artifact = ProjectArtifact {
+        id: uuid::Uuid::new_v4().to_string(),
+        project_id: project_id.clone(),
+        title,
+        created_at: now.clone(),
+        updated_at: now,
+        parent_artifact_id: None,
+        data: ArtifactData::Markdown { content: result },
+    };
+
+    // Save to database
+    store.create_artifact(&artifact).map_err(|e| e.0)?;
+
+    // Add context links
+    for context_id in &context_artifact_ids {
+        store
+            .add_context(&artifact.id, context_id)
+            .map_err(|e| e.0)?;
+    }
+
+    Ok(artifact)
+}
+
+/// Extract a title from markdown content.
+/// Looks for the first # heading, or falls back to first line or prompt.
+fn extract_title_from_markdown(content: &str, fallback_prompt: &str) -> String {
+    // Look for first heading
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if let Some(heading) = trimmed.strip_prefix("# ") {
+            return heading.trim().to_string();
+        }
+    }
+
+    // Fall back to first non-empty line
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if !trimmed.is_empty() {
+            let title = trimmed.trim_start_matches('#').trim();
+            if title.len() > 60 {
+                return format!("{}...", &title[..57]);
+            }
+            return title.to_string();
+        }
+    }
+
+    // Fall back to prompt
+    let prompt_title = fallback_prompt.trim();
+    if prompt_title.len() > 60 {
+        format!("{}...", &prompt_title[..57])
+    } else {
+        prompt_title.to_string()
+    }
+}
+
 // =============================================================================
 // Theme Commands
 // =============================================================================
@@ -1485,6 +1610,7 @@ pub fn run() {
             get_artifact_context,
             save_session,
             get_sessions,
+            generate_artifact,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

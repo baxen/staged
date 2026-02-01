@@ -125,3 +125,30 @@ export async function saveSession(artifactId: string, transcript: string): Promi
 export async function getSessions(artifactId: string): Promise<Session[]> {
   return invoke<Session[]>('get_sessions', { artifactId });
 }
+
+// =============================================================================
+// AI-powered artifact generation
+// =============================================================================
+
+/**
+ * Generate a new artifact using AI.
+ *
+ * The AI is given the prompt and any context artifacts, and produces
+ * a markdown artifact. Only the final message becomes the artifact content.
+ *
+ * @param projectId - The project to create the artifact in
+ * @param prompt - The user's request (e.g., "Research best practices for...")
+ * @param contextArtifactIds - Optional artifact IDs to include as context
+ * @returns The created artifact
+ */
+export async function generateArtifact(
+  projectId: string,
+  prompt: string,
+  contextArtifactIds?: string[]
+): Promise<Artifact> {
+  return invoke<Artifact>('generate_artifact', {
+    projectId,
+    prompt,
+    contextArtifactIds: contextArtifactIds ?? [],
+  });
+}

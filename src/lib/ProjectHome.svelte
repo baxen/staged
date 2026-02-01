@@ -1,25 +1,26 @@
 <!--
-  ProjectHome.svelte - The new artifact-centric homepage
+  ProjectHome.svelte - The artifact-centric homepage
 
   Displays projects as tabs and artifacts in a grid layout.
   This is the main surface for the artifact-centric workspace model.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
-  import {
-    FileText,
-    GitCommit,
-    Plus,
-    MoreHorizontal,
-    Clock,
-    Sparkles,
-    FolderKanban,
-  } from 'lucide-svelte';
-  import type { Project, Artifact, ArtifactData } from './types';
+  import { onMount, onDestroy } from 'svelte';
+  import { Plus, Sparkles, FolderKanban, Trash2 } from 'lucide-svelte';
+  import type { Project, Artifact } from './types';
   import * as projectService from './services/project';
   import ArtifactCard from './ArtifactCard.svelte';
   import NewArtifactCard from './NewArtifactCard.svelte';
   import ArtifactDetail from './ArtifactDetail.svelte';
+  import NewArtifactModal from './NewArtifactModal.svelte';
+
+  // Props for external control
+  interface Props {
+    /** Called when user wants to close this project tab */
+    onCloseProject?: () => void;
+  }
+
+  let { onCloseProject }: Props = $props();
 
   // State
   let projects = $state<Project[]>([]);
@@ -30,9 +31,13 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
 
+  // Modal state
+  let showNewArtifactModal = $state(false);
+
   // Derived
   let selectedProject = $derived(projects.find((p) => p.id === selectedProjectId) ?? null);
   let detailArtifact = $derived(artifacts.find((a) => a.id === detailArtifactId) ?? null);
+  let selectedProjectIndex = $derived(projects.findIndex((p) => p.id === selectedProjectId));
 
   // Load projects on mount
   onMount(async () => {
@@ -45,13 +50,7 @@
     try {
       projects = await projectService.listProjects();
 
-      // If no projects, create a demo one with fake artifacts
-      if (projects.length === 0) {
-        await createDemoData();
-        projects = await projectService.listProjects();
-      }
-
-      // Select first project by default
+      // Select first project by default if we have any
       if (projects.length > 0 && !selectedProjectId) {
         selectedProjectId = projects[0].id;
       }
@@ -66,6 +65,8 @@
   $effect(() => {
     if (selectedProjectId) {
       loadArtifacts(selectedProjectId);
+    } else {
+      artifacts = [];
     }
   });
 
@@ -76,194 +77,6 @@
       console.error('Failed to load artifacts:', e);
       artifacts = [];
     }
-  }
-
-  async function createDemoData() {
-    // Create a demo project
-    const project = await projectService.createProject('Improve Git Performance');
-
-    // Create some demo artifacts
-    await projectService.createArtifact(project.id, 'Git Integration Research', {
-      type: 'markdown',
-      content: `# Git Integration Analysis
-
-## Current State
-The application currently uses direct git command execution for all operations.
-
-## Bottlenecks Identified
-1. **Large repository cloning** - No shallow clone support
-2. **Status checks** - Full tree walk on every status
-3. **Diff generation** - Loading entire files into memory
-
-## Recommendations
-- Implement shallow clone for initial setup
-- Cache git status with file system watchers
-- Stream diff generation for large files
-
-## Next Steps
-Create a detailed implementation plan for the caching layer.`,
-    });
-
-    await projectService.createArtifact(project.id, 'Caching Layer Plan', {
-      type: 'markdown',
-      content: `# Caching Layer Implementation Plan
-
-## Overview
-Add a caching layer to reduce redundant git operations.
-
-## Components
-
-### 1. Status Cache
-- Watch filesystem for changes
-- Invalidate on file modifications
-- TTL of 5 seconds for background refresh
-
-### 2. Diff Cache
-- Key by file path + before/after refs
-- LRU eviction with 100MB limit
-- Persist across sessions
-
-## Implementation Order
-1. Status cache (highest impact)
-2. Diff cache (memory optimization)
-3. Ref cache (minor improvement)`,
-    });
-
-    await projectService.createArtifact(project.id, 'Quick Notes', {
-      type: 'markdown',
-      content: `# Quick Notes
-
-- Remember to check libgit2 bindings as alternative
-- Look into git sparse-checkout for monorepos
-- Consider WebWorker for heavy operations`,
-    });
-
-    await projectService.createArtifact(project.id, 'Architecture Deep Dive', {
-      type: 'markdown',
-      content: `# Architecture Deep Dive
-
-## System Overview
-
-This document provides a comprehensive analysis of the current system architecture, identifying key components, data flows, and potential areas for improvement.
-
-## Core Components
-
-### 1. Repository Manager
-
-The Repository Manager is responsible for all git operations. It maintains a connection pool to handle concurrent operations efficiently.
-
-**Key Responsibilities:**
-- Repository discovery and initialization
-- Branch management and switching
-- Commit history traversal
-- Diff computation
-
-**Current Implementation:**
-\`\`\`rust
-pub struct RepoManager {
-    repos: HashMap<PathBuf, Repository>,
-    cache: LruCache<CacheKey, CachedValue>,
-    watcher: FileWatcher,
-}
-
-impl RepoManager {
-    pub fn get_diff(&self, spec: &DiffSpec) -> Result<Diff> {
-        // Check cache first
-        if let Some(cached) = self.cache.get(&spec.cache_key()) {
-            return Ok(cached.clone());
-        }
-        
-        // Compute diff
-        let diff = self.compute_diff(spec)?;
-        self.cache.insert(spec.cache_key(), diff.clone());
-        Ok(diff)
-    }
-}
-\`\`\`
-
-### 2. File Watcher
-
-The file watcher monitors the filesystem for changes and invalidates relevant caches.
-
-**Events Handled:**
-- File creation
-- File modification  
-- File deletion
-- Directory changes
-
-**Debouncing Strategy:**
-We use a 100ms debounce window to batch rapid changes (common during saves or git operations).
-
-### 3. UI Layer
-
-The UI is built with Svelte 5, using runes for reactive state management.
-
-**Component Hierarchy:**
-- App.svelte (root)
-  - TabBar (tab management)
-  - TopBar (actions, navigation)
-  - Sidebar (file list)
-  - DiffViewer (main content)
-
-## Data Flow
-
-### Diff Request Flow
-
-1. User selects a diff spec (e.g., "main..HEAD")
-2. UI dispatches request via Tauri invoke
-3. Backend resolves refs to commits
-4. Diff is computed using libgit2
-5. Result is cached and returned
-6. UI renders the diff with syntax highlighting
-
-### Cache Invalidation Flow
-
-1. File watcher detects change
-2. Change is debounced (100ms window)
-3. Affected cache entries are identified
-4. Entries are invalidated
-5. UI is notified to refresh if needed
-
-## Performance Considerations
-
-### Memory Usage
-
-Current memory profile for a medium-sized repository (10k files):
-- Base memory: ~50MB
-- Per-open-diff: ~5MB
-- Syntax highlighting cache: ~20MB
-- Total typical usage: ~100MB
-
-### Latency Targets
-
-| Operation | Target | Current |
-|-----------|--------|---------|
-| Initial load | <500ms | 450ms |
-| File select | <50ms | 35ms |
-| Diff compute | <200ms | 180ms |
-| Syntax highlight | <100ms | 85ms |
-
-## Future Improvements
-
-### Short Term (1-2 weeks)
-- Implement streaming diff for large files
-- Add progress indicators for slow operations
-- Optimize syntax highlighting for very long files
-
-### Medium Term (1-2 months)
-- WebWorker for CPU-intensive operations
-- Incremental diff updates
-- Better memory management for large repos
-
-### Long Term (3-6 months)
-- Plugin system for custom diff renderers
-- Collaborative features (shared reviews)
-- Integration with CI/CD systems
-
-## Conclusion
-
-The current architecture provides a solid foundation but has room for optimization, particularly in memory usage and handling of large repositories. The proposed improvements should address these concerns while maintaining the simplicity and reliability of the current design.`,
-    });
   }
 
   function handleSelectProject(projectId: string) {
@@ -300,25 +113,34 @@ The current architecture provides a solid foundation but has room for optimizati
     }
   }
 
-  async function handleNewArtifact() {
-    if (!selectedProjectId) return;
+  async function handleDeleteProject(projectId: string) {
+    const project = projects.find((p) => p.id === projectId);
+    if (!project) return;
 
-    // For now, just create a placeholder artifact
-    // In the real flow, this would open an AI prompt interface
-    const title = prompt('Artifact title:');
-    if (!title) return;
+    if (!confirm(`Delete project "${project.name}" and all its artifacts?`)) return;
 
     try {
-      const artifact = await projectService.createArtifact(selectedProjectId, title, {
-        type: 'markdown',
-        content: `# ${title}\n\n*This artifact is being generated...*`,
-      });
-      artifacts = [...artifacts, artifact];
-      selectedArtifactIds = new Set([artifact.id]);
-      detailArtifactId = artifact.id;
+      await projectService.deleteProject(projectId);
+      projects = projects.filter((p) => p.id !== projectId);
+
+      // Select another project if we deleted the current one
+      if (selectedProjectId === projectId) {
+        selectedProjectId = projects.length > 0 ? projects[0].id : null;
+      }
     } catch (e) {
-      console.error('Failed to create artifact:', e);
+      console.error('Failed to delete project:', e);
     }
+  }
+
+  function handleNewArtifact() {
+    if (!selectedProjectId) return;
+    showNewArtifactModal = true;
+  }
+
+  function handleArtifactCreated(artifact: Artifact) {
+    artifacts = [artifact, ...artifacts];
+    selectedArtifactIds = new Set([artifact.id]);
+    detailArtifactId = artifact.id;
   }
 
   async function handleDeleteArtifact(artifactId: string) {
@@ -340,20 +162,73 @@ The current architecture provides a solid foundation but has room for optimizati
     }
   }
 
-  function formatRelativeTime(dateStr: string): string {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMins / 60);
-    const diffDays = Math.floor(diffHours / 24);
+  // Keyboard shortcuts
+  function handleKeydown(e: KeyboardEvent) {
+    // Skip if in input/textarea
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+      return;
+    }
 
-    if (diffMins < 1) return 'just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffHours < 24) return `${diffHours}h ago`;
-    if (diffDays < 7) return `${diffDays}d ago`;
-    return date.toLocaleDateString();
+    const isMeta = e.metaKey || e.ctrlKey;
+
+    // Cmd+W - Close current project tab
+    if (isMeta && e.key === 'w') {
+      e.preventDefault();
+      if (onCloseProject) {
+        onCloseProject();
+      }
+      return;
+    }
+
+    // Cmd+T - New project
+    if (isMeta && e.key === 't') {
+      e.preventDefault();
+      handleNewProject();
+      return;
+    }
+
+    // Cmd+N - New artifact (when project is selected)
+    if (isMeta && e.key === 'n') {
+      e.preventDefault();
+      handleNewArtifact();
+      return;
+    }
+
+    // Ctrl+Tab / Ctrl+Shift+Tab - Switch project tabs
+    if (e.ctrlKey && e.key === 'Tab') {
+      e.preventDefault();
+      if (projects.length <= 1) return;
+
+      if (e.shiftKey) {
+        // Previous tab
+        const newIndex = selectedProjectIndex <= 0 ? projects.length - 1 : selectedProjectIndex - 1;
+        selectedProjectId = projects[newIndex].id;
+      } else {
+        // Next tab
+        const newIndex = selectedProjectIndex >= projects.length - 1 ? 0 : selectedProjectIndex + 1;
+        selectedProjectId = projects[newIndex].id;
+      }
+      return;
+    }
+
+    // Escape - Close detail modal
+    if (e.key === 'Escape') {
+      if (detailArtifactId) {
+        e.preventDefault();
+        detailArtifactId = null;
+      }
+      return;
+    }
   }
+
+  onMount(() => {
+    window.addEventListener('keydown', handleKeydown);
+  });
+
+  onDestroy(() => {
+    window.removeEventListener('keydown', handleKeydown);
+  });
 </script>
 
 <div class="project-home">
@@ -373,8 +248,28 @@ The current architecture provides a solid foundation but has room for optimizati
             <div class="tab-indicator"></div>
           {/if}
         </button>
+        {#if projects.length > 1 && project.id === selectedProjectId}
+          <div
+            class="tab-close"
+            onclick={(e) => {
+              e.stopPropagation();
+              handleDeleteProject(project.id);
+            }}
+            onkeydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                handleDeleteProject(project.id);
+              }
+            }}
+            role="button"
+            tabindex="0"
+            title="Delete project"
+          >
+            <Trash2 size={12} />
+          </div>
+        {/if}
       {/each}
-      <button class="tab new-tab" onclick={handleNewProject} title="New project">
+      <button class="tab new-tab" onclick={handleNewProject} title="New project (⌘T)">
         <Plus size={14} />
       </button>
     </div>
@@ -449,6 +344,16 @@ The current architecture provides a solid foundation but has room for optimizati
       <ArtifactDetail artifact={detailArtifact} onClose={() => (detailArtifactId = null)} />
     </div>
   </div>
+{/if}
+
+<!-- New artifact modal -->
+{#if showNewArtifactModal && selectedProjectId}
+  <NewArtifactModal
+    projectId={selectedProjectId}
+    availableArtifacts={artifacts}
+    onCreated={handleArtifactCreated}
+    onClose={() => (showNewArtifactModal = false)}
+  />
 {/if}
 
 <style>
@@ -566,6 +471,27 @@ The current architecture provides a solid foundation but has room for optimizati
     overflow: hidden;
     text-overflow: ellipsis;
     text-align: left;
+  }
+
+  .tab-close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    margin-left: -8px;
+    margin-right: 4px;
+    margin-bottom: 3px;
+    background: var(--bg-hover);
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+
+  .tab-close:hover {
+    background: var(--ui-danger-bg);
+    color: var(--ui-danger);
   }
 
   .tab.new-tab {
