@@ -3,24 +3,26 @@
 
   Displays projects as tabs and artifacts in a grid layout.
   This is the main surface for the artifact-centric workspace model.
+
+  Keyboard shortcuts:
+  - Cmd+T: New project
+  - Cmd+W: Close current project (or window if last project)
+  - Cmd+N: New artifact (when project is selected)
+  - Ctrl+Tab: Next project tab
+  - Ctrl+Shift+Tab: Previous project tab
+  - Escape: Close detail modal
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Plus, Sparkles, FolderKanban, Trash2 } from 'lucide-svelte';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
+  import { Plus, Sparkles, FolderKanban, Trash2, X } from 'lucide-svelte';
   import type { Project, Artifact } from './types';
   import * as projectService from './services/project';
   import ArtifactCard from './ArtifactCard.svelte';
   import NewArtifactCard from './NewArtifactCard.svelte';
   import ArtifactDetail from './ArtifactDetail.svelte';
   import NewArtifactModal from './NewArtifactModal.svelte';
-
-  // Props for external control
-  interface Props {
-    /** Called when user wants to close this project tab */
-    onCloseProject?: () => void;
-  }
-
-  let { onCloseProject }: Props = $props();
+  import NewProjectModal from './NewProjectModal.svelte';
 
   // State
   let projects = $state<Project[]>([]);
@@ -33,6 +35,7 @@
 
   // Modal state
   let showNewArtifactModal = $state(false);
+  let showNewProjectModal = $state(false);
 
   // Derived
   let selectedProject = $derived(projects.find((p) => p.id === selectedProjectId) ?? null);
@@ -100,14 +103,16 @@
     detailArtifactId = detailArtifactId === artifactId ? null : artifactId;
   }
 
-  async function handleNewProject() {
-    const name = prompt('Project name:');
-    if (!name) return;
+  function openNewProjectModal() {
+    showNewProjectModal = true;
+  }
 
+  async function handleCreateProject(name: string) {
     try {
       const project = await projectService.createProject(name);
       projects = [...projects, project];
       selectedProjectId = project.id;
+      showNewProjectModal = false;
     } catch (e) {
       console.error('Failed to create project:', e);
     }
@@ -130,6 +135,25 @@
     } catch (e) {
       console.error('Failed to delete project:', e);
     }
+  }
+
+  async function handleCloseProject(projectId: string) {
+    // If this is the last project, close the window
+    if (projects.length <= 1) {
+      const window = getCurrentWindow();
+      await window.close();
+      return;
+    }
+
+    // Switch to another project first if closing the selected one
+    const currentIndex = projects.findIndex((p) => p.id === projectId);
+    if (selectedProjectId === projectId) {
+      const newIndex = currentIndex === 0 ? 1 : currentIndex - 1;
+      selectedProjectId = projects[newIndex].id;
+    }
+
+    // Remove from the open tabs list (doesn't delete the project)
+    projects = projects.filter((p) => p.id !== projectId);
   }
 
   function handleNewArtifact() {
@@ -162,34 +186,50 @@
     }
   }
 
+  // Navigate to next project tab
+  function nextProjectTab() {
+    if (projects.length <= 1) return;
+    const newIndex = selectedProjectIndex >= projects.length - 1 ? 0 : selectedProjectIndex + 1;
+    selectedProjectId = projects[newIndex].id;
+  }
+
+  // Navigate to previous project tab
+  function prevProjectTab() {
+    if (projects.length <= 1) return;
+    const newIndex = selectedProjectIndex <= 0 ? projects.length - 1 : selectedProjectIndex - 1;
+    selectedProjectId = projects[newIndex].id;
+  }
+
   // Keyboard shortcuts
   function handleKeydown(e: KeyboardEvent) {
-    // Skip if in input/textarea
+    // Skip if in input/textarea (unless Escape)
     const target = e.target as HTMLElement;
-    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+    const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA';
+
+    if (isInput && e.key !== 'Escape') {
       return;
     }
 
     const isMeta = e.metaKey || e.ctrlKey;
 
-    // Cmd+W - Close current project tab
-    if (isMeta && e.key === 'w') {
+    // Cmd+W - Close current project tab (or window if last)
+    if (e.metaKey && e.key === 'w') {
       e.preventDefault();
-      if (onCloseProject) {
-        onCloseProject();
+      if (selectedProjectId) {
+        handleCloseProject(selectedProjectId);
       }
       return;
     }
 
     // Cmd+T - New project
-    if (isMeta && e.key === 't') {
+    if (e.metaKey && e.key === 't') {
       e.preventDefault();
-      handleNewProject();
+      openNewProjectModal();
       return;
     }
 
     // Cmd+N - New artifact (when project is selected)
-    if (isMeta && e.key === 'n') {
+    if (e.metaKey && e.key === 'n') {
       e.preventDefault();
       handleNewArtifact();
       return;
@@ -198,23 +238,36 @@
     // Ctrl+Tab / Ctrl+Shift+Tab - Switch project tabs
     if (e.ctrlKey && e.key === 'Tab') {
       e.preventDefault();
-      if (projects.length <= 1) return;
-
       if (e.shiftKey) {
-        // Previous tab
-        const newIndex = selectedProjectIndex <= 0 ? projects.length - 1 : selectedProjectIndex - 1;
-        selectedProjectId = projects[newIndex].id;
+        prevProjectTab();
       } else {
-        // Next tab
-        const newIndex = selectedProjectIndex >= projects.length - 1 ? 0 : selectedProjectIndex + 1;
-        selectedProjectId = projects[newIndex].id;
+        nextProjectTab();
       }
       return;
     }
 
-    // Escape - Close detail modal
+    // Cmd+Shift+[ / Cmd+Shift+] - Switch project tabs (alternative)
+    if (e.metaKey && e.shiftKey && (e.key === '[' || e.key === '{')) {
+      e.preventDefault();
+      prevProjectTab();
+      return;
+    }
+
+    if (e.metaKey && e.shiftKey && (e.key === ']' || e.key === '}')) {
+      e.preventDefault();
+      nextProjectTab();
+      return;
+    }
+
+    // Escape - Close detail modal or new artifact modal
     if (e.key === 'Escape') {
-      if (detailArtifactId) {
+      if (showNewArtifactModal) {
+        e.preventDefault();
+        showNewArtifactModal = false;
+      } else if (showNewProjectModal) {
+        e.preventDefault();
+        showNewProjectModal = false;
+      } else if (detailArtifactId) {
         e.preventDefault();
         detailArtifactId = null;
       }
@@ -236,40 +289,33 @@
   <div class="project-tabs">
     <div class="tabs-list">
       {#each projects as project, index (project.id)}
-        <button
+        <div
           class="tab"
           class:active={project.id === selectedProjectId}
           onclick={() => handleSelectProject(project.id)}
+          onkeydown={(e) => e.key === 'Enter' && handleSelectProject(project.id)}
+          role="tab"
+          tabindex="0"
           title={project.name}
         >
           <FolderKanban size={14} />
           <span class="tab-name">{project.name}</span>
-          {#if project.id === selectedProjectId}
-            <div class="tab-indicator"></div>
-          {/if}
-        </button>
-        {#if projects.length > 1 && project.id === selectedProjectId}
-          <div
+          <button
             class="tab-close"
             onclick={(e) => {
               e.stopPropagation();
-              handleDeleteProject(project.id);
+              handleCloseProject(project.id);
             }}
-            onkeydown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                handleDeleteProject(project.id);
-              }
-            }}
-            role="button"
-            tabindex="0"
-            title="Delete project"
+            title="Close tab (⌘W)"
           >
-            <Trash2 size={12} />
-          </div>
-        {/if}
+            <X size={12} />
+          </button>
+          {#if project.id === selectedProjectId}
+            <div class="tab-indicator"></div>
+          {/if}
+        </div>
       {/each}
-      <button class="tab new-tab" onclick={handleNewProject} title="New project (⌘T)">
+      <button class="tab new-tab" onclick={openNewProjectModal} title="New project (⌘T)">
         <Plus size={14} />
       </button>
     </div>
@@ -316,10 +362,11 @@
         <Sparkles size={48} strokeWidth={1} />
         <h2>Welcome to Staged</h2>
         <p>Create your first project to get started</p>
-        <button class="create-button" onclick={handleNewProject}>
+        <button class="create-button" onclick={openNewProjectModal}>
           <Plus size={16} />
           New Project
         </button>
+        <span class="shortcut-hint">or press ⌘T</span>
       </div>
     {/if}
   </div>
@@ -350,10 +397,20 @@
 {#if showNewArtifactModal && selectedProjectId}
   <NewArtifactModal
     projectId={selectedProjectId}
-    availableArtifacts={artifacts}
+    contextArtifacts={artifacts.filter((a) => selectedArtifactIds.has(a.id))}
     onCreated={handleArtifactCreated}
     onClose={() => (showNewArtifactModal = false)}
+    onRemoveContext={(id) => {
+      const newSet = new Set(selectedArtifactIds);
+      newSet.delete(id);
+      selectedArtifactIds = newSet;
+    }}
   />
+{/if}
+
+<!-- New project modal -->
+{#if showNewProjectModal}
+  <NewProjectModal onCreated={handleCreateProject} onClose={() => (showNewProjectModal = false)} />
 {/if}
 
 <style>
@@ -449,7 +506,7 @@
   }
 
   /* Vertical separators between tabs (not before first, not after last regular tab) */
-  .tab:not(.new-tab) + .tab:not(.new-tab)::before {
+  .tab:not(.new-tab) + .tab:not(.new-tab):not(.tab-close)::before {
     content: '';
     position: absolute;
     left: -1px;
@@ -478,20 +535,29 @@
     align-items: center;
     justify-content: center;
     padding: 4px;
-    margin-left: -8px;
-    margin-right: 4px;
-    margin-bottom: 3px;
-    background: var(--bg-hover);
+    margin-left: auto;
+    background: transparent;
     border: none;
     border-radius: 4px;
-    color: var(--text-muted);
+    color: var(--text-faint);
     cursor: pointer;
     transition: all 0.1s;
+    opacity: 0;
+    z-index: 1;
+  }
+
+  .tab:hover .tab-close {
+    opacity: 1;
+  }
+
+  .tab.active .tab-close {
+    opacity: 1;
+    color: var(--text-muted);
   }
 
   .tab-close:hover {
-    background: var(--ui-danger-bg);
-    color: var(--ui-danger);
+    background: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .tab.new-tab {
@@ -628,5 +694,10 @@
 
   .create-button:hover {
     background-color: var(--ui-accent-hover);
+  }
+
+  .shortcut-hint {
+    font-size: var(--size-sm);
+    color: var(--text-faint);
   }
 </style>
