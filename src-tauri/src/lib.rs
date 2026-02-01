@@ -956,10 +956,15 @@ fn delete_project_artifact(artifact_id: String) -> Result<(), String> {
 
 /// Add context links to an artifact (which artifacts were used as input).
 #[tauri::command(rename_all = "camelCase")]
-fn add_artifact_context(artifact_id: String, context_artifact_ids: Vec<String>) -> Result<(), String> {
+fn add_artifact_context(
+    artifact_id: String,
+    context_artifact_ids: Vec<String>,
+) -> Result<(), String> {
     let store = project::get_store().map_err(|e| e.0)?;
     for context_id in context_artifact_ids {
-        store.add_context(&artifact_id, &context_id).map_err(|e| e.0)?;
+        store
+            .add_context(&artifact_id, &context_id)
+            .map_err(|e| e.0)?;
     }
     Ok(())
 }

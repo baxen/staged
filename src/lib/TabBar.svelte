@@ -107,7 +107,11 @@
     display: flex;
     gap: 2px;
     overflow-x: auto;
+    overflow-y: visible;
     scrollbar-width: none; /* Firefox */
+    /* Padding to accommodate curved corners on active tab */
+    padding: 0 12px;
+    margin: 0 -12px;
   }
 
   .tabs::-webkit-scrollbar {

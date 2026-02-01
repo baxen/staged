@@ -7,6 +7,7 @@
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
+  import ProjectHome from './lib/ProjectHome.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
   import TabBar from './lib/TabBar.svelte';
@@ -87,6 +88,10 @@
     clearResults as clearSmartDiffResults,
     loadAnalysisFromDb,
   } from './lib/stores/smartDiff.svelte';
+
+  // View mode: 'projects' = artifact-centric view, 'diff' = traditional diff viewer
+  type ViewMode = 'projects' | 'diff';
+  let viewMode = $state<ViewMode>('projects');
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -659,116 +664,122 @@
 </script>
 
 <main>
-  {#if windowState.tabs.length > 0}
-    <TabBar onNewTab={handleNewTab} onSwitchTab={handleTabSwitch} />
-  {/if}
+  {#if viewMode === 'projects'}
+    <!-- Artifact-centric project view -->
+    <ProjectHome />
+  {:else}
+    <!-- Traditional diff viewer -->
+    {#if windowState.tabs.length > 0}
+      <TabBar onNewTab={handleNewTab} onSwitchTab={handleTabSwitch} />
+    {/if}
 
-  <TopBar
-    onPresetSelect={handlePresetSelect}
-    onCustomDiff={handleCustomDiff}
-    onCommit={() => {
-      const tab = getActiveTab();
-      if (tab) handleFilesChanged(tab.repoPath);
-    }}
-    agentState={getActiveTab()?.agentState}
-    onReloadCommentsForTab={async (spec, repoPath) => {
-      // Find the tab that matches this spec/repoPath
-      const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-      if (!targetTab) {
-        console.warn('Could not find tab for repoPath:', repoPath);
-        return;
-      }
+    <TopBar
+      onPresetSelect={handlePresetSelect}
+      onCustomDiff={handleCustomDiff}
+      onCommit={() => {
+        const tab = getActiveTab();
+        if (tab) handleFilesChanged(tab.repoPath);
+      }}
+      agentState={getActiveTab()?.agentState}
+      onReloadCommentsForTab={async (spec, repoPath) => {
+        // Find the tab that matches this spec/repoPath
+        const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
+        if (!targetTab) {
+          console.warn('Could not find tab for repoPath:', repoPath);
+          return;
+        }
 
-      // Load comments from the database
-      const review = await import('./lib/services/review').then((m) =>
-        m.getReview(spec, repoPath ?? undefined)
-      );
+        // Load comments from the database
+        const review = await import('./lib/services/review').then((m) =>
+          m.getReview(spec, repoPath ?? undefined)
+        );
 
-      // Update the target tab's comments state directly
-      targetTab.commentsState.comments = review.comments;
-      targetTab.commentsState.reviewedPaths = review.reviewed;
-      targetTab.commentsState.currentSpec = spec;
-      targetTab.commentsState.currentRepoPath = repoPath;
+        // Update the target tab's comments state directly
+        targetTab.commentsState.comments = review.comments;
+        targetTab.commentsState.reviewedPaths = review.reviewed;
+        targetTab.commentsState.currentSpec = spec;
+        targetTab.commentsState.currentRepoPath = repoPath;
 
-      // Check if this is still the active tab
-      const activeTab = getActiveTab();
-      const isStillActive = activeTab?.id === targetTab.id;
+        // Check if this is still the active tab
+        const activeTab = getActiveTab();
+        const isStillActive = activeTab?.id === targetTab.id;
 
-      if (isStillActive) {
-        // Sync to global state so UI updates immediately
-        commentsState.comments = review.comments;
-        commentsState.reviewedPaths = review.reviewed;
-        commentsState.currentSpec = spec;
-        commentsState.currentRepoPath = repoPath;
-      }
-    }}
-    onArtifactSaved={(artifact, repoPath) => {
-      // Find the tab that matches this repoPath and add the artifact
-      const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-      if (targetTab) {
-        targetTab.agentState.artifacts.push(artifact);
-      }
-    }}
-  />
+        if (isStillActive) {
+          // Sync to global state so UI updates immediately
+          commentsState.comments = review.comments;
+          commentsState.reviewedPaths = review.reviewed;
+          commentsState.currentSpec = spec;
+          commentsState.currentRepoPath = repoPath;
+        }
+      }}
+      onArtifactSaved={(artifact, repoPath) => {
+        // Find the tab that matches this repoPath and add the artifact
+        const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
+        if (targetTab) {
+          targetTab.agentState.artifacts.push(artifact);
+        }
+      }}
+    />
 
-  <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
-    {#if showEmptyState && !preferences.features.agentPanel}
-      <!-- Full-width empty state (only when agent panel disabled) -->
-      <section class="main-content full-width">
-        <EmptyState />
-      </section>
-    {:else}
-      <section class="main-content">
-        {#if showEmptyState}
+    <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
+      {#if showEmptyState && !preferences.features.agentPanel}
+        <!-- Full-width empty state (only when agent panel disabled) -->
+        <section class="main-content full-width">
           <EmptyState />
-        {:else if diffState.loading}
-          <div class="loading-state">
-            <p>Loading...</p>
+        </section>
+      {:else}
+        <section class="main-content">
+          {#if showEmptyState}
+            <EmptyState />
+          {:else if diffState.loading}
+            <div class="loading-state">
+              <p>Loading...</p>
+            </div>
+          {:else if diffState.error}
+            <div class="error-state">
+              <AlertCircle size={18} />
+              <p class="error-message">{diffState.error}</p>
+            </div>
+          {:else}
+            <DiffViewer
+              diff={currentDiff}
+              sizeBase={preferences.sizeBase}
+              syntaxThemeVersion={preferences.syntaxThemeVersion}
+              loading={diffState.loadingFile !== null}
+              isReferenceFile={isCurrentFileReference}
+              agentState={getActiveTab()?.agentState}
+            />
+          {/if}
+        </section>
+        <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
+          <!-- Resize handle -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="sidebar-resize-handle"
+            class:left={preferences.sidebarPosition === 'left'}
+            class:dragging={isDraggingSidebar}
+            onmousedown={handleSidebarResizeStart}
+            ondblclick={handleSidebarResizeDoubleClick}
+          >
+            <div class="resize-handle-bar"></div>
           </div>
-        {:else if diffState.error}
-          <div class="error-state">
-            <AlertCircle size={18} />
-            <p class="error-message">{diffState.error}</p>
-          </div>
-        {:else}
-          <DiffViewer
-            diff={currentDiff}
-            sizeBase={preferences.sizeBase}
-            syntaxThemeVersion={preferences.syntaxThemeVersion}
-            loading={diffState.loadingFile !== null}
-            isReferenceFile={isCurrentFileReference}
+
+          <Sidebar
+            files={diffState.files}
+            loading={diffState.loading}
+            onFileSelect={selectFile}
+            selectedFile={diffState.selectedFile}
+            {isWorkingTree}
+            onAddReferenceFile={() => (showFileSearch = true)}
+            onRemoveReferenceFile={handleRemoveReferenceFile}
+            repoPath={repoState.currentPath}
+            spec={diffSelection.spec}
             agentState={getActiveTab()?.agentState}
           />
-        {/if}
-      </section>
-      <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
-        <!-- Resize handle -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="sidebar-resize-handle"
-          class:left={preferences.sidebarPosition === 'left'}
-          class:dragging={isDraggingSidebar}
-          onmousedown={handleSidebarResizeStart}
-          ondblclick={handleSidebarResizeDoubleClick}
-        >
-          <div class="resize-handle-bar"></div>
-        </div>
-
-        <Sidebar
-          files={diffState.files}
-          loading={diffState.loading}
-          onFileSelect={selectFile}
-          selectedFile={diffState.selectedFile}
-          {isWorkingTree}
-          onAddReferenceFile={() => (showFileSearch = true)}
-          onRemoveReferenceFile={handleRemoveReferenceFile}
-          repoPath={repoState.currentPath}
-          spec={diffSelection.spec}
-          agentState={getActiveTab()?.agentState}
-        />
-      </aside>
-    {/if}
-  </div>
+        </aside>
+      {/if}
+    </div>
+  {/if}
 </main>
 
 {#if showFileSearch}
