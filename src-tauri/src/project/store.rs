@@ -129,8 +129,9 @@ impl ProjectStore {
     /// List all projects, ordered by most recently updated.
     pub fn list_projects(&self) -> Result<Vec<Project>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn
-            .prepare("SELECT id, name, created_at, updated_at FROM projects ORDER BY updated_at DESC")?;
+        let mut stmt = conn.prepare(
+            "SELECT id, name, created_at, updated_at FROM projects ORDER BY updated_at DESC",
+        )?;
         let projects = stmt
             .query_map([], |row| {
                 Ok(Project {
@@ -367,8 +368,8 @@ impl ProjectStore {
     /// Get the artifacts that were used as context when creating an artifact.
     pub fn get_context_artifacts(&self, artifact_id: &str) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT context_artifact_id FROM artifact_context WHERE artifact_id = ?1")?;
+        let mut stmt = conn
+            .prepare("SELECT context_artifact_id FROM artifact_context WHERE artifact_id = ?1")?;
         let ids = stmt
             .query_map(params![artifact_id], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -379,8 +380,8 @@ impl ProjectStore {
     #[allow(dead_code)]
     pub fn get_dependent_artifacts(&self, context_artifact_id: &str) -> Result<Vec<String>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt =
-            conn.prepare("SELECT artifact_id FROM artifact_context WHERE context_artifact_id = ?1")?;
+        let mut stmt = conn
+            .prepare("SELECT artifact_id FROM artifact_context WHERE context_artifact_id = ?1")?;
         let ids = stmt
             .query_map(params![context_artifact_id], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
