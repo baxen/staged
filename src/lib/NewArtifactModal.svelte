@@ -1,27 +1,28 @@
 <!--
   NewArtifactModal.svelte - Modal for creating new artifacts via AI
 
-  Collects a prompt and optional context artifacts, then calls the AI
-  to generate a markdown artifact. Only the final message becomes the artifact.
+  Collects a prompt and uses pre-selected context artifacts from the project page.
+  Context is shown as compact chips that can be removed.
 -->
 <script lang="ts">
-  import { X, Sparkles, FileText, Loader2, Check } from 'lucide-svelte';
+  import { X, Sparkles, FileText, Loader2 } from 'lucide-svelte';
   import type { Artifact } from './types';
 
   interface Props {
     projectId: string;
-    /** Available artifacts that can be used as context */
-    availableArtifacts: Artifact[];
+    /** Artifacts already selected on the project page to use as context */
+    contextArtifacts: Artifact[];
     /** Called when artifact is successfully created */
     onCreated: (artifact: Artifact) => void;
     onClose: () => void;
+    /** Called to remove an artifact from context (updates selection on project page) */
+    onRemoveContext: (artifactId: string) => void;
   }
 
-  let { projectId, availableArtifacts, onCreated, onClose }: Props = $props();
+  let { projectId, contextArtifacts, onCreated, onClose, onRemoveContext }: Props = $props();
 
   // Form state
   let prompt = $state('');
-  let selectedContextIds = $state<Set<string>>(new Set());
   let loading = $state(false);
   let error = $state<string | null>(null);
 
@@ -33,16 +34,6 @@
     textareaRef?.focus();
   });
 
-  function toggleContext(artifactId: string) {
-    const newSet = new Set(selectedContextIds);
-    if (newSet.has(artifactId)) {
-      newSet.delete(artifactId);
-    } else {
-      newSet.add(artifactId);
-    }
-    selectedContextIds = newSet;
-  }
-
   async function handleSubmit() {
     if (!prompt.trim()) return;
 
@@ -50,8 +41,8 @@
     error = null;
 
     try {
-      // Build context from selected artifacts
-      const contextArtifactIds = Array.from(selectedContextIds);
+      // Build context from the pre-selected artifacts
+      const contextArtifactIds = contextArtifacts.map((a) => a.id);
 
       // Import dynamically to avoid circular deps
       const { generateArtifact } = await import('./services/project');
@@ -77,19 +68,6 @@
       handleSubmit();
     }
   }
-
-  // Get preview of artifact content
-  function getArtifactPreview(artifact: Artifact): string {
-    if (artifact.data.type !== 'markdown') return '';
-    const content = artifact.data.content;
-    // Strip markdown headers and get first meaningful line
-    const lines = content.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      return trimmed && !trimmed.startsWith('#');
-    });
-    const firstLine = lines[0] || '';
-    return firstLine.length > 60 ? firstLine.slice(0, 60) + '...' : firstLine;
-  }
 </script>
 
 <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -108,6 +86,29 @@
     </header>
 
     <div class="modal-body">
+      <!-- Context chips (if any selected) -->
+      {#if contextArtifacts.length > 0}
+        <div class="context-section">
+          <span class="context-label">Context</span>
+          <div class="context-chips">
+            {#each contextArtifacts as artifact (artifact.id)}
+              <div class="context-chip">
+                <FileText size={12} />
+                <span class="chip-title">{artifact.title}</span>
+                <button
+                  class="chip-remove"
+                  onclick={() => onRemoveContext(artifact.id)}
+                  disabled={loading}
+                  title="Remove from context"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+
       <!-- Prompt input -->
       <div class="prompt-section">
         <label for="prompt-input">What would you like to create?</label>
@@ -119,36 +120,14 @@
           rows="4"
           disabled={loading}
         ></textarea>
-        <div class="hint">Press ⌘Enter to generate</div>
-      </div>
-
-      <!-- Context selection -->
-      {#if availableArtifacts.length > 0}
-        <div class="context-section">
-          <span class="context-label">Include as context (optional)</span>
-          <div class="context-list">
-            {#each availableArtifacts as artifact (artifact.id)}
-              <button
-                class="context-item"
-                class:selected={selectedContextIds.has(artifact.id)}
-                onclick={() => toggleContext(artifact.id)}
-                disabled={loading}
-              >
-                <div class="context-checkbox">
-                  {#if selectedContextIds.has(artifact.id)}
-                    <Check size={12} />
-                  {/if}
-                </div>
-                <FileText size={14} />
-                <div class="context-info">
-                  <span class="context-title">{artifact.title}</span>
-                  <span class="context-preview">{getArtifactPreview(artifact)}</span>
-                </div>
-              </button>
-            {/each}
-          </div>
+        <div class="hint">
+          {#if contextArtifacts.length === 0}
+            <span class="hint-tip">Tip: Select artifacts on the project page to use as context</span
+            >
+          {/if}
+          <span>⌘Enter to generate</span>
         </div>
-      {/if}
+      </div>
 
       <!-- Error display -->
       {#if error}
@@ -300,9 +279,14 @@
   }
 
   .hint {
+    display: flex;
+    justify-content: space-between;
     font-size: var(--size-xs);
     color: var(--text-faint);
-    text-align: right;
+  }
+
+  .hint-tip {
+    color: var(--text-muted);
   }
 
   /* Context section */
@@ -313,92 +297,64 @@
   }
 
   .context-label {
-    font-size: var(--size-sm);
+    font-size: var(--size-xs);
     font-weight: 500;
-    color: var(--text-primary);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
 
-  .context-list {
+  .context-chips {
     display: flex;
-    flex-direction: column;
-    gap: 4px;
-    max-height: 200px;
-    overflow-y: auto;
+    flex-wrap: wrap;
+    gap: 6px;
   }
 
-  .context-item {
+  .context-chip {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    background-color: var(--bg-elevated);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: left;
-  }
-
-  .context-item:hover {
-    border-color: var(--text-accent);
-  }
-
-  .context-item.selected {
-    border-color: var(--text-accent);
+    gap: 6px;
+    padding: 4px 8px;
     background-color: rgba(88, 166, 255, 0.1);
-  }
-
-  .context-item:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
-  .context-checkbox {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    height: 16px;
-    border: 1px solid var(--border-muted);
+    border: 1px solid rgba(88, 166, 255, 0.3);
     border-radius: 4px;
-    flex-shrink: 0;
+    font-size: var(--size-xs);
     color: var(--text-accent);
   }
 
-  .context-item.selected .context-checkbox {
-    background-color: var(--text-accent);
-    border-color: var(--text-accent);
-    color: var(--bg-deepest);
-  }
-
-  .context-item :global(svg:not(.context-checkbox svg)) {
-    color: var(--text-muted);
+  .context-chip :global(svg) {
     flex-shrink: 0;
   }
 
-  .context-info {
-    flex: 1;
-    min-width: 0;
+  .chip-title {
+    max-width: 150px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chip-remove {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    margin: -2px -4px -2px 0;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-accent);
+    cursor: pointer;
+    opacity: 0.6;
+    transition: all 0.1s;
   }
 
-  .context-title {
-    font-size: var(--size-sm);
-    font-weight: 500;
-    color: var(--text-primary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .chip-remove:hover {
+    opacity: 1;
+    background-color: rgba(88, 166, 255, 0.2);
   }
 
-  .context-preview {
-    font-size: var(--size-xs);
-    color: var(--text-faint);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .chip-remove:disabled {
+    cursor: not-allowed;
   }
 
   /* Error */
