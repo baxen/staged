@@ -290,3 +290,41 @@ export interface ChangesetAnalysis {
   /** Annotations keyed by file path */
   file_annotations: Record<string, SmartDiffAnnotation[]>;
 }
+
+// =============================================================================
+// Project types (artifact-centric model)
+// =============================================================================
+
+/** A goal-oriented collection of artifacts */
+export interface Project {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Type-specific data for an artifact */
+export type ArtifactData =
+  | { type: 'markdown'; content: string }
+  | { type: 'commit'; repo: string; branch: string; commitSha: string };
+
+/** The persistent output of AI work */
+export interface Artifact {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  parentArtifactId?: string;
+  /** Type-specific data (markdown content, commit info, etc.) */
+  data: ArtifactData;
+}
+
+/** An ephemeral AI conversation that produced an artifact */
+export interface Session {
+  id: string;
+  artifactId: string;
+  createdAt: string;
+  /** The conversation transcript */
+  transcript: string;
+}
