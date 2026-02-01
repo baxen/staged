@@ -308,6 +308,9 @@ export type ArtifactData =
   | { type: 'markdown'; content: string }
   | { type: 'commit'; repo: string; branch: string; commitSha: string };
 
+/** Generation status of an artifact */
+export type ArtifactStatus = 'generating' | 'complete' | 'error';
+
 /** The persistent output of AI work */
 export interface Artifact {
   id: string;
@@ -318,6 +321,10 @@ export interface Artifact {
   parentArtifactId?: string;
   /** Type-specific data (markdown content, commit info, etc.) */
   data: ArtifactData;
+  /** Generation status */
+  status: ArtifactStatus;
+  /** Error message if status is 'error' */
+  errorMessage?: string;
 }
 
 /** An ephemeral AI conversation that produced an artifact */

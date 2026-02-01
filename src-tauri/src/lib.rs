@@ -859,7 +859,7 @@ fn delete_artifact(artifact_id: String) -> Result<(), String> {
 // Project Commands (new artifact-centric model)
 // =============================================================================
 
-use project::{Artifact as ProjectArtifact, ArtifactData, Project, Session};
+use project::{Artifact as ProjectArtifact, ArtifactData, ArtifactStatus, Project, Session};
 
 /// Create a new project.
 #[tauri::command(rename_all = "camelCase")]
@@ -915,6 +915,8 @@ fn create_artifact(
         updated_at: now,
         parent_artifact_id: None,
         data,
+        status: ArtifactStatus::Complete,
+        error_message: None,
     };
     store.create_artifact(&artifact).map_err(|e| e.0)?;
     Ok(artifact)
@@ -1009,21 +1011,81 @@ Guidelines for your final response:
 
 /// Generate a new artifact using AI.
 ///
-/// Calls the AI with the prompt and any context artifacts, then creates
-/// a markdown artifact from the final response.
+/// Creates a placeholder artifact immediately and runs AI generation in the background.
+/// Emits events as the artifact is updated:
+/// - `artifact-updated`: When the artifact content/status changes
 #[tauri::command(rename_all = "camelCase")]
 async fn generate_artifact(
+    app_handle: AppHandle,
     project_id: String,
     prompt: String,
     context_artifact_ids: Vec<String>,
 ) -> Result<ProjectArtifact, String> {
-    // Find an AI agent
-    let agent = ai::find_acp_agent().ok_or_else(|| {
-        "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
-    })?;
-
     // Get the project store
     let store = project::get_store().map_err(|e| e.0)?;
+
+    // Create a placeholder title from the prompt
+    let placeholder_title = if prompt.len() > 50 {
+        format!("{}...", &prompt[..47])
+    } else {
+        prompt.clone()
+    };
+
+    // Create the artifact in "generating" state
+    let artifact = ProjectArtifact::new_generating(&project_id, &placeholder_title);
+
+    // Save to database
+    store.create_artifact(&artifact).map_err(|e| e.0)?;
+
+    // Add context links
+    for context_id in &context_artifact_ids {
+        store
+            .add_context(&artifact.id, context_id)
+            .map_err(|e| e.0)?;
+    }
+
+    // Clone what we need for the background task
+    let artifact_for_task = artifact.clone();
+
+    // Spawn background task to run AI generation
+    tauri::async_runtime::spawn(async move {
+        run_artifact_generation(app_handle, artifact_for_task, prompt, context_artifact_ids).await;
+    });
+
+    Ok(artifact)
+}
+
+/// Background task to run AI generation and update the artifact.
+async fn run_artifact_generation(
+    app_handle: AppHandle,
+    artifact: ProjectArtifact,
+    prompt: String,
+    context_artifact_ids: Vec<String>,
+) {
+    let store = match project::get_store() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Failed to get store: {}", e.0);
+            return;
+        }
+    };
+
+    // Find an AI agent
+    let agent = match ai::find_acp_agent() {
+        Some(a) => a,
+        None => {
+            // Update artifact with error
+            let _ = store.update_artifact_status(
+                &artifact.id,
+                ArtifactStatus::Error,
+                Some("No AI agent found. Install Goose: https://github.com/block/goose"),
+                None,
+                None,
+            );
+            let _ = emit_artifact_updated(&app_handle, &artifact.id);
+            return;
+        }
+    };
 
     // Build the full prompt with context
     let mut full_prompt = String::from(ARTIFACT_SYSTEM_PROMPT);
@@ -1034,9 +1096,9 @@ async fn generate_artifact(
             .push_str("\n## Context\n\nThe following artifacts have been provided as context:\n\n");
 
         for artifact_id in &context_artifact_ids {
-            if let Some(artifact) = store.get_artifact(artifact_id).map_err(|e| e.0)? {
-                full_prompt.push_str(&format!("### {}\n\n", artifact.title));
-                if let ArtifactData::Markdown { content } = &artifact.data {
+            if let Ok(Some(ctx_artifact)) = store.get_artifact(artifact_id) {
+                full_prompt.push_str(&format!("### {}\n\n", ctx_artifact.title));
+                if let ArtifactData::Markdown { content } = &ctx_artifact.data {
                     full_prompt.push_str(content);
                     full_prompt.push_str("\n\n---\n\n");
                 }
@@ -1050,39 +1112,57 @@ async fn generate_artifact(
     full_prompt.push_str("\n\nPlease create a comprehensive artifact addressing this request. Remember: only your final message becomes the artifact, so make it complete and self-contained.");
 
     // Use current directory as working dir (artifacts aren't repo-specific)
-    let working_dir = std::env::current_dir().map_err(|e| e.to_string())?;
-
-    // Call the AI
-    let result = ai::run_acp_prompt(&agent, &working_dir, &full_prompt)
-        .await
-        .map_err(|e| format!("AI generation failed: {}", e))?;
-
-    // Extract a title from the response (first heading or first line)
-    let title = extract_title_from_markdown(&result, &prompt);
-
-    // Create the artifact
-    let now = chrono::Utc::now().to_rfc3339();
-    let artifact = ProjectArtifact {
-        id: uuid::Uuid::new_v4().to_string(),
-        project_id: project_id.clone(),
-        title,
-        created_at: now.clone(),
-        updated_at: now,
-        parent_artifact_id: None,
-        data: ArtifactData::Markdown { content: result },
+    let working_dir = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = store.update_artifact_status(
+                &artifact.id,
+                ArtifactStatus::Error,
+                Some(&format!("Failed to get working directory: {}", e)),
+                None,
+                None,
+            );
+            let _ = emit_artifact_updated(&app_handle, &artifact.id);
+            return;
+        }
     };
 
-    // Save to database
-    store.create_artifact(&artifact).map_err(|e| e.0)?;
+    // Call the AI
+    match ai::run_acp_prompt(&agent, &working_dir, &full_prompt).await {
+        Ok(result) => {
+            // Extract a title from the response
+            let title = extract_title_from_markdown(&result, &prompt);
+            let data = ArtifactData::Markdown { content: result };
 
-    // Add context links
-    for context_id in &context_artifact_ids {
-        store
-            .add_context(&artifact.id, context_id)
-            .map_err(|e| e.0)?;
+            // Update artifact with success
+            let _ = store.update_artifact_status(
+                &artifact.id,
+                ArtifactStatus::Complete,
+                None,
+                Some(&title),
+                Some(&data),
+            );
+        }
+        Err(e) => {
+            // Update artifact with error
+            let _ = store.update_artifact_status(
+                &artifact.id,
+                ArtifactStatus::Error,
+                Some(&format!("AI generation failed: {}", e)),
+                None,
+                None,
+            );
+        }
     }
 
-    Ok(artifact)
+    let _ = emit_artifact_updated(&app_handle, &artifact.id);
+}
+
+/// Emit an artifact-updated event to the frontend.
+fn emit_artifact_updated(app_handle: &AppHandle, artifact_id: &str) -> Result<(), String> {
+    app_handle
+        .emit("artifact-updated", artifact_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Extract a title from markdown content.

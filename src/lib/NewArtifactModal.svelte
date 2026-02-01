@@ -5,7 +5,7 @@
   Context is shown as compact chips that can be removed.
 -->
 <script lang="ts">
-  import { X, Sparkles, FileText, Loader2 } from 'lucide-svelte';
+  import { X, Sparkles, FileText } from 'lucide-svelte';
   import type { Artifact } from './types';
 
   interface Props {
@@ -23,8 +23,6 @@
 
   // Form state
   let prompt = $state('');
-  let loading = $state(false);
-  let error = $state<string | null>(null);
 
   // Textarea ref for auto-focus
   let textareaRef: HTMLTextAreaElement | undefined = $state();
@@ -37,9 +35,6 @@
   async function handleSubmit() {
     if (!prompt.trim()) return;
 
-    loading = true;
-    error = null;
-
     try {
       // Build context from the pre-selected artifacts
       const contextArtifactIds = contextArtifacts.map((a) => a.id);
@@ -47,15 +42,15 @@
       // Import dynamically to avoid circular deps
       const { generateArtifact } = await import('./services/project');
 
+      // This now returns immediately with a placeholder artifact in "generating" state
       const artifact = await generateArtifact(projectId, prompt.trim(), contextArtifactIds);
 
       onCreated(artifact);
       onClose();
     } catch (e) {
-      console.error('Failed to generate artifact:', e);
-      error = e instanceof Error ? e.message : String(e);
-    } finally {
-      loading = false;
+      console.error('Failed to start artifact generation:', e);
+      // If we can't even create the placeholder, show an alert
+      alert(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -98,7 +93,6 @@
                 <button
                   class="chip-remove"
                   onclick={() => onRemoveContext(artifact.id)}
-                  disabled={loading}
                   title="Remove from context"
                 >
                   <X size={12} />
@@ -118,7 +112,6 @@
           bind:value={prompt}
           placeholder="Research the best practices for..., Create a plan to..., Analyze the tradeoffs between..."
           rows="4"
-          disabled={loading}
         ></textarea>
         <div class="hint">
           {#if contextArtifacts.length === 0}
@@ -128,25 +121,13 @@
           <span>⌘Enter to generate</span>
         </div>
       </div>
-
-      <!-- Error display -->
-      {#if error}
-        <div class="error-message">
-          {error}
-        </div>
-      {/if}
     </div>
 
     <footer class="modal-footer">
-      <button class="cancel-button" onclick={onClose} disabled={loading}> Cancel </button>
-      <button class="generate-button" onclick={handleSubmit} disabled={loading || !prompt.trim()}>
-        {#if loading}
-          <Loader2 size={16} class="spinner" />
-          Generating...
-        {:else}
-          <Sparkles size={16} />
-          Generate
-        {/if}
+      <button class="cancel-button" onclick={onClose}> Cancel </button>
+      <button class="generate-button" onclick={handleSubmit} disabled={!prompt.trim()}>
+        <Sparkles size={16} />
+        Generate
       </button>
     </footer>
   </div>
@@ -273,11 +254,6 @@
     color: var(--text-faint);
   }
 
-  .prompt-section textarea:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
   .hint {
     display: flex;
     justify-content: space-between;
@@ -353,20 +329,6 @@
     background-color: rgba(88, 166, 255, 0.2);
   }
 
-  .chip-remove:disabled {
-    cursor: not-allowed;
-  }
-
-  /* Error */
-  .error-message {
-    padding: 12px;
-    background-color: var(--ui-danger-bg);
-    border: 1px solid var(--ui-danger);
-    border-radius: 6px;
-    color: var(--ui-danger);
-    font-size: var(--size-sm);
-  }
-
   /* Footer */
   .modal-footer {
     display: flex;
@@ -391,11 +353,6 @@
     background-color: var(--bg-hover);
   }
 
-  .cancel-button:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
   .generate-button {
     display: flex;
     align-items: center;
@@ -418,19 +375,5 @@
   .generate-button:disabled {
     opacity: 0.6;
     cursor: not-allowed;
-  }
-
-  /* Spinner animation */
-  :global(.spinner) {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
   }
 </style>

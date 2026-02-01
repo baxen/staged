@@ -5,7 +5,7 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::types::{Artifact, ArtifactData, ArtifactType, Project, Session};
+use super::types::{Artifact, ArtifactData, ArtifactStatus, ArtifactType, Project, Session};
 use super::{ProjectError, Result};
 
 /// Project storage backed by SQLite.
@@ -54,6 +54,8 @@ impl ProjectStore {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 parent_artifact_id TEXT,
+                status TEXT NOT NULL DEFAULT 'complete',
+                error_message TEXT,
                 FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
                 FOREIGN KEY (parent_artifact_id) REFERENCES artifacts(id) ON DELETE SET NULL
             );
@@ -84,6 +86,32 @@ impl ProjectStore {
             PRAGMA foreign_keys = ON;
             "#,
         )?;
+
+        // Run migrations for existing databases
+        Self::run_migrations(&conn)?;
+
+        Ok(())
+    }
+
+    /// Run database migrations for schema changes.
+    /// Takes a connection reference to avoid deadlock (caller already holds the lock).
+    fn run_migrations(conn: &Connection) -> Result<()> {
+        // Check if status column exists, add if not
+        let has_status: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('artifacts') WHERE name = 'status'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_status {
+            conn.execute(
+                "ALTER TABLE artifacts ADD COLUMN status TEXT NOT NULL DEFAULT 'complete'",
+                [],
+            )?;
+            conn.execute("ALTER TABLE artifacts ADD COLUMN error_message TEXT", [])?;
+        }
 
         Ok(())
     }
@@ -174,8 +202,8 @@ impl ProjectStore {
             serde_json::to_string(&artifact.data).map_err(|e| ProjectError::new(e.to_string()))?;
 
         conn.execute(
-            "INSERT INTO artifacts (id, project_id, title, artifact_type, data_json, created_at, updated_at, parent_artifact_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO artifacts (id, project_id, title, artifact_type, data_json, created_at, updated_at, parent_artifact_id, status, error_message)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 &artifact.id,
                 &artifact.project_id,
@@ -185,6 +213,8 @@ impl ProjectStore {
                 &artifact.created_at,
                 &artifact.updated_at,
                 &artifact.parent_artifact_id,
+                artifact.status.as_str(),
+                &artifact.error_message,
             ],
         )?;
 
@@ -202,7 +232,7 @@ impl ProjectStore {
     pub fn get_artifact(&self, id: &str) -> Result<Option<Artifact>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id
+            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message
              FROM artifacts WHERE id = ?1",
             params![id],
             |row| {
@@ -214,6 +244,7 @@ impl ProjectStore {
                         Box::new(e),
                     )
                 })?;
+                let status_str: String = row.get(7)?;
                 Ok(Artifact {
                     id: row.get(0)?,
                     project_id: row.get(1)?,
@@ -222,6 +253,8 @@ impl ProjectStore {
                     updated_at: row.get(5)?,
                     parent_artifact_id: row.get(6)?,
                     data,
+                    status: ArtifactStatus::parse(&status_str),
+                    error_message: row.get(8)?,
                 })
             },
         )
@@ -233,7 +266,7 @@ impl ProjectStore {
     pub fn list_artifacts(&self, project_id: &str) -> Result<Vec<Artifact>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id
+            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message
              FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
         )?;
         let artifacts = stmt
@@ -246,6 +279,7 @@ impl ProjectStore {
                         Box::new(e),
                     )
                 })?;
+                let status_str: String = row.get(7)?;
                 Ok(Artifact {
                     id: row.get(0)?,
                     project_id: row.get(1)?,
@@ -254,6 +288,8 @@ impl ProjectStore {
                     updated_at: row.get(5)?,
                     parent_artifact_id: row.get(6)?,
                     data,
+                    status: ArtifactStatus::parse(&status_str),
+                    error_message: row.get(8)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -269,7 +305,7 @@ impl ProjectStore {
     ) -> Result<Vec<Artifact>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id
+            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message
              FROM artifacts WHERE project_id = ?1 AND artifact_type = ?2 ORDER BY updated_at DESC",
         )?;
         let artifacts = stmt
@@ -282,6 +318,7 @@ impl ProjectStore {
                         Box::new(e),
                     )
                 })?;
+                let status_str: String = row.get(7)?;
                 Ok(Artifact {
                     id: row.get(0)?,
                     project_id: row.get(1)?,
@@ -290,6 +327,8 @@ impl ProjectStore {
                     updated_at: row.get(5)?,
                     parent_artifact_id: row.get(6)?,
                     data,
+                    status: ArtifactStatus::parse(&status_str),
+                    error_message: row.get(8)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -340,6 +379,52 @@ impl ProjectStore {
             "UPDATE projects SET updated_at = ?1 WHERE id = (SELECT project_id FROM artifacts WHERE id = ?2)",
             params![now, id],
         )?;
+
+        Ok(())
+    }
+
+    /// Update an artifact's status (and optionally content/title).
+    pub fn update_artifact_status(
+        &self,
+        id: &str,
+        status: ArtifactStatus,
+        error_message: Option<&str>,
+        title: Option<&str>,
+        data: Option<&ArtifactData>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = chrono::Utc::now().to_rfc3339();
+
+        match (title, data) {
+            (Some(title), Some(data)) => {
+                let data_json =
+                    serde_json::to_string(data).map_err(|e| ProjectError::new(e.to_string()))?;
+                conn.execute(
+                    "UPDATE artifacts SET status = ?1, error_message = ?2, title = ?3, data_json = ?4, artifact_type = ?5, updated_at = ?6 WHERE id = ?7",
+                    params![status.as_str(), error_message, title, data_json, data.artifact_type().as_str(), now, id],
+                )?;
+            }
+            (Some(title), None) => {
+                conn.execute(
+                    "UPDATE artifacts SET status = ?1, error_message = ?2, title = ?3, updated_at = ?4 WHERE id = ?5",
+                    params![status.as_str(), error_message, title, now, id],
+                )?;
+            }
+            (None, Some(data)) => {
+                let data_json =
+                    serde_json::to_string(data).map_err(|e| ProjectError::new(e.to_string()))?;
+                conn.execute(
+                    "UPDATE artifacts SET status = ?1, error_message = ?2, data_json = ?3, artifact_type = ?4, updated_at = ?5 WHERE id = ?6",
+                    params![status.as_str(), error_message, data_json, data.artifact_type().as_str(), now, id],
+                )?;
+            }
+            (None, None) => {
+                conn.execute(
+                    "UPDATE artifacts SET status = ?1, error_message = ?2, updated_at = ?3 WHERE id = ?4",
+                    params![status.as_str(), error_message, now, id],
+                )?;
+            }
+        }
 
         Ok(())
     }

@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager};
 
 // Re-export types
 pub use store::ProjectStore;
-pub use types::{Artifact, ArtifactData, ArtifactType, Project, Session};
+pub use types::{Artifact, ArtifactData, ArtifactStatus, ArtifactType, Project, Session};
 
 // =============================================================================
 // Error type
