@@ -3,12 +3,22 @@
   
   Renders a blurred overlay on the left (before) pane showing what the old code
   was doing. Uses the before_description field from annotations.
+  
+  NOTE: This component is kept for future AI integration but is not currently used.
 -->
 <script lang="ts">
-  import type { SmartDiffAnnotation } from './types';
+  /** Annotation category for styling */
+  type AnnotationCategory = 'explanation' | 'warning' | 'suggestion' | 'context';
+
+  /** Annotation data passed to this component */
+  interface Annotation {
+    content: string;
+    category: AnnotationCategory;
+    before_description?: string;
+  }
 
   interface Props {
-    annotation: SmartDiffAnnotation;
+    annotation: Annotation;
     /** Top position in pixels (relative to lines-wrapper) */
     top: number;
     /** Height in pixels */

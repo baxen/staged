@@ -1087,10 +1087,6 @@
         <button
           class="tree-item comment-item"
           class:ai-comment={comment.author === 'ai'}
-          class:category-warning={comment.category === 'warning'}
-          class:category-suggestion={comment.category === 'suggestion'}
-          class:category-explanation={comment.category === 'explanation'}
-          class:category-context={comment.category === 'context'}
           style="padding-left: 8px"
           onclick={() => onFileSelect?.(comment.path, comment.span.start, comment.id)}
         >
@@ -2024,22 +2020,6 @@
   /* AI comment styling */
   .ai-comment .comment-icon {
     color: var(--text-accent);
-  }
-
-  .ai-comment.category-warning .comment-icon {
-    color: var(--orange-9);
-  }
-
-  .ai-comment.category-suggestion .comment-icon {
-    color: var(--green-9);
-  }
-
-  .ai-comment.category-explanation .comment-icon {
-    color: var(--blue-9);
-  }
-
-  .ai-comment.category-context .comment-icon {
-    color: var(--text-faint);
   }
 
   /* Reference files section */
