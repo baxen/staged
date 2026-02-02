@@ -37,9 +37,7 @@
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { preferences } from './stores/preferences.svelte';
-  import AgentPanel from './features/agent/AgentPanel.svelte';
   import type { DiffSpec, FileDiffSummary } from './types';
-  import type { AgentState } from './stores/agent.svelte';
 
   interface FileEntry {
     path: string;
@@ -75,8 +73,6 @@
     repoPath?: string | null;
     /** Current diff spec for artifact persistence */
     spec?: DiffSpec | null;
-    /** Agent state for this tab's chat session */
-    agentState?: AgentState | null;
   }
 
   let {
@@ -89,7 +85,6 @@
     onRemoveReferenceFile,
     repoPath = null,
     spec = null,
-    agentState = null,
   }: Props = $props();
 
   let collapsedDirs = $state(new Set<string>());
@@ -500,7 +495,7 @@
     <div class="loading-state">
       <p>Loading...</p>
     </div>
-  {:else if files.length === 0 && !preferences.features.agentPanel}
+  {:else if files.length === 0}
     <div class="empty-state">
       <p>No changes</p>
       {#if isWorkingTree}
@@ -628,21 +623,7 @@
           {@render commentList()}
         </ul>
       {/if}
-
-      <!-- Agent Chat section (feature-gated) -->
-      {#if preferences.features.agentPanel && agentState}
-        <div class="section-header agent-header">
-          <div class="section-divider">
-            <span class="divider-label">AGENT</span>
-          </div>
-        </div>
-      {/if}
     </div>
-
-    <!-- Agent Panel outside file-list for flex layout (takes remaining space) -->
-    {#if preferences.features.agentPanel && agentState}
-      <AgentPanel {repoPath} {spec} {files} {selectedFile} {agentState} />
-    {/if}
   {/if}
 </div>
 
@@ -1099,10 +1080,5 @@
   .remove-btn:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
-  }
-
-  /* Agent section header - inside file-list, no extra margin needed */
-  .agent-header {
-    margin-bottom: 0;
   }
 </style>

@@ -27,7 +27,6 @@
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
   import { createDiffSelection } from './lib/stores/diffSelection.svelte';
-  import { createAgentState } from './lib/stores/agent.svelte';
   import { DiffSpec, gitRefName } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
@@ -88,7 +87,6 @@
     clearResults as clearSmartDiffResults,
     loadAnalysisFromDb,
   } from './lib/stores/smartDiff.svelte';
-  import { liveSessionStore } from './lib/stores/liveSession.svelte';
 
   // View mode: 'projects' = artifact-centric view, 'diff' = traditional diff viewer
   type ViewMode = 'projects' | 'diff';
@@ -463,14 +461,7 @@
     syncGlobalToTab();
 
     const repoName = extractRepoName(repoPath);
-    addTab(
-      repoPath,
-      repoName,
-      createDiffState,
-      createCommentsState,
-      createDiffSelection,
-      createAgentState
-    );
+    addTab(repoPath, repoName, createDiffState, createCommentsState, createDiffSelection);
 
     // Start watching the new repo (idempotent - won't restart if already watching)
     watchRepo(repoPath);
@@ -544,9 +535,6 @@
     loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
-    // Initialize live session store for streaming AI sessions
-    liveSessionStore.init();
-
     // Pre-load suggested repos (Spotlight search runs in background)
     findRecentRepos(24, 10).then((repos) => {
       suggestedRepos = repos;
@@ -582,12 +570,7 @@
       setWindowLabel(label);
 
       // Load tabs from storage (if any)
-      loadTabsFromStorage(
-        createDiffState,
-        createCommentsState,
-        createDiffSelection,
-        createAgentState
-      );
+      loadTabsFromStorage(createDiffState, createCommentsState, createDiffSelection);
 
       // Initialize watcher listener once (handles all repos)
       unsubscribeWatcher = await initWatcher(handleFilesChanged);
@@ -616,14 +599,7 @@
         } else {
           // Create new tab for the CLI path
           const repoName = extractRepoName(repoPath);
-          addTab(
-            repoPath,
-            repoName,
-            createDiffState,
-            createCommentsState,
-            createDiffSelection,
-            createAgentState
-          );
+          addTab(repoPath, repoName, createDiffState, createCommentsState, createDiffSelection);
         }
 
         // Sync the active tab to global state
@@ -684,58 +660,17 @@
         const tab = getActiveTab();
         if (tab) handleFilesChanged(tab.repoPath);
       }}
-      agentState={getActiveTab()?.agentState}
-      onReloadCommentsForTab={async (spec, repoPath) => {
-        // Find the tab that matches this spec/repoPath
-        const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-        if (!targetTab) {
-          console.warn('Could not find tab for repoPath:', repoPath);
-          return;
-        }
-
-        // Load comments from the database
-        const review = await import('./lib/services/review').then((m) =>
-          m.getReview(spec, repoPath ?? undefined)
-        );
-
-        // Update the target tab's comments state directly
-        targetTab.commentsState.comments = review.comments;
-        targetTab.commentsState.reviewedPaths = review.reviewed;
-        targetTab.commentsState.currentSpec = spec;
-        targetTab.commentsState.currentRepoPath = repoPath;
-
-        // Check if this is still the active tab
-        const activeTab = getActiveTab();
-        const isStillActive = activeTab?.id === targetTab.id;
-
-        if (isStillActive) {
-          // Sync to global state so UI updates immediately
-          commentsState.comments = review.comments;
-          commentsState.reviewedPaths = review.reviewed;
-          commentsState.currentSpec = spec;
-          commentsState.currentRepoPath = repoPath;
-        }
-      }}
-      onArtifactSaved={(artifact, repoPath) => {
-        // Find the tab that matches this repoPath and add the artifact
-        const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-        if (targetTab) {
-          targetTab.agentState.artifacts.push(artifact);
-        }
-      }}
     />
 
     <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
-      {#if showEmptyState && !preferences.features.agentPanel}
-        <!-- Full-width empty state (only when agent panel disabled) -->
+      {#if showEmptyState}
+        <!-- Full-width empty state -->
         <section class="main-content full-width">
           <EmptyState />
         </section>
       {:else}
         <section class="main-content">
-          {#if showEmptyState}
-            <EmptyState />
-          {:else if diffState.loading}
+          {#if diffState.loading}
             <div class="loading-state">
               <p>Loading...</p>
             </div>
@@ -751,7 +686,6 @@
               syntaxThemeVersion={preferences.syntaxThemeVersion}
               loading={diffState.loadingFile !== null}
               isReferenceFile={isCurrentFileReference}
-              agentState={getActiveTab()?.agentState}
             />
           {/if}
         </section>
@@ -778,7 +712,6 @@
             onRemoveReferenceFile={handleRemoveReferenceFile}
             repoPath={repoState.currentPath}
             spec={diffSelection.spec}
-            agentState={getActiveTab()?.agentState}
           />
         </aside>
       {/if}

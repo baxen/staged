@@ -50,10 +50,7 @@
 
   // Feature flag metadata for display
   const featureMeta: Record<string, { label: string; description: string }> = {
-    agentPanel: {
-      label: 'Agent Panel',
-      description: 'Show AI agent panel for code assistance',
-    },
+    // No feature flags currently active
   };
 
   // Get list of all feature flags with their current state

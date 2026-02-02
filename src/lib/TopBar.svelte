@@ -40,43 +40,14 @@
   } from './stores/comments.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
-  import {
-    smartDiffState,
-    checkAi,
-    runAnalysis,
-    clearResults as clearSmartDiffState,
-    setAnnotationsRevealed,
-  } from './stores/smartDiff.svelte';
-  import { saveArtifact } from './services/review';
-  import type { AgentState, Artifact } from './stores/agent.svelte';
-
+  import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
     onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
     onCommit?: () => void;
-    agentState?: AgentState | null;
-    /**
-     * Callback to reload comments for a specific tab after AI analysis.
-     * @param spec - The diff spec to load comments for
-     * @param repoPath - The repo path
-     */
-    onReloadCommentsForTab?: (spec: DiffSpecType, repoPath: string | null) => Promise<void>;
-    /**
-     * Callback when an artifact is saved (to update the tab's artifact list).
-     * @param artifact - The saved artifact
-     * @param repoPath - The repo path where the artifact belongs
-     */
-    onArtifactSaved?: (artifact: Artifact, repoPath: string | null) => void;
   }
 
-  let {
-    onPresetSelect,
-    onCustomDiff,
-    onCommit,
-    agentState = null,
-    onReloadCommentsForTab,
-    onArtifactSaved,
-  }: Props = $props();
+  let { onPresetSelect, onCustomDiff, onCommit }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -100,10 +71,7 @@
   // Can sync if viewing a PR with comments
   let canSync = $derived(diffSelection.prNumber !== undefined && commentsState.comments.length > 0);
 
-  // Smart diff state
-  let isAiLoading = $derived(smartDiffState.loading);
-  let hasAiResults = $derived(smartDiffState.changesetSummary !== null);
-  let canRunAi = $derived(diffState.files.length > 0 && !diffState.loading);
+  // Smart diff state (AI disabled - keeping reveal toggle for future use)
   let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
   let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
 
@@ -147,117 +115,6 @@
       setTimeout(() => {
         copiedFeedback = false;
       }, 1500);
-    }
-  }
-
-  /**
-   * Handle AI analysis button click.
-   * Triggers analysis if not already running.
-   */
-  async function handleAiAnalysis() {
-    // If already loading, do nothing (button shows progress)
-    if (isAiLoading) return;
-
-    if (!canRunAi) return;
-
-    // Check AI availability first
-    const available = await checkAi();
-    if (!available) {
-      // TODO: Show error toast or modal
-      console.error('AI not available:', smartDiffState.aiError);
-      return;
-    }
-
-    // Start analysis in background
-    // The button will show loading state
-    runChangesetAnalysis();
-  }
-
-  /**
-   * Create an artifact from a changeset summary.
-   */
-  function createArtifactFromSummary(summary: ChangesetSummary): Artifact {
-    // Generate title from summary (first 50 chars)
-    const title = summary.summary
-      .replace(/^#+\s*/, '') // Strip markdown headers
-      .substring(0, 50)
-      .trim();
-
-    // Format as markdown document
-    let content = '';
-
-    if (summary.summary) {
-      content += `# Summary\n\n${summary.summary}\n\n`;
-    }
-
-    if (summary.key_changes.length > 0) {
-      content += `# Key Changes\n\n`;
-      for (const change of summary.key_changes) {
-        content += `- ${change}\n`;
-      }
-      content += '\n';
-    }
-
-    if (summary.concerns.length > 0) {
-      content += `# Concerns\n\n`;
-      for (const concern of summary.concerns) {
-        content += `- ${concern}\n`;
-      }
-    }
-
-    return {
-      id: crypto.randomUUID(),
-      title: `AI Review: ${title}`,
-      content: content.trim(),
-      createdAt: new Date().toISOString(),
-    };
-  }
-
-  /**
-   * Run changeset analysis in background.
-   * Automatically saves results as an artifact when complete.
-   * Sets agentState.loading to show busy indicators in AgentPanel and tab bar.
-   */
-  async function runChangesetAnalysis() {
-    // Capture context at call time for the analysis request
-    const capturedAgentState = agentState;
-    const capturedRepoPath = repoState.currentPath ?? null;
-    const capturedSpec = diffSelection.spec;
-
-    // Set agent loading state to show "Working on it..." and tab spinner
-    if (capturedAgentState) {
-      capturedAgentState.loading = true;
-    }
-
-    try {
-      // Single call - backend handles file listing and content loading
-      const result = await runAnalysis(capturedRepoPath, capturedSpec);
-
-      if (result) {
-        // Reload comments for the tab where analysis was started
-        await onReloadCommentsForTab?.(capturedSpec, capturedRepoPath);
-
-        // Create and save artifact from the summary
-        const artifact = createArtifactFromSummary(result);
-
-        try {
-          await saveArtifact(capturedSpec, artifact, capturedRepoPath ?? undefined);
-          // Notify the tab to update its artifact list
-          onArtifactSaved?.(artifact, capturedRepoPath);
-        } catch (e) {
-          console.error('Failed to save artifact:', e);
-        }
-
-        // Clear the in-memory analysis results (they're saved as artifact now)
-        clearSmartDiffState();
-      }
-    } catch (e) {
-      console.error('Analysis failed:', e);
-    } finally {
-      // Clear agent loading state on the captured state (correct tab)
-      if (capturedAgentState) {
-        capturedAgentState.loading = false;
-      }
     }
   }
 
@@ -393,17 +250,14 @@
       </button>
     {/if}
 
-    <!-- AI Analysis button -->
+    <!-- AI Analysis button (disabled - AI integration being rebuilt) -->
     <button
       class="action-btn ai-btn"
-      class:loading={isAiLoading}
-      class:has-results={hasAiResults}
-      class:disabled={!canRunAi}
-      onclick={handleAiAnalysis}
-      title={isAiLoading ? 'Analyzing...' : hasAiResults ? 'View AI analysis' : 'Analyze with AI'}
-      disabled={!canRunAi && !hasAiResults}
+      class:disabled={true}
+      title="AI analysis coming soon"
+      disabled={true}
     >
-      <div class="ai-icon" class:spinning={isAiLoading}>
+      <div class="ai-icon">
         <Orbit size={14} />
       </div>
     </button>
@@ -839,31 +693,10 @@
     overflow: visible;
   }
 
-  .ai-btn.has-results {
-    color: var(--ui-accent);
-  }
-
-  .ai-btn.has-results:hover:not(:disabled) {
-    color: var(--ui-accent);
-  }
-
   .ai-icon {
     display: flex;
     align-items: center;
     justify-content: center;
-  }
-
-  .ai-icon.spinning {
-    animation: spin 2s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   /* AI Annotations reveal toggle */

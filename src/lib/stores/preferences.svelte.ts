@@ -72,9 +72,7 @@ export interface KeyboardBinding {
  * Known feature flags with their default values.
  * Add new flags here as the app evolves.
  */
-export const DEFAULT_FEATURES = {
-  agentPanel: false,
-} as const;
+export const DEFAULT_FEATURES = {} as const;
 
 export type FeatureFlag = keyof typeof DEFAULT_FEATURES;
 
