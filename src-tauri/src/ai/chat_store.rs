@@ -31,8 +31,26 @@ pub struct ChatMessage {
     pub id: i64,
     pub session_id: String,
     pub role: MessageRole,
+    /// For user messages: plain text
+    /// For assistant messages: JSON array of ContentSegment
     pub content: String,
     pub created_at: i64,
+}
+
+/// A segment of assistant content (text or tool call), stored in order
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ContentSegment {
+    Text {
+        text: String,
+    },
+    ToolCall {
+        id: String,
+        title: String,
+        status: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        locations: Vec<String>,
+    },
 }
 
 /// Message role
@@ -59,33 +77,12 @@ impl MessageRole {
     }
 }
 
-/// A tool call associated with an assistant message
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatToolCall {
-    pub id: String,
-    pub message_id: i64,
-    pub title: String,
-    pub status: String,
-    pub locations: Vec<String>,
-}
-
-/// Full session with messages and tool calls
+/// Full session with messages
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatSessionFull {
     pub session: ChatSession,
-    pub messages: Vec<ChatMessageWithTools>,
-}
-
-/// Message with its tool calls
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ChatMessageWithTools {
-    #[serde(flatten)]
-    pub message: ChatMessage,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub tool_calls: Vec<ChatToolCall>,
+    pub messages: Vec<ChatMessage>,
 }
 
 // =============================================================================
@@ -363,55 +360,11 @@ impl ChatStore {
     // =========================================================================
     // Tool call operations
     // =========================================================================
-
-    /// Add a tool call to a message
-    pub fn add_tool_call(&self, tool_call: &ChatToolCall) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        let locations_json = serde_json::to_string(&tool_call.locations)?;
-
-        conn.execute(
-            "INSERT INTO chat_tool_calls (id, message_id, title, status, locations_json)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                &tool_call.id,
-                tool_call.message_id,
-                &tool_call.title,
-                &tool_call.status,
-                locations_json,
-            ],
-        )?;
-        Ok(())
-    }
-
-    /// Get tool calls for a message
-    pub fn get_tool_calls(&self, message_id: i64) -> Result<Vec<ChatToolCall>> {
-        let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, message_id, title, status, locations_json
-             FROM chat_tool_calls WHERE message_id = ?1",
-        )?;
-        let tool_calls = stmt
-            .query_map(params![message_id], |row| {
-                let locations_json: String = row.get(4)?;
-                let locations: Vec<String> =
-                    serde_json::from_str(&locations_json).unwrap_or_default();
-                Ok(ChatToolCall {
-                    id: row.get(0)?,
-                    message_id: row.get(1)?,
-                    title: row.get(2)?,
-                    status: row.get(3)?,
-                    locations,
-                })
-            })?
-            .collect::<std::result::Result<Vec<_>, _>>()?;
-        Ok(tool_calls)
-    }
-
-    // =========================================================================
     // Combined operations
     // =========================================================================
 
-    /// Get full session with all messages and tool calls
+    /// Get full session with all messages
+    /// Assistant message content is JSON array of ContentSegment
     pub fn get_session_full(&self, id: &str) -> Result<Option<ChatSessionFull>> {
         let session = match self.get_session(id)? {
             Some(s) => s,
@@ -419,47 +372,14 @@ impl ChatStore {
         };
 
         let messages = self.get_messages(id)?;
-        let mut messages_with_tools = Vec::with_capacity(messages.len());
-
-        for message in messages {
-            let tool_calls = if message.role == MessageRole::Assistant {
-                self.get_tool_calls(message.id)?
-            } else {
-                Vec::new()
-            };
-            messages_with_tools.push(ChatMessageWithTools {
-                message,
-                tool_calls,
-            });
-        }
-
-        Ok(Some(ChatSessionFull {
-            session,
-            messages: messages_with_tools,
-        }))
+        Ok(Some(ChatSessionFull { session, messages }))
     }
 
-    /// Add a complete assistant turn (message + tool calls)
-    pub fn add_assistant_turn(
-        &self,
-        session_id: &str,
-        content: &str,
-        tool_calls: &[ChatToolCall],
-    ) -> Result<i64> {
-        let message_id = self.add_message(session_id, MessageRole::Assistant, content)?;
-
-        for tc in tool_calls {
-            let tc_with_id = ChatToolCall {
-                id: tc.id.clone(),
-                message_id,
-                title: tc.title.clone(),
-                status: tc.status.clone(),
-                locations: tc.locations.clone(),
-            };
-            self.add_tool_call(&tc_with_id)?;
-        }
-
-        Ok(message_id)
+    /// Add an assistant turn with ordered segments (text + tool calls interleaved)
+    pub fn add_assistant_turn(&self, session_id: &str, segments: &[ContentSegment]) -> Result<i64> {
+        // Serialize segments to JSON for storage
+        let content = serde_json::to_string(segments)?;
+        self.add_message(session_id, MessageRole::Assistant, &content)
     }
 }
 
@@ -547,7 +467,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tool_calls() {
+    fn test_assistant_segments() {
         let dir = tempdir().unwrap();
         let db_path = dir.path().join("test.db");
         let store = ChatStore::open(db_path).unwrap();
@@ -563,25 +483,45 @@ mod tests {
         };
         store.create_session(&session).unwrap();
 
-        let tool_calls = vec![ChatToolCall {
-            id: "tc1".to_string(),
-            message_id: 0, // Will be set by add_assistant_turn
-            title: "Read file".to_string(),
-            status: "completed".to_string(),
-            locations: vec!["src/main.rs".to_string()],
-        }];
+        // Interleaved segments: text, tool, text
+        let segments = vec![
+            ContentSegment::Text {
+                text: "Let me read that file.".to_string(),
+            },
+            ContentSegment::ToolCall {
+                id: "tc1".to_string(),
+                title: "Read file".to_string(),
+                status: "completed".to_string(),
+                locations: vec!["src/main.rs".to_string()],
+            },
+            ContentSegment::Text {
+                text: "Here's what I found.".to_string(),
+            },
+        ];
 
         store
             .add_message("test-session", MessageRole::User, "Read main.rs")
             .unwrap();
-        store
-            .add_assistant_turn("test-session", "Here's the file:", &tool_calls)
-            .unwrap();
+        store.add_assistant_turn("test-session", &segments).unwrap();
 
         let full = store.get_session_full("test-session").unwrap().unwrap();
         assert_eq!(full.messages.len(), 2);
-        assert_eq!(full.messages[1].tool_calls.len(), 1);
-        assert_eq!(full.messages[1].tool_calls[0].title, "Read file");
+
+        // Parse the assistant message content as segments
+        let loaded_segments: Vec<ContentSegment> =
+            serde_json::from_str(&full.messages[1].content).unwrap();
+        assert_eq!(loaded_segments.len(), 3);
+
+        // Verify order is preserved
+        assert!(
+            matches!(&loaded_segments[0], ContentSegment::Text { text } if text == "Let me read that file.")
+        );
+        assert!(
+            matches!(&loaded_segments[1], ContentSegment::ToolCall { title, .. } if title == "Read file")
+        );
+        assert!(
+            matches!(&loaded_segments[2], ContentSegment::Text { text } if text == "Here's what I found.")
+        );
     }
 
     #[test]

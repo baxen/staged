@@ -2,21 +2,23 @@
   ChatPanel.svelte - AI chat interface panel
 
   A slide-out panel for chatting with an AI agent via ACP.
-  Supports streaming responses and displays tool calls.
+  Uses the new chat session architecture with SQLite persistence.
 -->
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { X, Send, Bot, User, Loader2, Wrench, AlertCircle } from 'lucide-svelte';
   import {
     checkAiAvailable,
-    sendAgentPromptStreaming,
+    createChatSession,
+    getChatSession,
+    sendChatPrompt,
     listenToSessionUpdates,
-    listenToSessionComplete,
-    listenToSessionError,
+    listenToSessionStatus,
+    parseAssistantContent,
     type SessionNotification,
-    type SessionCompleteEvent,
-    type SessionErrorEvent,
-    type ToolCallSummary,
+    type SessionStatusEvent,
+    type ChatMessage,
+    type ContentSegment,
   } from './services/ai';
   import type { UnlistenFn } from '@tauri-apps/api/event';
 
@@ -31,22 +33,21 @@
   // State
   // ==========================================================================
 
-  /** Message in the chat history */
-  interface ChatMessage {
+  /** A segment for display - text or tool call */
+  type DisplaySegment =
+    | { type: 'text'; text: string }
+    | { type: 'tool'; id: string; title: string; status: string };
+
+  /** Display message - user has plain text, assistant has segments */
+  interface DisplayMessage {
     role: 'user' | 'assistant';
+    /** For user: plain text. For assistant: unused (use segments) */
     content: string;
-    toolCalls?: ToolCallSummary[];
-    isStreaming?: boolean;
+    /** For assistant: ordered segments. For user: empty */
+    segments: DisplaySegment[];
   }
 
-  /** Active tool call being displayed */
-  interface ActiveToolCall {
-    id: string;
-    title: string;
-    status: string;
-  }
-
-  let messages = $state<ChatMessage[]>([]);
+  let messages = $state<DisplayMessage[]>([]);
   let inputValue = $state('');
   let isLoading = $state(false);
   let sessionId = $state<string | null>(null);
@@ -54,9 +55,11 @@
   let aiAvailable = $state<boolean | null>(null);
   let aiAgentName = $state<string>('');
 
-  // Streaming state
-  let streamingContent = $state('');
-  let activeToolCalls = $state<Map<string, ActiveToolCall>>(new Map());
+  // Streaming state (current turn only)
+  // Segments arrive in order: text, tool, more text, etc.
+  let streamingSegments = $state<DisplaySegment[]>([]);
+  // Track tool calls by ID for updates
+  let toolCallMap = $state<Map<string, DisplaySegment & { type: 'tool' }>>(new Map());
 
   // Refs
   let messagesContainer: HTMLDivElement;
@@ -64,8 +67,7 @@
 
   // Event listeners
   let unlistenUpdate: UnlistenFn | null = null;
-  let unlistenComplete: UnlistenFn | null = null;
-  let unlistenError: UnlistenFn | null = null;
+  let unlistenStatus: UnlistenFn | null = null;
 
   // ==========================================================================
   // Lifecycle
@@ -83,8 +85,7 @@
 
     // Set up event listeners
     unlistenUpdate = await listenToSessionUpdates(handleSessionUpdate);
-    unlistenComplete = await listenToSessionComplete(handleSessionComplete);
-    unlistenError = await listenToSessionError(handleSessionError);
+    unlistenStatus = await listenToSessionStatus(handleSessionStatus);
 
     // Focus input
     inputElement?.focus();
@@ -92,8 +93,7 @@
 
   onDestroy(() => {
     unlistenUpdate?.();
-    unlistenComplete?.();
-    unlistenError?.();
+    unlistenStatus?.();
   });
 
   // ==========================================================================
@@ -101,80 +101,109 @@
   // ==========================================================================
 
   function handleSessionUpdate(notification: SessionNotification) {
-    // DEBUG: Log raw notification to see exact shape
-    console.log('[ChatPanel] session-update raw:', JSON.stringify(notification, null, 2));
+    // Note: notification.sessionId is the ACP session ID, not our chat session ID.
+    // For now, we process all updates since we only have one active chat.
+    // TODO: When supporting multiple chats, we'll need to map ACP session IDs to our IDs.
+    if (!isLoading) {
+      // Ignore updates when we're not expecting them
+      return;
+    }
 
     const update = notification.update;
 
-    // ACP uses "sessionUpdate" as the discriminator with snake_case values
     if (update.sessionUpdate === 'agent_message_chunk') {
-      // Handle text chunks - ContentBlock uses "type" discriminator
       if ('content' in update && update.content.type === 'text') {
-        streamingContent += update.content.text;
+        // Append to the last text segment, or create a new one
+        const lastSegment = streamingSegments[streamingSegments.length - 1];
+        if (lastSegment && lastSegment.type === 'text') {
+          lastSegment.text += update.content.text;
+          streamingSegments = [...streamingSegments]; // trigger reactivity
+        } else {
+          streamingSegments = [...streamingSegments, { type: 'text', text: update.content.text }];
+        }
         scrollToBottom();
       }
     } else if (update.sessionUpdate === 'tool_call') {
-      // New tool call started
       if ('toolCallId' in update) {
-        activeToolCalls.set(update.toolCallId, {
+        const toolSegment: DisplaySegment & { type: 'tool' } = {
+          type: 'tool',
           id: update.toolCallId,
           title: update.title,
           status: update.status,
-        });
-        activeToolCalls = new Map(activeToolCalls);
+        };
+        toolCallMap.set(update.toolCallId, toolSegment);
+        streamingSegments = [...streamingSegments, toolSegment];
+        scrollToBottom();
       }
     } else if (update.sessionUpdate === 'tool_call_update') {
-      // Tool call updated
       if ('toolCallId' in update) {
-        const existing = activeToolCalls.get(update.toolCallId);
-        if (existing) {
+        const existing = toolCallMap.get(update.toolCallId);
+        if (existing && update.fields) {
           if (update.fields.title) existing.title = update.fields.title;
           if (update.fields.status) existing.status = update.fields.status;
-          activeToolCalls = new Map(activeToolCalls);
+          streamingSegments = [...streamingSegments]; // trigger reactivity
         }
       }
     }
   }
 
-  function handleSessionComplete(event: SessionCompleteEvent) {
-    // DEBUG: Log complete event
-    console.log('[ChatPanel] session-complete:', JSON.stringify(event, null, 2));
-
-    // Finalize the streaming message
-    if (streamingContent || activeToolCalls.size > 0) {
-      const toolCalls: ToolCallSummary[] = Array.from(activeToolCalls.values()).map((tc) => ({
-        id: tc.id,
-        title: tc.title,
-        status: tc.status,
-      }));
-
-      messages.push({
-        role: 'assistant',
-        content: streamingContent,
-        toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-      });
-      messages = [...messages];
+  async function handleSessionStatus(event: SessionStatusEvent) {
+    // Only process status for our session
+    if (!sessionId || event.sessionId !== sessionId) {
+      return;
     }
 
-    // Update session ID for continuity
-    sessionId = event.sessionId;
+    if (event.status.status === 'idle') {
+      // Turn complete - refresh from database to get canonical state
+      await refreshFromDatabase();
+      isLoading = false;
+    } else if (event.status.status === 'error') {
+      error = event.status.message;
+      isLoading = false;
+      // Clear streaming state
+      streamingSegments = [];
+      toolCallMap = new Map();
+    }
+  }
 
-    // Reset streaming state
-    streamingContent = '';
-    activeToolCalls = new Map();
-    isLoading = false;
+  async function refreshFromDatabase() {
+    if (!sessionId) return;
 
+    try {
+      const session = await getChatSession(sessionId);
+      if (session) {
+        // Convert persisted messages to display format
+        messages = session.messages.map(toDisplayMessage);
+      }
+    } catch (e) {
+      console.error('Failed to refresh from database:', e);
+    }
+
+    // Clear streaming state
+    streamingSegments = [];
+    toolCallMap = new Map();
     scrollToBottom();
   }
 
-  function handleSessionError(event: SessionErrorEvent) {
-    // DEBUG: Log error event
-    console.log('[ChatPanel] session-error:', JSON.stringify(event, null, 2));
-
-    error = event.error;
-    isLoading = false;
-    streamingContent = '';
-    activeToolCalls = new Map();
+  function toDisplayMessage(msg: ChatMessage): DisplayMessage {
+    if (msg.role === 'user') {
+      return { role: 'user', content: msg.content, segments: [] };
+    }
+    // Assistant: parse content as segments
+    const contentSegments = parseAssistantContent(msg.content);
+    const segments: DisplaySegment[] = contentSegments.map((seg: ContentSegment) => {
+      if (seg.type === 'text') {
+        return { type: 'text' as const, text: seg.text };
+      } else {
+        return {
+          type: 'tool' as const,
+          id: seg.id,
+          title: seg.title,
+          status: seg.status,
+        };
+      }
+    });
+    return { role: 'assistant', content: '', segments };
   }
 
   // ==========================================================================
@@ -185,29 +214,34 @@
     const content = inputValue.trim();
     if (!content || isLoading || !aiAvailable) return;
 
-    // Add user message
-    messages.push({ role: 'user', content });
-    messages = [...messages];
-    inputValue = '';
     error = null;
+    inputValue = '';
+
+    // Create session if needed
+    if (!sessionId) {
+      try {
+        const workingDir = repoPath || '.';
+        sessionId = await createChatSession(workingDir);
+      } catch (e) {
+        error = e instanceof Error ? e.message : String(e);
+        return;
+      }
+    }
+
+    // Add user message to display immediately
+    messages = [...messages, { role: 'user', content, segments: [] }];
 
     // Reset streaming state
-    streamingContent = '';
-    activeToolCalls = new Map();
+    streamingSegments = [];
+    toolCallMap = new Map();
     isLoading = true;
 
     await tick();
     scrollToBottom();
 
     try {
-      // Send with streaming - response comes via events
-      const response = await sendAgentPromptStreaming(content, {
-        repoPath,
-        sessionId: sessionId ?? undefined,
-      });
-
-      // Save session ID for future messages
-      sessionId = response.sessionId;
+      // Send prompt - response streams via events
+      await sendChatPrompt(sessionId, content);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
       isLoading = false;
@@ -232,7 +266,6 @@
     });
   }
 
-  // Auto-resize textarea
   function handleInput(event: Event) {
     const target = event.target as HTMLTextAreaElement;
     target.style.height = 'auto';
@@ -278,45 +311,53 @@
             {/if}
           </div>
           <div class="message-content">
-            {#if message.toolCalls && message.toolCalls.length > 0}
-              <div class="tool-calls">
-                {#each message.toolCalls as toolCall}
-                  <div class="tool-call" class:completed={toolCall.status === 'completed'}>
+            {#if message.role === 'user'}
+              <div class="message-text">{message.content}</div>
+            {:else}
+              <!-- Assistant: render segments in order -->
+              {#each message.segments as segment}
+                {#if segment.type === 'text'}
+                  <div class="message-text">{segment.text}</div>
+                {:else}
+                  <div class="tool-call" class:completed={segment.status === 'completed'}>
                     <Wrench size={12} />
-                    <span class="tool-title">{toolCall.title}</span>
+                    <span class="tool-title">{segment.title}</span>
                   </div>
-                {/each}
-              </div>
+                {/if}
+              {/each}
             {/if}
-            <div class="message-text">{message.content}</div>
           </div>
         </div>
       {/each}
 
-      <!-- Streaming message -->
-      {#if isLoading && (streamingContent || activeToolCalls.size > 0)}
+      <!-- Streaming message (current turn) - segments in arrival order -->
+      {#if isLoading && streamingSegments.length > 0}
         <div class="message">
           <div class="message-icon">
             <Bot size={14} />
           </div>
           <div class="message-content">
-            {#if activeToolCalls.size > 0}
-              <div class="tool-calls">
-                {#each Array.from(activeToolCalls.values()) as toolCall}
-                  <div class="tool-call" class:running={toolCall.status === 'running'}>
-                    {#if toolCall.status === 'running'}
-                      <Loader2 size={12} class="spinning" />
-                    {:else}
-                      <Wrench size={12} />
-                    {/if}
-                    <span class="tool-title">{toolCall.title}</span>
-                  </div>
-                {/each}
-              </div>
-            {/if}
-            {#if streamingContent}
-              <div class="message-text">{streamingContent}<span class="cursor">▋</span></div>
-            {/if}
+            {#each streamingSegments as segment, i}
+              {#if segment.type === 'text'}
+                <div class="message-text">
+                  {segment.text}{#if i === streamingSegments.length - 1}<span class="cursor">▋</span
+                    >{/if}
+                </div>
+              {:else}
+                <div
+                  class="tool-call"
+                  class:running={segment.status === 'running'}
+                  class:completed={segment.status === 'completed'}
+                >
+                  {#if segment.status === 'running'}
+                    <Loader2 size={12} class="spinning" />
+                  {:else}
+                    <Wrench size={12} />
+                  {/if}
+                  <span class="tool-title">{segment.title}</span>
+                </div>
+              {/if}
+            {/each}
           </div>
         </div>
       {:else if isLoading}
@@ -548,12 +589,6 @@
     50% {
       opacity: 0;
     }
-  }
-
-  .tool-calls {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
   }
 
   .tool-call {
