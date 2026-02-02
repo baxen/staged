@@ -11,12 +11,14 @@ pub mod review;
 mod themes;
 mod watcher;
 
+use ai::{ChatSessionFull, ChatStore, SessionManager, SessionStatus};
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
 };
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
@@ -610,8 +612,88 @@ async fn send_agent_prompt_streaming(
 }
 
 // =============================================================================
-// AI Analysis Persistence Commands
+// Chat Session Commands (new architecture)
 // =============================================================================
+
+/// Create a new chat session.
+/// Returns the session ID.
+#[tauri::command(rename_all = "camelCase")]
+async fn create_chat_session(
+    state: State<'_, Arc<SessionManager>>,
+    working_dir: String,
+    agent_id: Option<String>,
+) -> Result<String, String> {
+    state
+        .create_session(PathBuf::from(working_dir), agent_id.as_deref())
+        .await
+}
+
+/// List all chat sessions (from database).
+#[tauri::command(rename_all = "camelCase")]
+fn list_chat_sessions(state: State<'_, Arc<ChatStore>>) -> Result<Vec<ai::ChatSession>, String> {
+    state.list_sessions().map_err(|e| e.to_string())
+}
+
+/// List chat sessions for a specific working directory.
+#[tauri::command(rename_all = "camelCase")]
+fn list_chat_sessions_for_dir(
+    state: State<'_, Arc<ChatStore>>,
+    working_dir: String,
+) -> Result<Vec<ai::ChatSession>, String> {
+    state
+        .list_sessions_for_dir(&working_dir)
+        .map_err(|e| e.to_string())
+}
+
+/// Get full session with all messages and tool calls.
+#[tauri::command(rename_all = "camelCase")]
+fn get_chat_session(
+    state: State<'_, Arc<ChatStore>>,
+    session_id: String,
+) -> Result<Option<ChatSessionFull>, String> {
+    state
+        .get_session_full(&session_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get session status (idle, processing, error).
+#[tauri::command(rename_all = "camelCase")]
+async fn get_chat_session_status(
+    state: State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> Result<SessionStatus, String> {
+    state.get_session_status(&session_id).await
+}
+
+/// Send a prompt to a chat session.
+/// Streams response via events, persists to database on completion.
+#[tauri::command(rename_all = "camelCase")]
+async fn send_chat_prompt(
+    state: State<'_, Arc<SessionManager>>,
+    session_id: String,
+    prompt: String,
+) -> Result<(), String> {
+    state.send_prompt(&session_id, prompt).await
+}
+
+/// Delete a chat session (removes from database).
+#[tauri::command(rename_all = "camelCase")]
+fn delete_chat_session(state: State<'_, Arc<ChatStore>>, session_id: String) -> Result<(), String> {
+    state.delete_session(&session_id).map_err(|e| e.to_string())
+}
+
+/// Update chat session title.
+#[tauri::command(rename_all = "camelCase")]
+fn update_chat_session_title(
+    state: State<'_, Arc<ChatStore>>,
+    session_id: String,
+    title: String,
+) -> Result<(), String> {
+    state
+        .update_session_title(&session_id, &title)
+        .map_err(|e| e.to_string())
+}
+
 // =============================================================================
 // Review Commands
 // =============================================================================
@@ -1444,6 +1526,22 @@ pub fn run() {
             // Initialize the project store with app data directory
             project::init_store(app.handle()).map_err(|e| e.0)?;
 
+            // Initialize the chat store with app data directory
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|e| format!("Cannot get app data dir: {}", e))?;
+            let chat_db_path = app_data_dir.join("chat.db");
+            let chat_store = Arc::new(
+                ChatStore::open(chat_db_path)
+                    .map_err(|e| format!("Failed to open chat store: {}", e))?,
+            );
+            app.manage(chat_store.clone());
+
+            // Initialize the session manager
+            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), chat_store));
+            app.manage(session_manager);
+
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
             app.manage(watcher);
@@ -1489,11 +1587,20 @@ pub fn run() {
             fetch_pr,
             sync_review_to_github,
             invalidate_pr_cache,
-            // AI commands
+            // AI commands (legacy)
             check_ai_available,
             discover_acp_providers,
             send_agent_prompt,
             send_agent_prompt_streaming,
+            // Chat session commands (new)
+            create_chat_session,
+            list_chat_sessions,
+            list_chat_sessions_for_dir,
+            get_chat_session,
+            get_chat_session_status,
+            send_chat_prompt,
+            delete_chat_session,
+            update_chat_session_title,
             // Review commands
             get_review,
             add_comment,
