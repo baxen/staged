@@ -498,15 +498,8 @@ export class ConnectorRendererCanvas {
       const isHovered = this.hoveredCommentId === comment.id;
       const rectWidth = isHovered ? COMMENT_WIDTH + 1 : COMMENT_WIDTH;
 
-      // Determine color based on comment author
-      let fillColor: string;
-      if (comment.author === 'ai') {
-        // AI comment
-        fillColor = this.colors.commentColor;
-      } else {
-        // User comment
-        fillColor = isHovered ? this.colors.commentHoverColor : this.colors.commentColor;
-      }
+      // Determine color
+      const fillColor = isHovered ? this.colors.commentHoverColor : this.colors.commentColor;
 
       // Draw rectangle
       ctx.fillStyle = fillColor;

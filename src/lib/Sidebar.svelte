@@ -26,7 +26,6 @@
     Eye,
     X,
     Plus,
-    Wand2,
     Trash2,
     GitCommitHorizontal,
     Orbit,
@@ -1086,16 +1085,11 @@
       <div class="comment-item-container">
         <button
           class="tree-item comment-item"
-          class:ai-comment={comment.author === 'ai'}
           style="padding-left: 8px"
           onclick={() => onFileSelect?.(comment.path, comment.span.start, comment.id)}
         >
           <span class="comment-icon">
-            {#if comment.author === 'ai'}
-              <Wand2 size={12} />
-            {:else}
-              <MessageSquare size={12} />
-            {/if}
+            <MessageSquare size={12} />
           </span>
           <span class="comment-details">
             <span class="comment-location">
@@ -2015,11 +2009,6 @@
   .comment-delete-btn:hover {
     color: var(--status-deleted);
     background-color: var(--bg-primary);
-  }
-
-  /* AI comment styling */
-  .ai-comment .comment-icon {
-    color: var(--text-accent);
   }
 
   /* Reference files section */

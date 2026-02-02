@@ -134,34 +134,6 @@ export function getTotalCommentCount(): number {
   return commentsState.comments.length;
 }
 
-/**
- * Get all AI-authored comments.
- */
-export function getAiComments(): Comment[] {
-  return commentsState.comments.filter((c) => c.author === 'ai');
-}
-
-/**
- * Get all user-authored comments.
- */
-export function getUserComments(): Comment[] {
-  return commentsState.comments.filter((c) => c.author === 'user');
-}
-
-/**
- * Get AI comments for the current file.
- */
-export function getAiCommentsForCurrentFile(): Comment[] {
-  return getCommentsForCurrentFile().filter((c) => c.author === 'ai');
-}
-
-/**
- * Get user comments for the current file.
- */
-export function getUserCommentsForCurrentFile(): Comment[] {
-  return getCommentsForCurrentFile().filter((c) => c.author === 'user');
-}
-
 // =============================================================================
 // Actions
 // =============================================================================
