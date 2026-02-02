@@ -88,6 +88,7 @@
     clearResults as clearSmartDiffResults,
     loadAnalysisFromDb,
   } from './lib/stores/smartDiff.svelte';
+  import { liveSessionStore } from './lib/stores/liveSession.svelte';
 
   // View mode: 'projects' = artifact-centric view, 'diff' = traditional diff viewer
   type ViewMode = 'projects' | 'diff';
@@ -542,6 +543,9 @@
     loadSavedSidebarWidth();
     loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
+
+    // Initialize live session store for streaming AI sessions
+    liveSessionStore.init();
 
     // Pre-load suggested repos (Spotlight search runs in background)
     findRecentRepos(24, 10).then((repos) => {

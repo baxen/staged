@@ -10,7 +10,8 @@ mod types;
 
 pub use acp_client::{
     discover_acp_providers, find_acp_agent, find_acp_agent_by_id, run_acp_prompt,
-    run_acp_prompt_with_session, AcpAgent, AcpPromptResult, AcpProviderInfo,
+    run_acp_prompt_streaming, run_acp_prompt_with_session, AcpAgent, AcpPromptResult,
+    AcpProviderInfo,
 };
 pub use runner::analyze_diff;
 pub use types::{

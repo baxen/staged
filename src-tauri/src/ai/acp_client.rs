@@ -3,7 +3,12 @@
 //! This module spawns agent processes and communicates with them using ACP,
 //! a JSON-RPC based protocol over stdio. Supports both one-shot requests
 //! (for diff analysis) and persistent sessions (for interactive chat).
+//!
+//! For streaming sessions, emits Tauri events with SDK types directly:
+//! - "session-update": SessionNotification from the SDK
+//! - "session-complete": Custom event with finalized transcript
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
@@ -12,9 +17,12 @@ use agent_client_protocol::{
     Agent, ClientSideConnection, ContentBlock as AcpContentBlock, Implementation,
     InitializeRequest, LoadSessionRequest, NewSessionRequest, PermissionOptionId, PromptRequest,
     ProtocolVersion, RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
-    Result as AcpResult, SelectedPermissionOutcome, SessionId, SessionNotification, TextContent,
+    Result as AcpResult, SelectedPermissionOutcome, SessionId, SessionNotification, SessionUpdate,
+    TextContent, ToolCall, ToolCallUpdate,
 };
 use async_trait::async_trait;
+use serde::{Deserialize, Serialize};
+use tauri::Emitter;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio_util::compat::{TokioAsyncReadCompatExt, TokioAsyncWriteCompatExt};
@@ -202,18 +210,158 @@ where
     None
 }
 
-/// Shared state for collecting the response
-struct ResponseCollector {
-    accumulated_content: Mutex<String>,
+// =============================================================================
+// Finalized Message Types (for database storage)
+// =============================================================================
+
+/// Summary of a tool call for storage (not streaming details)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolCallSummary {
+    pub id: String,
+    pub title: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_preview: Option<String>,
 }
 
-/// Client implementation for handling agent notifications
-struct StagedAcpClient {
-    collector: Arc<ResponseCollector>,
+/// Finalized message for database storage
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "role", rename_all = "camelCase")]
+pub enum FinalizedMessage {
+    User {
+        content: String,
+    },
+    Assistant {
+        content: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty", rename = "toolCalls")]
+        tool_calls: Vec<ToolCallSummary>,
+    },
+}
+
+/// Event emitted when session completes
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionCompleteEvent {
+    pub session_id: String,
+    pub transcript: Vec<FinalizedMessage>,
+}
+
+/// Event emitted when session errors
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionErrorEvent {
+    pub session_id: String,
+    pub error: String,
+}
+
+// =============================================================================
+// Streaming Client Implementation
+// =============================================================================
+
+/// Internal state for tracking a tool call during streaming
+#[derive(Debug, Clone)]
+struct ToolCallState {
+    id: String,
+    title: String,
+    status: String,
+    locations: Vec<String>,
+    result_preview: Option<String>,
+}
+
+impl From<&ToolCall> for ToolCallState {
+    fn from(tc: &ToolCall) -> Self {
+        Self {
+            id: tc.tool_call_id.0.to_string(),
+            title: tc.title.clone(),
+            status: format!("{:?}", tc.status).to_lowercase(),
+            locations: tc
+                .locations
+                .iter()
+                .map(|l| l.path.display().to_string())
+                .collect(),
+            result_preview: None,
+        }
+    }
+}
+
+impl From<ToolCallState> for ToolCallSummary {
+    fn from(state: ToolCallState) -> Self {
+        Self {
+            id: state.id,
+            title: state.title,
+            status: state.status,
+            locations: state.locations,
+            result_preview: state.result_preview,
+        }
+    }
+}
+
+/// Client implementation for handling agent notifications with streaming support
+struct StreamingAcpClient {
+    /// Tauri app handle for emitting events (None for non-streaming mode)
+    app_handle: Option<tauri::AppHandle>,
+    /// Session ID for event correlation
+    session_id: Mutex<String>,
+    /// Accumulated assistant message text
+    current_message: Mutex<String>,
+    /// Active tool calls by ID
+    tool_calls: Mutex<HashMap<String, ToolCallState>>,
+}
+
+impl StreamingAcpClient {
+    fn new(app_handle: Option<tauri::AppHandle>) -> Self {
+        Self {
+            app_handle,
+            session_id: Mutex::new(String::new()),
+            current_message: Mutex::new(String::new()),
+            tool_calls: Mutex::new(HashMap::new()),
+        }
+    }
+
+    async fn set_session_id(&self, id: &str) {
+        *self.session_id.lock().await = id.to_string();
+    }
+
+    /// Emit a session update event to the frontend
+    fn emit_update(&self, notification: &SessionNotification) {
+        if let Some(ref app_handle) = self.app_handle {
+            if let Err(e) = app_handle.emit("session-update", notification) {
+                log::warn!("Failed to emit session-update event: {}", e);
+            }
+        }
+    }
+
+    /// Finalize the current message and tool calls into a transcript
+    async fn finalize(&self) -> Vec<FinalizedMessage> {
+        let content = std::mem::take(&mut *self.current_message.lock().await);
+        let tool_calls: Vec<ToolCallSummary> = std::mem::take(&mut *self.tool_calls.lock().await)
+            .into_values()
+            .map(Into::into)
+            .collect();
+
+        let mut messages = Vec::new();
+
+        if !content.is_empty() || !tool_calls.is_empty() {
+            messages.push(FinalizedMessage::Assistant {
+                content,
+                tool_calls,
+            });
+        }
+
+        messages
+    }
+
+    /// Get the accumulated response text (for non-streaming callers)
+    async fn get_response(&self) -> String {
+        self.current_message.lock().await.clone()
+    }
 }
 
 #[async_trait(?Send)]
-impl agent_client_protocol::Client for StagedAcpClient {
+impl agent_client_protocol::Client for StreamingAcpClient {
     async fn request_permission(
         &self,
         args: RequestPermissionRequest,
@@ -233,14 +381,22 @@ impl agent_client_protocol::Client for StagedAcpClient {
     }
 
     async fn session_notification(&self, notification: SessionNotification) -> AcpResult<()> {
-        use agent_client_protocol::SessionUpdate;
+        // 1. Emit the raw SDK notification to frontend (if streaming)
+        self.emit_update(&notification);
 
+        // 2. Update internal state for finalization
         match &notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let AcpContentBlock::Text(text) = &chunk.content {
-                    let mut accumulated = self.collector.accumulated_content.lock().await;
-                    accumulated.push_str(&text.text);
+                    self.current_message.lock().await.push_str(&text.text);
                 }
+            }
+            SessionUpdate::ToolCall(tool_call) => {
+                let state = ToolCallState::from(tool_call);
+                self.tool_calls.lock().await.insert(state.id.clone(), state);
+            }
+            SessionUpdate::ToolCallUpdate(update) => {
+                self.update_tool_call(update).await;
             }
             _ => {
                 log::debug!("Ignoring session update: {:?}", notification.update);
@@ -251,43 +407,124 @@ impl agent_client_protocol::Client for StagedAcpClient {
     }
 }
 
+impl StreamingAcpClient {
+    async fn update_tool_call(&self, update: &ToolCallUpdate) {
+        let mut tool_calls = self.tool_calls.lock().await;
+        let id = update.tool_call_id.0.to_string();
+        if let Some(tc) = tool_calls.get_mut(&id) {
+            if let Some(ref status) = update.fields.status {
+                tc.status = format!("{:?}", status).to_lowercase();
+            }
+            if let Some(ref title) = update.fields.title {
+                tc.title = title.clone();
+            }
+            // Extract preview from content if available
+            if let Some(ref content) = &update.fields.content {
+                tc.result_preview = extract_content_preview(content);
+            }
+        }
+    }
+}
+
+/// Extract a preview string from tool call content
+fn extract_content_preview(content: &[agent_client_protocol::ToolCallContent]) -> Option<String> {
+    for item in content {
+        match item {
+            agent_client_protocol::ToolCallContent::Content(c) => {
+                if let AcpContentBlock::Text(text) = &c.content {
+                    let preview: String = text.text.chars().take(200).collect();
+                    return Some(if text.text.len() > 200 {
+                        format!("{}...", preview)
+                    } else {
+                        preview
+                    });
+                }
+            }
+            agent_client_protocol::ToolCallContent::Diff(d) => {
+                // Show a preview of the diff (old_text -> new_text)
+                let preview = format!(
+                    "{}{}",
+                    d.path.display(),
+                    if d.old_text.is_some() {
+                        " (modified)"
+                    } else {
+                        " (new)"
+                    }
+                );
+                return Some(preview);
+            }
+            agent_client_protocol::ToolCallContent::Terminal(t) => {
+                return Some(format!("Terminal: {}", t.terminal_id.0));
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+// =============================================================================
+// Public API
+// =============================================================================
+
 /// Result of running an ACP prompt with session support
 pub struct AcpPromptResult {
     /// The agent's response text
     pub response: String,
     /// The session ID (can be used to resume this session later)
     pub session_id: String,
+    /// Finalized transcript for storage
+    pub transcript: Vec<FinalizedMessage>,
 }
 
-/// Run a one-shot prompt through ACP and return the response
+/// Run a one-shot prompt through ACP and return the response (no streaming)
 ///
 /// This spawns the agent, initializes ACP, sends the prompt, collects the
 /// response, and shuts down. Designed for Staged's single-request use case
 /// (e.g., diff analysis).
-///
-/// Runs in a dedicated thread with its own LocalSet to handle !Send futures.
 pub async fn run_acp_prompt(
     agent: &AcpAgent,
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_with_session(agent, working_dir, prompt, None).await?;
+    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None).await?;
     Ok(result.response)
 }
 
-/// Run a prompt through ACP with optional session resumption
+/// Run a prompt through ACP with optional session resumption (no streaming)
 ///
 /// If `session_id` is provided, attempts to load and resume that session.
 /// Otherwise, creates a new session. Returns both the response and the
 /// session ID for future resumption.
-///
-/// Sessions are persisted in Goose's SQLite database, so they survive
-/// process restarts.
 pub async fn run_acp_prompt_with_session(
     agent: &AcpAgent,
     working_dir: &Path,
     prompt: &str,
     session_id: Option<&str>,
+) -> Result<AcpPromptResult, String> {
+    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None).await
+}
+
+/// Run a prompt through ACP with streaming events emitted to frontend
+///
+/// Emits "session-update" events with SessionNotification payloads during execution.
+/// Emits "session-complete" event with finalized transcript when done.
+pub async fn run_acp_prompt_streaming(
+    agent: &AcpAgent,
+    working_dir: &Path,
+    prompt: &str,
+    session_id: Option<&str>,
+    app_handle: tauri::AppHandle,
+) -> Result<AcpPromptResult, String> {
+    run_acp_prompt_internal(agent, working_dir, prompt, session_id, Some(app_handle)).await
+}
+
+/// Internal implementation that handles both streaming and non-streaming modes
+async fn run_acp_prompt_internal(
+    agent: &AcpAgent,
+    working_dir: &Path,
+    prompt: &str,
+    session_id: Option<&str>,
+    app_handle: Option<tauri::AppHandle>,
 ) -> Result<AcpPromptResult, String> {
     let agent_path = agent.path().to_path_buf();
     let agent_name = agent.name().to_string();
@@ -315,6 +552,7 @@ pub async fn run_acp_prompt_with_session(
                 &working_dir,
                 &prompt,
                 session_id.as_deref(),
+                app_handle,
             )
             .await
         })
@@ -331,6 +569,7 @@ async fn run_acp_session_inner(
     working_dir: &Path,
     prompt: &str,
     existing_session_id: Option<&str>,
+    app_handle: Option<tauri::AppHandle>,
 ) -> Result<AcpPromptResult, String> {
     // Spawn the agent process with ACP mode
     let mut cmd = Command::new(agent_path);
@@ -359,19 +598,13 @@ async fn run_acp_session_inner(
     let stdin_compat = stdin.compat_write();
     let stdout_compat = stdout.compat();
 
-    // Create response collector
-    let collector = Arc::new(ResponseCollector {
-        accumulated_content: Mutex::new(String::new()),
-    });
-
-    // Create client handler
-    let client = StagedAcpClient {
-        collector: collector.clone(),
-    };
+    // Create streaming client
+    let client = Arc::new(StreamingAcpClient::new(app_handle.clone()));
+    let client_for_connection = Arc::clone(&client);
 
     // Create the ACP connection
     let (connection, io_future) =
-        ClientSideConnection::new(client, stdin_compat, stdout_compat, |fut| {
+        ClientSideConnection::new(client_for_connection, stdin_compat, stdout_compat, |fut| {
             tokio::task::spawn_local(fut);
         });
 
@@ -436,9 +669,13 @@ async fn run_acp_session_inner(
             (session_response.session_id, true)
         };
 
+    // Set session ID on client for event correlation
+    client.set_session_id(&session_id.0).await;
+
     // Clear any accumulated content from loading session history
     // (load_session may replay old messages as AgentMessageChunk notifications)
-    collector.accumulated_content.lock().await.clear();
+    *client.current_message.lock().await = String::new();
+    client.tool_calls.lock().await.clear();
 
     // For new sessions, prepend system context to guide the agent's behavior
     let full_prompt = if is_new_session {
@@ -453,21 +690,50 @@ async fn run_acp_session_inner(
         vec![AcpContentBlock::Text(TextContent::new(full_prompt))],
     );
 
-    connection
-        .prompt(prompt_request)
-        .await
-        .map_err(|e| format!("Failed to send prompt: {:?}", e))?;
+    let prompt_result = connection.prompt(prompt_request).await;
 
     // Clean up the child process
     let _ = child.kill().await;
 
-    // Get the accumulated response
-    let response = collector.accumulated_content.lock().await.clone();
+    // Handle result
+    let session_id_str = session_id.0.to_string();
 
-    Ok(AcpPromptResult {
-        response,
-        session_id: session_id.0.to_string(),
-    })
+    match prompt_result {
+        Ok(_) => {
+            let response = client.get_response().await;
+            let transcript = client.finalize().await;
+
+            // Emit completion event if streaming
+            if let Some(ref app_handle) = app_handle {
+                let complete_event = SessionCompleteEvent {
+                    session_id: session_id_str.clone(),
+                    transcript: transcript.clone(),
+                };
+                if let Err(e) = app_handle.emit("session-complete", &complete_event) {
+                    log::warn!("Failed to emit session-complete event: {}", e);
+                }
+            }
+
+            Ok(AcpPromptResult {
+                response,
+                session_id: session_id_str,
+                transcript,
+            })
+        }
+        Err(e) => {
+            // Emit error event if streaming
+            if let Some(ref app_handle) = app_handle {
+                let error_event = SessionErrorEvent {
+                    session_id: session_id_str,
+                    error: format!("{:?}", e),
+                };
+                if let Err(emit_err) = app_handle.emit("session-error", &error_event) {
+                    log::warn!("Failed to emit session-error event: {}", emit_err);
+                }
+            }
+            Err(format!("Failed to send prompt: {:?}", e))
+        }
+    }
 }
 
 #[cfg(test)]

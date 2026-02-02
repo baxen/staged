@@ -585,6 +585,47 @@ async fn send_agent_prompt(
     })
 }
 
+/// Send a prompt to the AI agent with real-time streaming events.
+///
+/// Similar to send_agent_prompt but emits Tauri events during execution:
+/// - "session-update": SessionNotification from the ACP SDK (streaming chunks, tool calls)
+/// - "session-complete": Finalized transcript when done
+/// - "session-error": Error information if the session fails
+///
+/// Returns the same response as send_agent_prompt for compatibility.
+#[tauri::command(rename_all = "camelCase")]
+async fn send_agent_prompt_streaming(
+    app_handle: AppHandle,
+    repo_path: Option<String>,
+    prompt: String,
+    session_id: Option<String>,
+    provider: Option<String>,
+) -> Result<AgentPromptResponse, String> {
+    let agent = if let Some(provider_id) = provider {
+        ai::find_acp_agent_by_id(&provider_id).ok_or_else(|| {
+            format!(
+                "Provider '{}' not found. Run discover_acp_providers to see available providers.",
+                provider_id
+            )
+        })?
+    } else {
+        ai::find_acp_agent().ok_or_else(|| {
+            "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
+        })?
+    };
+
+    let path = get_repo_path(repo_path.as_deref()).to_path_buf();
+
+    let result =
+        ai::run_acp_prompt_streaming(&agent, &path, &prompt, session_id.as_deref(), app_handle)
+            .await?;
+
+    Ok(AgentPromptResponse {
+        response: result.response,
+        session_id: result.session_id,
+    })
+}
+
 // =============================================================================
 // AI Analysis Persistence Commands
 // =============================================================================
@@ -1127,13 +1168,29 @@ async fn run_artifact_generation(
         }
     };
 
-    // Call the AI
-    match ai::run_acp_prompt(&agent, &working_dir, &full_prompt).await {
+    // Emit event linking artifact to upcoming session (frontend uses this to show streaming)
+    #[derive(serde::Serialize, Clone)]
+    #[serde(rename_all = "camelCase")]
+    struct ArtifactSessionStart {
+        artifact_id: String,
+    }
+    let _ = app_handle.emit(
+        "artifact-session-start",
+        ArtifactSessionStart {
+            artifact_id: artifact.id.clone(),
+        },
+    );
+
+    // Call the AI with streaming enabled
+    // This emits session-update events during generation so the frontend can show progress
+    match ai::run_acp_prompt_streaming(&agent, &working_dir, &full_prompt, None, app_handle.clone())
+        .await
+    {
         Ok(result) => {
             // Extract a title from the response
-            let title = extract_title_from_markdown(&result, &prompt);
+            let title = extract_title_from_markdown(&result.response, &prompt);
             let data = ArtifactData::Markdown {
-                content: result.clone(),
+                content: result.response.clone(),
             };
 
             // Update artifact with success
@@ -1145,13 +1202,16 @@ async fn run_artifact_generation(
                 Some(&data),
             );
 
-            // Save the session transcript
-            // Format: JSON array with user prompt and AI response
-            let transcript = serde_json::json!([
-                { "role": "user", "content": prompt },
-                { "role": "assistant", "content": result }
-            ])
-            .to_string();
+            // Save the session transcript with full FinalizedMessage[] format
+            // This preserves tool calls and structured message data
+            let transcript = serde_json::to_string(&result.transcript).unwrap_or_else(|_| {
+                // Fallback to simple format if serialization fails
+                serde_json::json!([
+                    { "role": "user", "content": prompt },
+                    { "role": "assistant", "content": result.response }
+                ])
+                .to_string()
+            });
             let session = Session::new(&artifact.id, transcript);
             let _ = store.create_session(&session);
         }
@@ -1632,6 +1692,7 @@ pub fn run() {
             check_ai_available,
             discover_acp_providers,
             send_agent_prompt,
+            send_agent_prompt_streaming,
             // AI persistence commands
             save_changeset_summary,
             get_changeset_summary,
