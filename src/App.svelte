@@ -674,6 +674,9 @@
 <main>
   {#if windowState.tabs.length > 0}
     <TabBar onNewTab={handleNewTab} onSwitchTab={handleTabSwitch} />
+  {:else}
+    <!-- Spacer for traffic light buttons when no tabs -->
+    <div class="titlebar-spacer" data-tauri-drag-region></div>
   {/if}
 
   <TopBar onPresetSelect={handlePresetSelect} onCustomDiff={handleCustomDiff} />
@@ -820,6 +823,13 @@
     height: 100vh;
     overflow: hidden;
     background-color: var(--bg-chrome);
+  }
+
+  .titlebar-spacer {
+    height: 28px;
+    flex-shrink: 0;
+    background: var(--bg-chrome);
+    -webkit-app-region: drag;
   }
 
   .app-container {
