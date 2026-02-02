@@ -7,7 +7,7 @@
 //! ## Architecture
 //!
 //! - `client.rs` - Core ACP client implementation (agent discovery, session management)
-//! - `legacy/` - Original diff analysis code (being phased out)
+//! - `legacy/` - Reference code for diff analysis prompts (not wired up, kept for reference)
 //!
 //! ## Usage
 //!
@@ -19,7 +19,7 @@
 //! ```
 
 mod client;
-pub mod legacy;
+mod legacy; // Reference code only - not exposed or used
 
 // Re-export core ACP client functionality
 pub use client::{
