@@ -1192,29 +1192,13 @@ async fn run_artifact_generation(
         }
     };
 
-    // Emit event linking artifact to upcoming session (frontend uses this to show streaming)
-    #[derive(serde::Serialize, Clone)]
-    #[serde(rename_all = "camelCase")]
-    struct ArtifactSessionStart {
-        artifact_id: String,
-    }
-    let _ = app_handle.emit(
-        "artifact-session-start",
-        ArtifactSessionStart {
-            artifact_id: artifact.id.clone(),
-        },
-    );
-
-    // Call the AI with streaming enabled
-    // This emits session-update events during generation so the frontend can show progress
-    match ai::run_acp_prompt_streaming(&agent, &working_dir, &full_prompt, None, app_handle.clone())
-        .await
-    {
+    // Call the AI
+    match ai::run_acp_prompt(&agent, &working_dir, &full_prompt).await {
         Ok(result) => {
             // Extract a title from the response
-            let title = extract_title_from_markdown(&result.response, &prompt);
+            let title = extract_title_from_markdown(&result, &prompt);
             let data = ArtifactData::Markdown {
-                content: result.response.clone(),
+                content: result.clone(),
             };
 
             // Update artifact with success
@@ -1226,16 +1210,13 @@ async fn run_artifact_generation(
                 Some(&data),
             );
 
-            // Save the session transcript with full FinalizedMessage[] format
-            // This preserves tool calls and structured message data
-            let transcript = serde_json::to_string(&result.transcript).unwrap_or_else(|_| {
-                // Fallback to simple format if serialization fails
-                serde_json::json!([
-                    { "role": "user", "content": prompt },
-                    { "role": "assistant", "content": result.response }
-                ])
-                .to_string()
-            });
+            // Save the session transcript
+            // Format: JSON array with user prompt and AI response
+            let transcript = serde_json::json!([
+                { "role": "user", "content": prompt },
+                { "role": "assistant", "content": result }
+            ])
+            .to_string();
             let session = Session::new(&artifact.id, transcript);
             let _ = store.create_session(&session);
         }
