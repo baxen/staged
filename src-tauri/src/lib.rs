@@ -520,7 +520,6 @@ async fn sync_review_to_github(
 // AI Commands
 // =============================================================================
 
-use ai::legacy::{ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult};
 use ai::AcpProviderInfo;
 
 /// Discover available ACP providers on the system.
@@ -652,135 +651,6 @@ async fn send_agent_prompt_streaming(
 // =============================================================================
 // AI Analysis Persistence Commands
 // =============================================================================
-
-/// Save a changeset summary to the database.
-#[tauri::command(rename_all = "camelCase")]
-fn save_changeset_summary(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-    summary: ChangesetSummary,
-) -> Result<(), String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.save_changeset_summary(&id, &summary).map_err(|e| e.0)
-}
-
-/// Get a saved changeset summary from the database.
-#[tauri::command(rename_all = "camelCase")]
-fn get_changeset_summary(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-) -> Result<Option<ChangesetSummary>, String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.get_changeset_summary(&id).map_err(|e| e.0)
-}
-
-/// Save a file analysis to the database.
-#[tauri::command(rename_all = "camelCase")]
-fn save_file_analysis(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-    file_path: String,
-    result: SmartDiffResult,
-) -> Result<(), String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store
-        .save_file_analysis(&id, &file_path, &result)
-        .map_err(|e| e.0)
-}
-
-/// Get a saved file analysis from the database.
-#[tauri::command(rename_all = "camelCase")]
-fn get_file_analysis(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-    file_path: String,
-) -> Result<Option<SmartDiffResult>, String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.get_file_analysis(&id, &file_path).map_err(|e| e.0)
-}
-
-/// Get all saved file analyses for a diff.
-#[tauri::command(rename_all = "camelCase")]
-fn get_all_file_analyses(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-) -> Result<Vec<(String, SmartDiffResult)>, String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.get_all_file_analyses(&id).map_err(|e| e.0)
-}
-
-/// Delete all AI analyses for a diff (used when refreshing).
-#[tauri::command(rename_all = "camelCase")]
-fn delete_all_analyses(repo_path: Option<String>, spec: DiffSpec) -> Result<(), String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.delete_all_analyses(&id).map_err(|e| e.0)
-}
-
-/// Convert AI annotations to comments and save them to the database.
-/// Only converts actionable annotations (warnings and suggestions).
-/// Informational annotations (explanations and context) remain as blur overlays.
-#[tauri::command(rename_all = "camelCase")]
-fn save_ai_comments(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-    annotations: Vec<SmartDiffAnnotation>,
-) -> Result<Vec<Comment>, String> {
-    use ai::legacy::AnnotationCategory;
-    use review::CommentAuthor;
-
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-
-    let mut comments = Vec::new();
-
-    for ann in annotations {
-        // Only convert warnings and suggestions to comments
-        // Keep explanations and context as blur overlays
-        let is_actionable = matches!(
-            ann.category,
-            AnnotationCategory::Warning | AnnotationCategory::Suggestion
-        );
-
-        if !is_actionable {
-            continue;
-        }
-
-        // Only create comments for annotations with after_span (target new code)
-        if let (Some(file_path), Some(after_span)) = (ann.file_path, ann.after_span) {
-            let comment = Comment {
-                id: uuid::Uuid::new_v4().to_string(),
-                path: file_path,
-                span: git::Span::new(
-                    after_span.start.try_into().unwrap_or(0),
-                    after_span.end.try_into().unwrap_or(0),
-                ),
-                content: ann.content,
-                author: CommentAuthor::Ai,
-                category: Some(format!("{:?}", ann.category).to_lowercase()),
-                created_at: Some(chrono::Utc::now().to_rfc3339()),
-            };
-
-            store.add_comment(&id, &comment).map_err(|e| e.0)?;
-            comments.push(comment);
-        }
-    }
-
-    Ok(comments)
-}
-
 // =============================================================================
 // Review Commands
 // =============================================================================
@@ -1666,19 +1536,11 @@ pub fn run() {
             sync_review_to_github,
             invalidate_pr_cache,
             // AI commands
-            analyze_diff,
             check_ai_available,
             discover_acp_providers,
+            analyze_diff,
             send_agent_prompt,
             send_agent_prompt_streaming,
-            // AI persistence commands
-            save_changeset_summary,
-            get_changeset_summary,
-            save_file_analysis,
-            get_file_analysis,
-            get_all_file_analyses,
-            delete_all_analyses,
-            save_ai_comments,
             // Review commands
             get_review,
             add_comment,
