@@ -1132,7 +1132,9 @@ async fn run_artifact_generation(
         Ok(result) => {
             // Extract a title from the response
             let title = extract_title_from_markdown(&result, &prompt);
-            let data = ArtifactData::Markdown { content: result };
+            let data = ArtifactData::Markdown {
+                content: result.clone(),
+            };
 
             // Update artifact with success
             let _ = store.update_artifact_status(
@@ -1142,6 +1144,16 @@ async fn run_artifact_generation(
                 Some(&title),
                 Some(&data),
             );
+
+            // Save the session transcript
+            // Format: JSON array with user prompt and AI response
+            let transcript = serde_json::json!([
+                { "role": "user", "content": prompt },
+                { "role": "assistant", "content": result }
+            ])
+            .to_string();
+            let session = Session::new(&artifact.id, transcript);
+            let _ = store.create_session(&session);
         }
         Err(e) => {
             // Update artifact with error
