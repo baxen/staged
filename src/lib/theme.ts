@@ -59,12 +59,6 @@ export interface Theme {
     commentHighlight: string; // Highlight color for commented regions in spine
   };
 
-  // AI annotation overlays
-  annotation: {
-    overlayBg: string; // Semi-transparent background for blur overlay
-    border: string; // Subtle border for overlay edges
-  };
-
   // Interactive elements
   ui: {
     accent: string; // Primary accent
@@ -367,15 +361,8 @@ export function createAdaptiveTheme(
       changedBg: overlay(syntaxFg, isDark ? 0.04 : 0.06),
       // Range borders need to be visible but not distracting
       rangeBorder: mix(primaryBg, syntaxFg, isDark ? 0.2 : 0.15),
-      // Comment highlight - uses blue accent for "annotation" semantic
+      // Comment highlight - uses blue accent
       commentHighlight: overlay(accentBlue, isDark ? 0.5 : 0.4),
-    },
-
-    annotation: {
-      // Semi-transparent background for blur overlay - darker for readability
-      overlayBg: isDark ? 'rgba(0, 0, 0, 0.5)' : 'rgba(255, 255, 255, 0.6)',
-      // Subtle border for overlay edges
-      border: isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)',
     },
 
     ui: {
@@ -440,9 +427,6 @@ export function themeToCssVars(t: Theme): string {
     --diff-changed-bg: ${t.diff.changedBg};
     --diff-range-border: ${t.diff.rangeBorder};
     --diff-comment-highlight: ${t.diff.commentHighlight};
-
-    --annotation-overlay-bg: ${t.annotation.overlayBg};
-    --annotation-border: ${t.annotation.border};
 
     --ui-accent: ${t.ui.accent};
     --ui-accent-hover: ${t.ui.accentHover};

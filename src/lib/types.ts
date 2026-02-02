@@ -194,8 +194,6 @@ export interface Comment {
   /** The line range this comment applies to (0-indexed, exclusive end) */
   span: Span;
   content: string;
-  /** Who authored this comment */
-  author: 'user' | 'ai';
   /** When the comment was created (ISO timestamp) */
   created_at?: string;
 }
