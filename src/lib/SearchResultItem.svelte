@@ -16,7 +16,7 @@
   let { match, snippet, isCurrent, onclick }: Props = $props();
 </script>
 
-<button class="search-result-item" class:current={isCurrent} onclick={onclick}>
+<button class="search-result-item" class:current={isCurrent} {onclick}>
   <span class="result-snippet" title={snippet}>
     {snippet}
   </span>

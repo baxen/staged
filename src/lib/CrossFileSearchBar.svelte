@@ -27,6 +27,11 @@
 
   const DEBOUNCE_MS = 300;
 
+  // Dynamic placeholder based on scope
+  let placeholderText = $derived(
+    globalSearchState.scope === 'changes' ? 'Search changed lines...' : 'Search all files...'
+  );
+
   // Match counter text
   let matchCounterText = $derived.by(() => {
     if (!globalSearchState.isOpen) return '';
@@ -98,7 +103,7 @@
         bind:this={inputElement}
         type="text"
         class="search-input"
-        placeholder="Search in all files..."
+        placeholder={placeholderText}
         value={localQuery}
         oninput={handleInput}
         onkeydown={handleKeydown}
@@ -140,7 +145,7 @@
 
 <style>
   .search-bar-container {
-    padding: 8px 12px;
+    padding: 12px;
     border-bottom: 1px solid var(--border-subtle);
     background-color: var(--bg-secondary);
   }
@@ -149,15 +154,15 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    background-color: var(--bg-primary);
+    background: var(--bg-primary);
     border: 1px solid var(--border-muted);
-    border-radius: 6px;
-    padding: 6px 8px;
-    transition: border-color 0.15s;
+    border-radius: 8px;
+    padding: 6px 10px;
+    transition: border-color 0.1s;
   }
 
   .search-input-wrapper:focus-within {
-    border-color: var(--accent-primary);
+    border-color: var(--text-accent);
   }
 
   .search-input-wrapper :global(.search-icon) {
@@ -171,6 +176,7 @@
     border: none;
     color: var(--text-primary);
     font-size: var(--size-sm);
+    font-family: inherit;
     outline: none;
     min-width: 0;
   }
@@ -198,12 +204,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 2px;
+    padding: 4px;
     background: none;
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    border-radius: 3px;
+    border-radius: 4px;
     flex-shrink: 0;
     transition:
       color 0.1s,
@@ -220,14 +226,14 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    margin-top: 6px;
+    margin-top: 8px;
   }
 
   .scope-toggle {
     display: flex;
-    gap: 4px;
-    background-color: var(--bg-primary);
-    border-radius: 4px;
+    gap: 2px;
+    background-color: var(--bg-hover);
+    border-radius: 5px;
     padding: 2px;
   }
 
@@ -238,7 +244,7 @@
     padding: 4px 6px;
     background: none;
     border: none;
-    color: var(--text-muted);
+    color: var(--text-faint);
     cursor: pointer;
     border-radius: 3px;
     transition:
@@ -246,22 +252,14 @@
       color 0.1s;
   }
 
-  .scope-btn :global(svg) {
-    stroke-width: 2;
-  }
-
-  .scope-btn:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
+  .scope-btn:hover:not(.active) {
+    color: var(--text-muted);
   }
 
   .scope-btn.active {
-    background-color: var(--accent-primary);
-    color: var(--accent-foreground, var(--text-primary));
-  }
-
-  .scope-btn.active :global(svg) {
-    stroke-width: 2.5;
+    background-color: var(--bg-primary);
+    color: var(--text-accent);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   }
 
   .match-counter {

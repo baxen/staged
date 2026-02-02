@@ -262,10 +262,7 @@
   let displayOrderedFiles = $derived.by(() => {
     if (treeView) {
       // In tree view, extract files from trees in display order
-      return [
-        ...extractFilesFromTree(needsReviewTree),
-        ...extractFilesFromTree(reviewedTree),
-      ];
+      return [...extractFilesFromTree(needsReviewTree), ...extractFilesFromTree(reviewedTree)];
     } else {
       // In flat view, use the existing order
       return [...needsReview, ...reviewed];
@@ -276,11 +273,11 @@
    * Get FileDiffSummary array in display order for search navigation.
    */
   let displayOrderedFileSummaries = $derived.by(() => {
-    const orderedPaths = displayOrderedFiles.map(f => f.path);
+    const orderedPaths = displayOrderedFiles.map((f) => f.path);
     // Create a map for quick lookup
-    const fileMap = new Map(files.map(f => [getFilePath(f), f]));
+    const fileMap = new Map(files.map((f) => [getFilePath(f), f]));
     // Return files in display order
-    return orderedPaths.map(path => fileMap.get(path)).filter(Boolean) as FileDiffSummary[];
+    return orderedPaths.map((path) => fileMap.get(path)).filter(Boolean) as FileDiffSummary[];
   });
 
   async function selectFile(file: FileEntry) {
@@ -392,7 +389,10 @@
   /**
    * Get a snippet of text around a search match.
    */
-  function getMatchSnippet(match: import('./services/diffSearch').SearchMatch, filePath: string): string {
+  function getMatchSnippet(
+    match: import('./services/diffSearch').SearchMatch,
+    filePath: string
+  ): string {
     const diff = diffState.diffCache.get(filePath);
     if (!diff) return '';
 
@@ -418,7 +418,11 @@
   /**
    * Handle clicking a search result.
    */
-  async function handleSearchResultClick(filePath: string, match: import('./services/diffSearch').SearchMatch, globalIndex: number) {
+  async function handleSearchResultClick(
+    filePath: string,
+    match: import('./services/diffSearch').SearchMatch,
+    globalIndex: number
+  ) {
     // Update current result index
     setCurrentResult(globalIndex);
 
@@ -645,7 +649,8 @@
         <button
           class="tree-item file-item"
           class:selected={selectedFile === node.file.path}
-          class:has-search-results={globalSearchState.isOpen && globalSearchState.fileResults.has(node.file.path)}
+          class:has-search-results={globalSearchState.isOpen &&
+            globalSearchState.fileResults.has(node.file.path)}
           style="padding-left: {8 + depth * 12}px"
           onclick={() => selectFile(node.file!)}
         >
@@ -685,8 +690,12 @@
             </span>
           {/if}
           {#if globalSearchState.isOpen && globalSearchState.fileResults.has(node.file.path)}
-            {@const resultCount = globalSearchState.fileResults.get(node.file.path)?.matches.length ?? 0}
-            <span class="search-result-count" title="{resultCount} search result{resultCount !== 1 ? 's' : ''}">
+            {@const resultCount =
+              globalSearchState.fileResults.get(node.file.path)?.matches.length ?? 0}
+            <span
+              class="search-result-count"
+              title="{resultCount} search result{resultCount !== 1 ? 's' : ''}"
+            >
               {resultCount}
             </span>
           {/if}
@@ -700,7 +709,11 @@
               {#each fileResult.matches.slice(0, fileResult.displayLimit) as match, i}
                 {@const snippet = getMatchSnippet(match, node.file.path)}
                 {@const isCurrent = isCurrentResult(displayOrderedFileSummaries, node.file.path, i)}
-                {@const globalIndex = getGlobalIndex(displayOrderedFileSummaries, node.file.path, i)}
+                {@const globalIndex = getGlobalIndex(
+                  displayOrderedFileSummaries,
+                  node.file.path,
+                  i
+                )}
                 <SearchResultItem
                   {match}
                   {snippet}
@@ -710,17 +723,11 @@
               {/each}
 
               {#if fileResult.matches.length > fileResult.displayLimit}
-                <button
-                  class="show-more-btn"
-                  onclick={() => expandFileResults(node.file!.path)}
-                >
+                <button class="show-more-btn" onclick={() => expandFileResults(node.file!.path)}>
                   Show {fileResult.matches.length - fileResult.displayLimit} more
                 </button>
               {:else if fileResult.displayLimit > 5}
-                <button
-                  class="show-less-btn"
-                  onclick={() => collapseFileResults(node.file!.path)}
-                >
+                <button class="show-less-btn" onclick={() => collapseFileResults(node.file!.path)}>
                   Show less
                 </button>
               {/if}
@@ -738,7 +745,8 @@
       <button
         class="tree-item file-item"
         class:selected={selectedFile === file.path}
-        class:has-search-results={globalSearchState.isOpen && globalSearchState.fileResults.has(file.path)}
+        class:has-search-results={globalSearchState.isOpen &&
+          globalSearchState.fileResults.has(file.path)}
         style="padding-left: 8px"
         onclick={() => selectFile(file)}
         title={file.path}
@@ -780,7 +788,10 @@
         {/if}
         {#if globalSearchState.isOpen && globalSearchState.fileResults.has(file.path)}
           {@const resultCount = globalSearchState.fileResults.get(file.path)?.matches.length ?? 0}
-          <span class="search-result-count" title="{resultCount} search result{resultCount !== 1 ? 's' : ''}">
+          <span
+            class="search-result-count"
+            title="{resultCount} search result{resultCount !== 1 ? 's' : ''}"
+          >
             {resultCount}
           </span>
         {/if}
@@ -804,17 +815,11 @@
             {/each}
 
             {#if fileResult.matches.length > fileResult.displayLimit}
-              <button
-                class="show-more-btn"
-                onclick={() => expandFileResults(file.path)}
-              >
+              <button class="show-more-btn" onclick={() => expandFileResults(file.path)}>
                 Show {fileResult.matches.length - fileResult.displayLimit} more
               </button>
             {:else if fileResult.displayLimit > 5}
-              <button
-                class="show-less-btn"
-                onclick={() => collapseFileResults(file.path)}
-              >
+              <button class="show-less-btn" onclick={() => collapseFileResults(file.path)}>
                 Show less
               </button>
             {/if}

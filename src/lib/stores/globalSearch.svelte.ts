@@ -366,9 +366,7 @@ export function getGlobalIndex(
 ): number {
   const flattened = getFlattenedResults(files);
 
-  const result = flattened.find(
-    (r) => r.filePath === filePath && r.localIndex === localIndex
-  );
+  const result = flattened.find((r) => r.filePath === filePath && r.localIndex === localIndex);
 
   return result?.globalIndex ?? -1;
 }
