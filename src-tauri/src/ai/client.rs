@@ -309,6 +309,8 @@ struct StreamingAcpClient {
     current_message: Mutex<String>,
     /// Active tool calls by ID
     tool_calls: Mutex<HashMap<String, ToolCallState>>,
+    /// Whether to suppress emitting events (used during session load replay)
+    suppress_emit: Mutex<bool>,
 }
 
 impl StreamingAcpClient {
@@ -318,6 +320,7 @@ impl StreamingAcpClient {
             session_id: Mutex::new(String::new()),
             current_message: Mutex::new(String::new()),
             tool_calls: Mutex::new(HashMap::new()),
+            suppress_emit: Mutex::new(false),
         }
     }
 
@@ -325,8 +328,16 @@ impl StreamingAcpClient {
         *self.session_id.lock().await = id.to_string();
     }
 
-    /// Emit a session update event to the frontend
-    fn emit_update(&self, notification: &SessionNotification) {
+    /// Set whether to suppress emitting events to frontend
+    async fn set_suppress_emit(&self, suppress: bool) {
+        *self.suppress_emit.lock().await = suppress;
+    }
+
+    /// Emit a session update event to the frontend (unless suppressed)
+    async fn emit_update(&self, notification: &SessionNotification) {
+        if *self.suppress_emit.lock().await {
+            return;
+        }
         if let Some(ref app_handle) = self.app_handle {
             if let Err(e) = app_handle.emit("session-update", notification) {
                 log::warn!("Failed to emit session-update event: {}", e);
@@ -381,8 +392,8 @@ impl agent_client_protocol::Client for StreamingAcpClient {
     }
 
     async fn session_notification(&self, notification: SessionNotification) -> AcpResult<()> {
-        // 1. Emit the raw SDK notification to frontend (if streaming)
-        self.emit_update(&notification);
+        // 1. Emit the raw SDK notification to frontend (if streaming, and not suppressed)
+        self.emit_update(&notification).await;
 
         // 2. Update internal state for finalization
         match &notification.update {
@@ -636,11 +647,14 @@ async fn run_acp_session_inner(
     let (session_id, is_new_session): (SessionId, bool) =
         if let Some(existing_id) = existing_session_id {
             // Try to load existing session
+            // Suppress emit during load to avoid replaying history to frontend
+            client.set_suppress_emit(true).await;
+
             log::info!("Attempting to load session: {}", existing_id);
             let load_request =
                 LoadSessionRequest::new(SessionId::new(existing_id), working_dir.to_path_buf());
 
-            match connection.load_session(load_request).await {
+            let result = match connection.load_session(load_request).await {
                 Ok(_) => {
                     log::info!("Resumed session: {}", existing_id);
                     (SessionId::new(existing_id), false)
@@ -658,7 +672,12 @@ async fn run_acp_session_inner(
                         .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
                     (session_response.session_id, true)
                 }
-            }
+            };
+
+            // Re-enable emit after session load (replay is done)
+            client.set_suppress_emit(false).await;
+
+            result
         } else {
             // Create new session
             let session_response = connection
