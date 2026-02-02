@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 
-use super::chat_store::{generate_session_id, ChatSession, ChatStore, ChatToolCall, MessageRole};
-use super::client::{self, AcpAgent, AcpPromptResult, ToolCallSummary};
+use super::chat_store::{generate_session_id, ChatSession, ChatStore, MessageRole};
+use super::client::{self, AcpAgent, AcpPromptResult};
 
 // =============================================================================
 // Types
@@ -320,41 +320,12 @@ fn persist_assistant_turn(
     session_id: &str,
     result: &AcpPromptResult,
 ) -> Result<(), String> {
-    // Extract content and tool calls from the transcript
-    let (content, tool_calls) = extract_assistant_content(&result.transcript);
-
-    let chat_tool_calls: Vec<ChatToolCall> = tool_calls
-        .iter()
-        .map(|tc| ChatToolCall {
-            id: tc.id.clone(),
-            message_id: 0, // Will be set by add_assistant_turn
-            title: tc.title.clone(),
-            status: tc.status.clone(),
-            locations: tc.locations.clone(),
-        })
-        .collect();
-
+    // Store segments directly - they preserve interleaving order
     store
-        .add_assistant_turn(session_id, &content, &chat_tool_calls)
+        .add_assistant_turn(session_id, &result.segments)
         .map_err(|e| e.to_string())?;
 
     Ok(())
-}
-
-/// Extract assistant content and tool calls from transcript
-fn extract_assistant_content(
-    transcript: &[super::client::FinalizedMessage],
-) -> (String, Vec<ToolCallSummary>) {
-    for msg in transcript {
-        if let super::client::FinalizedMessage::Assistant {
-            content,
-            tool_calls,
-        } = msg
-        {
-            return (content.clone(), tool_calls.clone());
-        }
-    }
-    (String::new(), Vec::new())
 }
 
 /// Set session title from first prompt if not already set

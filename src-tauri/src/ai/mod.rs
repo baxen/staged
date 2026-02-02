@@ -27,13 +27,12 @@ pub mod session;
 pub use client::{
     discover_acp_providers, find_acp_agent, find_acp_agent_by_id, run_acp_prompt,
     run_acp_prompt_streaming, run_acp_prompt_with_session, AcpAgent, AcpPromptResult,
-    AcpProviderInfo, FinalizedMessage, SessionCompleteEvent, SessionErrorEvent, ToolCallSummary,
+    AcpProviderInfo,
 };
 
 // Re-export chat store types
 pub use chat_store::{
-    ChatMessage, ChatMessageWithTools, ChatSession, ChatSessionFull, ChatStore, ChatToolCall,
-    MessageRole,
+    ChatMessage, ChatSession, ChatSessionFull, ChatStore, ContentSegment, MessageRole,
 };
 
 // Re-export session manager types
