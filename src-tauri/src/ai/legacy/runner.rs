@@ -5,9 +5,9 @@
 
 use std::path::Path;
 
-use super::acp_client::{find_acp_agent, run_acp_prompt, AcpAgent};
 use super::prompt::{build_prompt_with_strategy, FileAnalysisInput, LARGE_FILE_THRESHOLD};
 use super::types::ChangesetAnalysis;
+use crate::ai::{find_acp_agent, run_acp_prompt, AcpAgent};
 use crate::git::{self, DiffSpec, FileContent};
 
 /// Find an available AI agent.
