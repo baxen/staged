@@ -105,14 +105,8 @@ async fn test_real_diff(range: &str, repo_path: &str) {
                 } else {
                     println!("{}:", path);
                     for ann in annotations {
-                        println!("\n  [{}] {:?}", ann.id, ann.category);
-                        if let Some(ref span) = ann.before_span {
-                            println!("    Before: lines {}-{}", span.start, span.end);
-                        }
-                        if let Some(ref span) = ann.after_span {
-                            println!("    After: lines {}-{}", span.start, span.end);
-                        }
-                        println!("    {}", ann.content);
+                        println!("\n  Line {}: [{:?}]", ann.line, ann.severity);
+                        println!("    {}", ann.message);
                     }
                 }
                 println!();

@@ -2,9 +2,9 @@
   ArtifactDetail.svelte - Detail view for a selected artifact
 
   Shows the full content of a markdown artifact or commit info.
-  Shows generating state with placeholder when artifact is being created.
+  Shows live streaming state when artifact is being generated.
   Supports editing and refinement actions.
-  Can toggle to show the underlying AI session transcript.
+  Can toggle to show the underlying AI session transcript with tool calls.
 -->
 <script lang="ts">
   import {
@@ -12,15 +12,16 @@
     FileText,
     GitCommit,
     Clock,
-    Loader2,
     AlertCircle,
     MessageSquare,
     FileOutput,
   } from 'lucide-svelte';
-  import type { Artifact, Session } from './types';
+  import type { Artifact, Session, FinalizedMessage, LiveSession } from './types';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import { getSessions } from './services/project';
+  import { liveSessionStore } from './stores/liveSession.svelte';
+  import LiveSessionView from './LiveSessionView.svelte';
 
   interface Props {
     artifact: Artifact;
@@ -32,7 +33,7 @@
   // View mode: 'artifact' or 'session'
   let viewMode: 'artifact' | 'session' = $state('artifact');
 
-  // Session data
+  // Session data (loaded from DB for completed artifacts)
   let sessions: Session[] = $state([]);
   let loadingSessions = $state(false);
   let sessionError: string | null = $state(null);
@@ -59,22 +60,41 @@
     };
   });
 
-  // Parse session transcript into messages
-  interface SessionMessage {
-    role: 'user' | 'assistant';
-    content: string;
-  }
+  // Get live session for streaming (when artifact is generating)
+  // The liveSessionStore tracks the most recent streaming session
+  let liveSession = $derived.by((): LiveSession | undefined => {
+    if (!isGenerating) return undefined;
+    return liveSessionStore.getMostRecentStreaming();
+  });
 
-  let sessionMessages = $derived.by((): SessionMessage[] => {
+  // Parse session transcript into FinalizedMessage[] format
+  // Supports both new format (with toolCalls) and legacy format
+  let sessionTranscript = $derived.by((): FinalizedMessage[] => {
     if (sessions.length === 0) return [];
-    // Use the most recent session
     const session = sessions[0];
     try {
-      return JSON.parse(session.transcript) as SessionMessage[];
+      const parsed = JSON.parse(session.transcript);
+      // Validate it's an array
+      if (!Array.isArray(parsed)) {
+        return [{ role: 'assistant', content: session.transcript }];
+      }
+      return parsed as FinalizedMessage[];
     } catch {
       // Fallback: treat as raw text
       return [{ role: 'assistant', content: session.transcript }];
     }
+  });
+
+  // Create a LiveSession object from loaded session data for rendering
+  let completedSession = $derived.by((): LiveSession | null => {
+    if (sessionTranscript.length === 0) return null;
+    return {
+      sessionId: sessions[0]?.id ?? 'loaded',
+      isStreaming: false,
+      currentText: '',
+      toolCalls: new Map(),
+      finalTranscript: sessionTranscript,
+    };
   });
 
   function formatDate(dateStr: string): string {
@@ -126,7 +146,7 @@
       <h2 class="title">{artifact.title}</h2>
     </div>
     <div class="header-right">
-      {#if isMarkdown && artifact.status === 'complete'}
+      {#if isMarkdown && (artifact.status === 'complete' || isGenerating)}
         <div class="view-toggle">
           <button
             class="toggle-button"
@@ -168,15 +188,26 @@
 
   <div class="detail-content">
     {#if isGenerating}
-      <div class="generating-content">
-        <div class="generating-indicator">
-          <Loader2 size={24} class="spinner" />
-          <span>Generating with AI...</span>
+      <!-- Generating state - show live streaming or session view -->
+      {#if viewMode === 'session' && liveSession}
+        <div class="session-content">
+          <LiveSessionView session={liveSession} />
         </div>
-        <p class="generating-hint">
-          The artifact content will appear here when generation completes.
-        </p>
-      </div>
+      {:else if liveSession}
+        <!-- Show streaming preview in artifact view too -->
+        <div class="streaming-preview">
+          <LiveSessionView session={liveSession} />
+        </div>
+      {:else}
+        <!-- Fallback if no live session yet -->
+        <div class="generating-content">
+          <div class="generating-indicator">
+            <span class="spinner-icon">⟳</span>
+            <span>Starting AI generation...</span>
+          </div>
+          <p class="generating-hint">The artifact content will stream here as it's generated.</p>
+        </div>
+      {/if}
     {:else if isError}
       <div class="error-content">
         <div class="error-indicator">
@@ -186,11 +217,11 @@
         <p class="error-message">{artifact.errorMessage || 'An unknown error occurred'}</p>
       </div>
     {:else if viewMode === 'session'}
-      <!-- Session view -->
+      <!-- Session view - show transcript with tool calls -->
       <div class="session-content">
         {#if loadingSessions}
           <div class="loading-sessions">
-            <Loader2 size={20} class="spinner" />
+            <span class="spinner-icon">⟳</span>
             <span>Loading session...</span>
           </div>
         {:else if sessionError}
@@ -198,32 +229,13 @@
             <AlertCircle size={16} />
             <span>{sessionError}</span>
           </div>
-        {:else if sessions.length === 0}
+        {:else if !completedSession}
           <div class="no-session">
             <MessageSquare size={20} />
             <span>No session recorded for this artifact</span>
           </div>
         {:else}
-          <div class="session-messages">
-            {#each sessionMessages as message}
-              <div
-                class="message"
-                class:user={message.role === 'user'}
-                class:assistant={message.role === 'assistant'}
-              >
-                <div class="message-header">
-                  <span class="message-role">{message.role === 'user' ? 'You' : 'AI'}</span>
-                </div>
-                <div class="message-content">
-                  {#if message.role === 'assistant'}
-                    {@html DOMPurify.sanitize(marked(message.content) as string)}
-                  {:else}
-                    <p>{message.content}</p>
-                  {/if}
-                </div>
-              </div>
-            {/each}
-          </div>
+          <LiveSessionView session={completedSession} />
         {/if}
       </div>
     {:else if isMarkdown}
@@ -413,8 +425,14 @@
     margin: 0;
   }
 
+  /* Streaming preview in artifact view */
+  .streaming-preview {
+    height: 100%;
+  }
+
   /* Spinner animation */
-  :global(.spinner) {
+  .spinner-icon {
+    display: inline-block;
     animation: spin 1s linear infinite;
   }
 
@@ -472,119 +490,6 @@
 
   .session-error {
     color: var(--ui-danger);
-  }
-
-  .session-messages {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-  }
-
-  .message {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .message-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .message-role {
-    font-size: var(--size-sm);
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .message.user .message-role {
-    color: var(--text-accent);
-  }
-
-  .message.assistant .message-role {
-    color: var(--status-added);
-  }
-
-  .message-content {
-    padding-left: 0;
-    font-size: var(--size-md);
-    line-height: 1.6;
-    color: var(--text-primary);
-  }
-
-  .message.user .message-content {
-    background-color: var(--bg-elevated);
-    padding: 12px 16px;
-    border-radius: 8px;
-    border-left: 3px solid var(--text-accent);
-  }
-
-  .message.user .message-content p {
-    margin: 0;
-    white-space: pre-wrap;
-  }
-
-  .message.assistant .message-content {
-    border-left: 3px solid var(--status-added);
-    padding-left: 16px;
-  }
-
-  /* Markdown content in session messages */
-  .message.assistant .message-content :global(h1) {
-    font-size: var(--size-xl);
-    font-weight: 600;
-    margin: 0 0 16px 0;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-
-  .message.assistant .message-content :global(h2) {
-    font-size: var(--size-lg);
-    font-weight: 600;
-    margin: 24px 0 12px 0;
-  }
-
-  .message.assistant .message-content :global(h3) {
-    font-size: var(--size-md);
-    font-weight: 600;
-    margin: 20px 0 8px 0;
-  }
-
-  .message.assistant .message-content :global(p) {
-    margin: 0 0 12px 0;
-  }
-
-  .message.assistant .message-content :global(ul),
-  .message.assistant .message-content :global(ol) {
-    margin: 0 0 12px 0;
-    padding-left: 24px;
-  }
-
-  .message.assistant .message-content :global(li) {
-    margin: 4px 0;
-  }
-
-  .message.assistant .message-content :global(code) {
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    font-size: var(--size-sm);
-    background-color: var(--bg-elevated);
-    padding: 2px 6px;
-    border-radius: 4px;
-  }
-
-  .message.assistant .message-content :global(pre) {
-    background-color: var(--bg-deepest);
-    border-radius: 8px;
-    padding: 16px;
-    overflow-x: auto;
-    margin: 12px 0;
-  }
-
-  .message.assistant .message-content :global(pre code) {
-    background: none;
-    padding: 0;
   }
 
   /* Markdown content */

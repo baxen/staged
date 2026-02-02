@@ -163,3 +163,33 @@ export async function sendAgentPrompt(
     provider: provider ?? null,
   });
 }
+
+/**
+ * Send a prompt to the AI agent with real-time streaming events.
+ *
+ * Similar to sendAgentPrompt but emits Tauri events during execution:
+ * - "session-update": SessionNotification from the ACP SDK (streaming chunks, tool calls)
+ * - "session-complete": Finalized transcript when done
+ * - "session-error": Error information if the session fails
+ *
+ * Subscribe to these events using the sessionEvents service before calling.
+ *
+ * @param repoPath - Path to the repository (null for current directory)
+ * @param prompt - The prompt to send to the agent
+ * @param sessionId - Optional session ID to resume an existing session
+ * @param provider - Optional provider ID (e.g., 'goose' or 'claude')
+ * @returns The agent's response and session ID for future resumption
+ */
+export async function sendAgentPromptStreaming(
+  repoPath: string | null,
+  prompt: string,
+  sessionId?: string | null,
+  provider?: string | null
+): Promise<AgentPromptResponse> {
+  return invoke<AgentPromptResponse>('send_agent_prompt_streaming', {
+    repoPath,
+    prompt,
+    sessionId: sessionId ?? null,
+    provider: provider ?? null,
+  });
+}

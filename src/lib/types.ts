@@ -335,3 +335,158 @@ export interface Session {
   /** The conversation transcript */
   transcript: string;
 }
+
+// =============================================================================
+// ACP Session Streaming Types (matches agent-client-protocol SDK)
+// =============================================================================
+
+/** Notification sent by agent during session - emitted as "session-update" event */
+export interface SessionNotification {
+  sessionId: string;
+  update: SessionUpdate;
+}
+
+/** Discriminated union of session update types */
+export type SessionUpdate =
+  | SessionUpdateAgentMessageChunk
+  | SessionUpdateUserMessageChunk
+  | SessionUpdateAgentThoughtChunk
+  | SessionUpdateToolCall
+  | SessionUpdateToolCallUpdate
+  | SessionUpdatePlan
+  | SessionUpdateOther;
+
+export interface SessionUpdateAgentMessageChunk extends ContentChunk {
+  sessionUpdate: 'agent_message_chunk';
+}
+
+export interface SessionUpdateUserMessageChunk extends ContentChunk {
+  sessionUpdate: 'user_message_chunk';
+}
+
+export interface SessionUpdateAgentThoughtChunk extends ContentChunk {
+  sessionUpdate: 'agent_thought_chunk';
+}
+
+export interface SessionUpdateToolCall extends ToolCall {
+  sessionUpdate: 'tool_call';
+}
+
+export interface SessionUpdateToolCallUpdate extends ToolCallUpdatePayload {
+  sessionUpdate: 'tool_call_update';
+}
+
+export interface SessionUpdatePlan {
+  sessionUpdate: 'plan';
+  entries: PlanEntry[];
+}
+
+export interface SessionUpdateOther {
+  sessionUpdate: string;
+  [key: string]: unknown;
+}
+
+export interface ContentChunk {
+  content: ContentBlock;
+}
+
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'image'; data: string; mimeType: string }
+  | { type: string; [key: string]: unknown }; // Catch-all
+
+export interface ToolCall {
+  toolCallId: string;
+  title: string;
+  status: ToolCallStatus;
+  kind: ToolKind;
+  locations: ToolCallLocation[];
+  content: ToolCallContent[];
+}
+
+export interface ToolCallUpdatePayload {
+  toolCallId: string;
+  fields: ToolCallUpdateFields;
+}
+
+export interface ToolCallUpdateFields {
+  title?: string;
+  status?: ToolCallStatus;
+  content?: ToolCallContent[];
+  locations?: ToolCallLocation[];
+}
+
+export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+export type ToolKind =
+  | 'read'
+  | 'edit'
+  | 'delete'
+  | 'move'
+  | 'search'
+  | 'execute'
+  | 'think'
+  | 'fetch'
+  | 'switch_mode'
+  | 'other';
+
+export interface ToolCallLocation {
+  path: string;
+  line?: number;
+}
+
+export type ToolCallContent =
+  | { type: 'content'; content: ContentBlock }
+  | { type: 'diff'; path: string; oldText?: string; newText: string }
+  | { type: 'terminal'; terminalId: string };
+
+export interface PlanEntry {
+  title: string;
+  status?: 'pending' | 'in_progress' | 'completed' | 'failed';
+}
+
+// Session complete event (custom, emitted as "session-complete")
+export interface SessionCompleteEvent {
+  sessionId: string;
+  transcript: FinalizedMessage[];
+}
+
+// Session error event (custom, emitted as "session-error")
+export interface SessionErrorEvent {
+  sessionId: string;
+  error: string;
+}
+
+// Finalized message for storage/display (stored in DB)
+export type FinalizedMessage =
+  | { role: 'user'; content: string }
+  | { role: 'assistant'; content: string; toolCalls?: ToolCallSummary[] };
+
+export interface ToolCallSummary {
+  id: string;
+  title: string;
+  status: string;
+  locations: string[];
+  resultPreview?: string;
+}
+
+// =============================================================================
+// Live Session State (frontend-only, not persisted)
+// =============================================================================
+
+export interface LiveToolCall {
+  id: string;
+  title: string;
+  status: ToolCallStatus;
+  kind: ToolKind;
+  locations: string[];
+  preview?: string;
+}
+
+export interface LiveSession {
+  sessionId: string;
+  isStreaming: boolean;
+  currentText: string;
+  toolCalls: Map<string, LiveToolCall>;
+  error?: string;
+  finalTranscript: FinalizedMessage[] | null;
+}
