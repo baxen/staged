@@ -15,7 +15,7 @@ use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
 };
-use review::{Artifact, Comment, Edit, NewComment, NewEdit, Review};
+use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
@@ -520,9 +520,8 @@ async fn sync_review_to_github(
 // AI Commands
 // =============================================================================
 
-use ai::{
-    AcpProviderInfo, ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult,
-};
+use ai::legacy::{ChangesetAnalysis, ChangesetSummary, SmartDiffAnnotation, SmartDiffResult};
+use ai::AcpProviderInfo;
 
 /// Discover available ACP providers on the system.
 /// Returns a list of providers that are installed and working.
@@ -559,7 +558,7 @@ async fn analyze_diff(
     let path = get_repo_path(repo_path.as_deref()).to_path_buf();
 
     // analyze_diff is now async (uses ACP)
-    ai::analyze_diff(&path, &spec, provider.as_deref()).await
+    ai::legacy::analyze_diff(&path, &spec, provider.as_deref()).await
 }
 
 /// Response from send_agent_prompt including session ID for continuity.
@@ -738,7 +737,7 @@ fn save_ai_comments(
     spec: DiffSpec,
     annotations: Vec<SmartDiffAnnotation>,
 ) -> Result<Vec<Comment>, String> {
-    use ai::AnnotationCategory;
+    use ai::legacy::AnnotationCategory;
     use review::CommentAuthor;
 
     let path = get_repo_path(repo_path.as_deref());
@@ -885,39 +884,6 @@ fn remove_reference_file(
     let store = review::get_store().map_err(|e| e.0)?;
     let id = make_diff_id(repo, &spec)?;
     store.remove_reference_file(&id, &path).map_err(|e| e.0)
-}
-
-// =============================================================================
-// Artifact Commands (legacy - diff-based)
-// =============================================================================
-
-/// Save an artifact to the database (legacy - tied to diff).
-#[tauri::command(rename_all = "camelCase")]
-fn save_artifact(
-    repo_path: Option<String>,
-    spec: DiffSpec,
-    artifact: Artifact,
-) -> Result<(), String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.save_artifact(&id, &artifact).map_err(|e| e.0)
-}
-
-/// Get all artifacts for a diff (legacy - tied to diff).
-#[tauri::command(rename_all = "camelCase")]
-fn get_artifacts(repo_path: Option<String>, spec: DiffSpec) -> Result<Vec<Artifact>, String> {
-    let path = get_repo_path(repo_path.as_deref());
-    let store = review::get_store().map_err(|e| e.0)?;
-    let id = make_diff_id(path, &spec)?;
-    store.get_artifacts(&id).map_err(|e| e.0)
-}
-
-/// Delete an artifact by ID (legacy).
-#[tauri::command(rename_all = "camelCase")]
-fn delete_artifact(artifact_id: String) -> Result<(), String> {
-    let store = review::get_store().map_err(|e| e.0)?;
-    store.delete_artifact(&artifact_id).map_err(|e| e.0)
 }
 
 // =============================================================================
@@ -1725,11 +1691,7 @@ pub fn run() {
             clear_review,
             add_reference_file,
             remove_reference_file,
-            // Artifact commands (legacy - diff-based)
-            save_artifact,
-            get_artifacts,
-            delete_artifact,
-            // Project commands (new artifact-centric model)
+            // Project commands (artifact-centric model)
             create_project,
             get_project,
             list_projects,

@@ -8,7 +8,7 @@
 //!   cargo run --bin test_ai -- HEAD~1..HEAD
 //!   cargo run --bin test_ai -- main..HEAD ./my-repo
 
-use staged_lib::{ai, git};
+use staged_lib::{ai, ai::legacy, git};
 use std::env;
 use std::path::Path;
 
@@ -76,7 +76,7 @@ async fn test_real_diff(range: &str, repo_path: &str) {
     // Run analysis - the backend handles file listing and content loading
     println!("Analyzing diff with AI via ACP (this may take a few seconds)...\n");
 
-    match ai::analyze_diff(repo, &spec, None).await {
+    match ai::legacy::analyze_diff(repo, &spec, None).await {
         Ok(result) => {
             println!("═══════════════════════════════════════════════════════════════");
             println!("                     CHANGESET ANALYSIS");
