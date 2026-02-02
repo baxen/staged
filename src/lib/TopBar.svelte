@@ -13,9 +13,6 @@
     GitPullRequest,
     GitCommitHorizontal,
     Upload,
-    Orbit,
-    Eye,
-    EyeOff,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
@@ -25,7 +22,7 @@
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
-  import type { DiffSpec as DiffSpecType, ChangesetSummary } from './types';
+  import type { DiffSpec as DiffSpecType } from './types';
   import {
     getPresets,
     diffSelection,
@@ -40,7 +37,6 @@
   } from './stores/comments.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
-  import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
     onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
@@ -70,10 +66,6 @@
   let canCommit = $derived(isWorkingTree && diffState.files.length > 0);
   // Can sync if viewing a PR with comments
   let canSync = $derived(diffSelection.prNumber !== undefined && commentsState.comments.length > 0);
-
-  // Smart diff state (AI disabled - keeping reveal toggle for future use)
-  let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
-  let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffPreset): boolean {
@@ -247,34 +239,6 @@
         disabled={!canCommit}
       >
         <GitCommitHorizontal size={14} />
-      </button>
-    {/if}
-
-    <!-- AI Analysis button (disabled - AI integration being rebuilt) -->
-    <button
-      class="action-btn ai-btn"
-      class:disabled={true}
-      title="AI analysis coming soon"
-      disabled={true}
-    >
-      <div class="ai-icon">
-        <Orbit size={14} />
-      </div>
-    </button>
-
-    <!-- AI Annotations reveal toggle (only show when annotations exist) -->
-    {#if hasFileAnnotations}
-      <button
-        class="action-btn reveal-btn"
-        class:active={annotationsRevealed}
-        onclick={() => setAnnotationsRevealed(!annotationsRevealed)}
-        title="Hold A to show explanation view"
-      >
-        {#if annotationsRevealed}
-          <Eye size={14} />
-        {:else}
-          <EyeOff size={14} />
-        {/if}
       </button>
     {/if}
 
@@ -685,26 +649,5 @@
 
   .action-btn :global(svg) {
     flex-shrink: 0;
-  }
-
-  /* AI Analysis button */
-  .ai-btn {
-    position: relative;
-    overflow: visible;
-  }
-
-  .ai-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* AI Annotations reveal toggle */
-  .reveal-btn.active {
-    color: var(--ui-accent);
-  }
-
-  .reveal-btn.active:hover {
-    color: var(--ui-accent);
   }
 </style>

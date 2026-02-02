@@ -4,12 +4,21 @@
   Renders a blurred overlay on annotated code regions with the AI commentary
   displayed on top. The overlay scrolls with the code and can be revealed
   by holding down the 'A' key.
+  
+  NOTE: This component is kept for future AI integration but is not currently used.
 -->
 <script lang="ts">
-  import type { SmartDiffAnnotation } from './types';
+  /** Annotation category for styling */
+  type AnnotationCategory = 'explanation' | 'warning' | 'suggestion' | 'context';
+
+  /** Annotation data passed to this component */
+  interface Annotation {
+    content: string;
+    category: AnnotationCategory;
+  }
 
   interface Props {
-    annotation: SmartDiffAnnotation;
+    annotation: Annotation;
     /** Top position in pixels (relative to lines-wrapper) */
     top: number;
     /** Height in pixels */

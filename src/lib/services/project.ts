@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Project, Artifact, ArtifactData, Session } from '../types';
+import type { Project, Artifact, ArtifactData } from '../types';
 
 // =============================================================================
 // Project operations
@@ -106,24 +106,6 @@ export async function addArtifactContext(
  */
 export async function getArtifactContext(artifactId: string): Promise<string[]> {
   return invoke<string[]>('get_artifact_context', { artifactId });
-}
-
-// =============================================================================
-// Session operations
-// =============================================================================
-
-/**
- * Save a session (AI conversation transcript) for an artifact.
- */
-export async function saveSession(artifactId: string, transcript: string): Promise<Session> {
-  return invoke<Session>('save_session', { artifactId, transcript });
-}
-
-/**
- * Get sessions for an artifact.
- */
-export async function getSessions(artifactId: string): Promise<Session[]> {
-  return invoke<Session[]>('get_sessions', { artifactId });
 }
 
 // =============================================================================

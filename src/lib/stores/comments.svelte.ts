@@ -149,13 +149,6 @@ export function getUserComments(): Comment[] {
 }
 
 /**
- * Get AI comments by category.
- */
-export function getCommentsByCategory(category: string): Comment[] {
-  return commentsState.comments.filter((c) => c.author === 'ai' && c.category === category);
-}
-
-/**
  * Get AI comments for the current file.
  */
 export function getAiCommentsForCurrentFile(): Comment[] {

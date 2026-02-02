@@ -83,11 +83,6 @@
     openRepo,
     getRecentRepos,
   } from './lib/stores/repoState.svelte';
-  import {
-    clearResults as clearSmartDiffResults,
-    loadAnalysisFromDb,
-  } from './lib/stores/smartDiff.svelte';
-
   // View mode: 'projects' = artifact-centric view, 'diff' = traditional diff viewer
   type ViewMode = 'projects' | 'diff';
   let viewMode = $state<ViewMode>('projects');
@@ -145,8 +140,6 @@
     const repoPath = repoState.currentPath ?? undefined;
     await loadFiles(diffSelection.spec, repoPath);
     await loadComments(diffSelection.spec, repoPath);
-    // Load any saved AI analysis from database
-    await loadAnalysisFromDb(repoPath ?? null, diffSelection.spec);
   }
 
   // Update comments store when selected file changes
@@ -185,7 +178,6 @@
   async function handlePresetSelect(preset: DiffPreset) {
     resetState();
     clearReferenceFiles();
-    clearSmartDiffResults();
 
     selectPreset(preset);
 
@@ -203,7 +195,6 @@
   async function handleCustomDiff(spec: DiffSpecType, label?: string, prNumber?: number) {
     resetState();
     clearReferenceFiles();
-    clearSmartDiffResults();
     selectCustomDiff(spec, label, prNumber);
     await loadAll();
 
@@ -220,7 +211,6 @@
     resetState();
     clearComments();
     clearReferenceFiles();
-    clearSmartDiffResults();
 
     if (repoState.currentPath) {
       watchRepo(repoState.currentPath);
@@ -420,9 +410,6 @@
     // Switch to new tab (synchronous - no watcher restart)
     switchTab(index);
     console.log(`Active tab after switch:`, getActiveTab()?.repoName);
-
-    // Clear smart diff results (they're per-diff, not persisted per-tab)
-    clearSmartDiffResults();
 
     // Load new tab state
     syncTabToGlobal();
