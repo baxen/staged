@@ -28,18 +28,33 @@
     Plus,
     Wand2,
     Trash2,
+    GitCommitHorizontal,
+    Orbit,
+    Copy,
   } from 'lucide-svelte';
   import {
     commentsState,
     toggleReviewed as toggleReviewedAction,
     deleteComment,
+    copyCommentsToClipboard,
+    deleteAllComments,
   } from './stores/comments.svelte';
   import { registerShortcuts } from './services/keyboard';
   import { referenceFilesState } from './stores/referenceFiles.svelte';
   import { preferences } from './stores/preferences.svelte';
   import AgentPanel from './features/agent/AgentPanel.svelte';
-  import type { DiffSpec, FileDiffSummary, FileDiff } from './types';
-  import type { AgentState } from './stores/agent.svelte';
+  import CommitModal from './CommitModal.svelte';
+  import type { DiffSpec, FileDiffSummary, FileDiff, ChangesetSummary } from './types';
+  import type { AgentState, Artifact } from './stores/agent.svelte';
+  import { repoState } from './stores/repoState.svelte';
+  import { diffSelection } from './stores/diffSelection.svelte';
+  import {
+    smartDiffState,
+    checkAi,
+    runAnalysis,
+    clearResults as clearSmartDiffState,
+  } from './stores/smartDiff.svelte';
+  import { saveArtifact } from './services/review';
   import CrossFileSearchBar from './CrossFileSearchBar.svelte';
   import SearchResultItem from './SearchResultItem.svelte';
   import {
@@ -93,6 +108,20 @@
     spec?: DiffSpec | null;
     /** Agent state for this tab's chat session */
     agentState?: AgentState | null;
+    /** Called after a successful commit */
+    onCommit?: () => void;
+    /**
+     * Callback to reload comments for a specific tab after AI analysis.
+     * @param spec - The diff spec to load comments for
+     * @param repoPath - The repo path
+     */
+    onReloadCommentsForTab?: (spec: DiffSpec, repoPath: string | null) => Promise<void>;
+    /**
+     * Callback when an artifact is saved (to update the tab's artifact list).
+     * @param artifact - The saved artifact
+     * @param repoPath - The repo path where the artifact belongs
+     */
+    onArtifactSaved?: (artifact: Artifact, repoPath: string | null) => void;
   }
 
   let {
@@ -106,11 +135,23 @@
     repoPath = null,
     spec = null,
     agentState = null,
+    onCommit,
+    onReloadCommentsForTab,
+    onArtifactSaved,
   }: Props = $props();
 
   let collapsedDirs = $state(new Set<string>());
   let collapsedSearchResults = $state(new Set<string>());
   let treeView = $state(false);
+  let showCommitModal = $state(false);
+  let copiedFeedback = $state(false);
+
+  // Commit button state
+  let canCommit = $derived(isWorkingTree && files.length > 0);
+
+  // AI analysis state
+  let isAiLoading = $derived(smartDiffState.loading);
+  let canRunAi = $derived(files.length > 0 && !loading);
 
   /**
    * Get the primary path for a file summary.
@@ -321,6 +362,16 @@
     await deleteComment(commentId);
   }
 
+  async function handleCopyComments() {
+    const success = await copyCommentsToClipboard();
+    if (success) {
+      copiedFeedback = true;
+      setTimeout(() => {
+        copiedFeedback = false;
+      }, 1500);
+    }
+  }
+
   function toggleDir(path: string) {
     const newSet = new Set(collapsedDirs);
     if (newSet.has(path)) {
@@ -509,6 +560,115 @@
     onFileSelect?.(paths[prevIndex]);
   }
 
+  /**
+   * Handle AI analysis button click.
+   * Triggers analysis if not already running.
+   */
+  async function handleAiAnalysis() {
+    // If already loading, do nothing (button shows progress)
+    if (isAiLoading) return;
+
+    if (!canRunAi) return;
+
+    // Check AI availability first
+    const available = await checkAi();
+    if (!available) {
+      console.error('AI not available:', smartDiffState.aiError);
+      return;
+    }
+
+    // Start analysis in background
+    runChangesetAnalysis();
+  }
+
+  /**
+   * Create an artifact from a changeset summary.
+   */
+  function createArtifactFromSummary(summary: ChangesetSummary): Artifact {
+    // Generate title from summary (first 50 chars)
+    const title = summary.summary
+      .replace(/^#+\s*/, '') // Strip markdown headers
+      .substring(0, 50)
+      .trim();
+
+    // Format as markdown document
+    let content = '';
+
+    if (summary.summary) {
+      content += `# Summary\n\n${summary.summary}\n\n`;
+    }
+
+    if (summary.key_changes.length > 0) {
+      content += `# Key Changes\n\n`;
+      for (const change of summary.key_changes) {
+        content += `- ${change}\n`;
+      }
+      content += '\n';
+    }
+
+    if (summary.concerns.length > 0) {
+      content += `# Concerns\n\n`;
+      for (const concern of summary.concerns) {
+        content += `- ${concern}\n`;
+      }
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      title: `AI Review: ${title}`,
+      content: content.trim(),
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Run changeset analysis in background.
+   * Automatically saves results as an artifact when complete.
+   * Sets agentState.loading to show busy indicators in AgentPanel and tab bar.
+   */
+  async function runChangesetAnalysis() {
+    // Capture context at call time for the analysis request
+    const capturedAgentState = agentState;
+    const capturedRepoPath = repoState.currentPath ?? null;
+    const capturedSpec = diffSelection.spec;
+
+    // Set agent loading state to show "Working on it..." and tab spinner
+    if (capturedAgentState) {
+      capturedAgentState.loading = true;
+    }
+
+    try {
+      // Single call - backend handles file listing and content loading
+      const result = await runAnalysis(capturedRepoPath, capturedSpec);
+
+      if (result) {
+        // Reload comments for the tab where analysis was started
+        await onReloadCommentsForTab?.(capturedSpec, capturedRepoPath);
+
+        // Create and save artifact from the summary
+        const artifact = createArtifactFromSummary(result);
+
+        try {
+          await saveArtifact(capturedSpec, artifact, capturedRepoPath ?? undefined);
+          // Notify the tab to update its artifact list
+          onArtifactSaved?.(artifact, capturedRepoPath);
+        } catch (e) {
+          console.error('Failed to save artifact:', e);
+        }
+
+        // Clear the in-memory analysis results (they're saved as artifact now)
+        clearSmartDiffState();
+      }
+    } catch (e) {
+      console.error('Analysis failed:', e);
+    } finally {
+      // Clear agent loading state on the captured state (correct tab)
+      if (capturedAgentState) {
+        capturedAgentState.loading = false;
+      }
+    }
+  }
+
   // Register keyboard shortcuts
   onMount(() => {
     const unregister = registerShortcuts([
@@ -568,6 +728,17 @@
         category: 'search',
         allowInInputs: true,
         handler: handlePrevResult,
+      },
+      {
+        id: 'copy-comments',
+        keys: ['c'],
+        description: 'Copy all comments',
+        category: 'comments',
+        handler: () => {
+          if (commentsState.comments.length > 0) {
+            handleCopyComments();
+          }
+        },
       },
     ]);
 
@@ -893,19 +1064,34 @@
       <!-- Needs Review section -->
       {#if needsReview.length > 0}
         <div class="section-header">
-          <button
-            class="view-toggle"
-            onclick={() => (treeView = !treeView)}
-            title={treeView ? 'Switch to flat list' : 'Switch to tree view'}
-          >
-            {#if treeView}
-              <List size={12} />
-            {:else}
-              <FolderTree size={12} />
-            {/if}
-          </button>
+          <div class="section-left">
+            <button
+              class="view-toggle"
+              onclick={() => (treeView = !treeView)}
+              title={treeView ? 'Switch to flat list' : 'Switch to tree view'}
+            >
+              {#if treeView}
+                <List size={12} />
+              {:else}
+                <FolderTree size={12} />
+              {/if}
+            </button>
+          </div>
           <div class="section-divider">
             <span class="divider-label">CHANGED ({needsReview.length})</span>
+          </div>
+          <div class="section-right">
+            {#if isWorkingTree}
+              <button
+                class="commit-btn"
+                class:disabled={!canCommit}
+                onclick={() => canCommit && (showCommitModal = true)}
+                title={canCommit ? 'Commit' : 'No staged or unstaged changes'}
+                disabled={!canCommit}
+              >
+                <GitCommitHorizontal size={12} />
+              </button>
+            {/if}
           </div>
         </div>
         <ul class="tree-section">
@@ -920,19 +1106,35 @@
       <!-- Divider with REVIEWED label -->
       {#if reviewed.length > 0}
         <div class="section-header">
-          <button
-            class="view-toggle"
-            onclick={() => (treeView = !treeView)}
-            title={treeView ? 'Switch to flat list' : 'Switch to tree view'}
-          >
-            {#if treeView}
-              <List size={12} />
-            {:else}
-              <FolderTree size={12} />
-            {/if}
-          </button>
+          <div class="section-left">
+            <button
+              class="view-toggle"
+              onclick={() => (treeView = !treeView)}
+              title={treeView ? 'Switch to flat list' : 'Switch to tree view'}
+            >
+              {#if treeView}
+                <List size={12} />
+              {:else}
+                <FolderTree size={12} />
+              {/if}
+            </button>
+          </div>
           <div class="section-divider">
             <span class="divider-label">REVIEWED ({reviewed.length})</span>
+          </div>
+          <div class="section-right">
+            <!-- Show commit button here only if CHANGED section is empty (this is the first section) -->
+            {#if isWorkingTree && needsReview.length === 0}
+              <button
+                class="commit-btn"
+                class:disabled={!canCommit}
+                onclick={() => canCommit && (showCommitModal = true)}
+                title={canCommit ? 'Commit' : 'No staged or unstaged changes'}
+                disabled={!canCommit}
+              >
+                <GitCommitHorizontal size={12} />
+              </button>
+            {/if}
           </div>
         </div>
       {/if}
@@ -950,15 +1152,18 @@
 
       <!-- Reference Files section -->
       <div class="section-header">
-        <button
-          class="add-file-btn"
-          onclick={() => onAddReferenceFile?.()}
-          title="Add reference file (Cmd+O)"
-        >
-          <Plus size={12} />
-        </button>
+        <div class="section-left"></div>
         <div class="section-divider">
           <span class="divider-label">REFERENCE ({referenceFilesState.files.length})</span>
+        </div>
+        <div class="section-right">
+          <button
+            class="add-file-btn"
+            onclick={() => onAddReferenceFile?.()}
+            title="Add reference file (Cmd+O)"
+          >
+            <Plus size={12} />
+          </button>
         </div>
       </div>
       {#if referenceFilesState.files.length > 0}
@@ -998,8 +1203,32 @@
 
       <!-- Comments section -->
       <div class="section-header comments-header">
+        <div class="section-left"></div>
         <div class="section-divider">
           <span class="divider-label">COMMENTS ({commentsState.comments.length})</span>
+        </div>
+        <div class="section-right">
+          {#if commentsState.comments.length > 0}
+            <button
+              class="copy-btn"
+              class:copied={copiedFeedback}
+              onclick={handleCopyComments}
+              title="Copy all comments (c)"
+            >
+              {#if copiedFeedback}
+                <Check size={12} />
+              {:else}
+                <Copy size={12} />
+              {/if}
+            </button>
+            <button
+              class="delete-all-btn"
+              onclick={deleteAllComments}
+              title="Delete all comments"
+            >
+              <Trash2 size={12} />
+            </button>
+          {/if}
         </div>
       </div>
       {#if commentsState.comments.length > 0}
@@ -1011,8 +1240,23 @@
       <!-- Agent Chat section (feature-gated) -->
       {#if preferences.features.agentPanel && agentState}
         <div class="section-header agent-header">
+          <div class="section-left"></div>
           <div class="section-divider">
             <span class="divider-label">AGENT</span>
+          </div>
+          <div class="section-right">
+            <button
+              class="ai-btn"
+              class:loading={isAiLoading}
+              class:disabled={!canRunAi}
+              onclick={handleAiAnalysis}
+              title={isAiLoading ? 'Analyzing...' : 'Analyze with AI'}
+              disabled={!canRunAi}
+            >
+              <div class="ai-icon" class:spinning={isAiLoading}>
+                <Orbit size={12} />
+              </div>
+            </button>
           </div>
         </div>
       {/if}
@@ -1024,6 +1268,17 @@
     {/if}
   {/if}
 </div>
+
+{#if showCommitModal}
+  <CommitModal
+    repoPath={repoState.currentPath}
+    onCommit={() => {
+      showCommitModal = false;
+      onCommit?.();
+    }}
+    onClose={() => (showCommitModal = false)}
+  />
+{/if}
 
 <style>
   .sidebar-content {
@@ -1058,7 +1313,7 @@
     background: none;
     border: none;
     border-radius: 3px;
-    color: var(--text-faint);
+    color: var(--text-muted);
     cursor: pointer;
     transition:
       background-color 0.1s,
@@ -1067,7 +1322,7 @@
 
   .view-toggle:hover {
     background-color: var(--bg-hover);
-    color: var(--text-muted);
+    color: var(--text-primary);
   }
 
   .view-toggle:focus-visible {
@@ -1092,34 +1347,46 @@
     padding: 0;
   }
 
-  /* Divider with REVIEWED label */
+  /* Section header with centered title */
   .section-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    margin: 8px 12px;
+    margin: 16px 12px 8px;
     gap: 6px;
+  }
+
+  .section-left {
+    display: flex;
+    justify-content: flex-start;
+    gap: 4px;
+  }
+
+  .section-right {
+    display: flex;
+    justify-content: flex-end;
+    gap: 4px;
   }
 
   .section-divider {
     display: flex;
     align-items: center;
-    flex: 1;
     gap: 8px;
   }
 
   .section-divider::before,
   .section-divider::after {
     content: '';
-    flex: 1;
+    width: 16px;
     height: 1px;
-    background: var(--border-subtle);
+    background: var(--border-muted);
   }
 
   .divider-label {
     font-size: 9px;
-    font-weight: 500;
+    font-weight: 600;
     letter-spacing: 0.5px;
-    color: var(--text-faint);
+    color: var(--text-muted);
     text-transform: uppercase;
   }
 
@@ -1294,9 +1561,6 @@
   }
 
   /* Comments section */
-  .comments-header {
-    margin-top: 8px;
-  }
 
   .comments-section {
     margin-bottom: 8px;
@@ -1425,7 +1689,7 @@
     background: none;
     border: none;
     border-radius: 3px;
-    color: var(--text-faint);
+    color: var(--text-muted);
     cursor: pointer;
     transition:
       background-color 0.1s,
@@ -1434,7 +1698,7 @@
 
   .add-file-btn:hover {
     background-color: var(--bg-hover);
-    color: var(--text-muted);
+    color: var(--text-primary);
   }
 
   .add-file-btn:focus-visible {
@@ -1489,6 +1753,145 @@
   /* Agent section header - inside file-list, no extra margin needed */
   .agent-header {
     margin-bottom: 0;
+  }
+
+  /* Commit button in section header */
+  .commit-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .commit-btn:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .commit-btn:disabled,
+  .commit-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .commit-btn:focus-visible {
+    outline: 2px solid var(--text-accent);
+    outline-offset: -2px;
+  }
+
+  /* Copy comments button in comments section header */
+  .copy-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .copy-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .copy-btn.copied {
+    color: var(--status-added);
+  }
+
+  .copy-btn:focus-visible {
+    outline: 2px solid var(--text-accent);
+    outline-offset: -2px;
+  }
+
+  /* Delete all comments button in comments section header */
+  .delete-all-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .delete-all-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--status-deleted);
+  }
+
+  .delete-all-btn:focus-visible {
+    outline: 2px solid var(--text-accent);
+    outline-offset: -2px;
+  }
+
+  /* AI Analysis button in agent section header */
+  .ai-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .ai-btn:hover:not(:disabled) {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .ai-btn:disabled,
+  .ai-btn.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .ai-btn:focus-visible {
+    outline: 2px solid var(--text-accent);
+    outline-offset: -2px;
+  }
+
+  .ai-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .ai-icon.spinning {
+    animation: spin 2s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 
   /* Search results */

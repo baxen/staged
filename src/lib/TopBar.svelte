@@ -5,77 +5,43 @@
     Palette,
     Keyboard,
     MessageSquare,
-    Copy,
-    Check,
-    Trash2,
     Settings2,
     GitCompareArrows,
     GitPullRequest,
-    GitCommitHorizontal,
     Upload,
-    Orbit,
     Eye,
     EyeOff,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
-  import CommitModal from './CommitModal.svelte';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
   import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
-  import type { DiffSpec as DiffSpecType, ChangesetSummary } from './types';
+  import type { DiffSpec as DiffSpecType } from './types';
   import {
     getPresets,
     diffSelection,
     getDisplayLabel,
     type DiffPreset,
   } from './stores/diffSelection.svelte';
-  import { diffState } from './stores/diffState.svelte';
-  import {
-    commentsState,
-    copyCommentsToClipboard,
-    deleteAllComments,
-  } from './stores/comments.svelte';
+  import { commentsState } from './stores/comments.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
   import {
     smartDiffState,
-    checkAi,
-    runAnalysis,
-    clearResults as clearSmartDiffState,
     setAnnotationsRevealed,
   } from './stores/smartDiff.svelte';
-  import { saveArtifact } from './services/review';
-  import type { AgentState, Artifact } from './stores/agent.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
     onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
-    onCommit?: () => void;
-    agentState?: AgentState | null;
-    /**
-     * Callback to reload comments for a specific tab after AI analysis.
-     * @param spec - The diff spec to load comments for
-     * @param repoPath - The repo path
-     */
-    onReloadCommentsForTab?: (spec: DiffSpecType, repoPath: string | null) => Promise<void>;
-    /**
-     * Callback when an artifact is saved (to update the tab's artifact list).
-     * @param artifact - The saved artifact
-     * @param repoPath - The repo path where the artifact belongs
-     */
-    onArtifactSaved?: (artifact: Artifact, repoPath: string | null) => void;
   }
 
   let {
     onPresetSelect,
     onCustomDiff,
-    onCommit,
-    agentState = null,
-    onReloadCommentsForTab,
-    onArtifactSaved,
   }: Props = $props();
 
   // Dropdown states
@@ -84,26 +50,15 @@
   // Modal state
   let showCustomModal = $state(false);
   let showPRModal = $state(false);
-  let showCommitModal = $state(false);
   let showThemeModal = $state(false);
   let showSyncModal = $state(false);
   let showShortcutsModal = $state(false);
   let showSettingsModal = $state(false);
 
-  // Copy feedback
-  let copiedFeedback = $state(false);
-
-  // Check if we're viewing working directory changes (can show commit button)
-  let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
-  // Can only commit if there are files to commit
-  let canCommit = $derived(isWorkingTree && diffState.files.length > 0);
   // Can sync if viewing a PR with comments
   let canSync = $derived(diffSelection.prNumber !== undefined && commentsState.comments.length > 0);
 
-  // Smart diff state
-  let isAiLoading = $derived(smartDiffState.loading);
-  let hasAiResults = $derived(smartDiffState.changesetSummary !== null);
-  let canRunAi = $derived(diffState.files.length > 0 && !diffState.loading);
+  // Smart diff state (for annotations reveal toggle)
   let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
   let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
 
@@ -140,127 +95,6 @@
     onCustomDiff(spec);
   }
 
-  async function handleCopyComments() {
-    const success = await copyCommentsToClipboard();
-    if (success) {
-      copiedFeedback = true;
-      setTimeout(() => {
-        copiedFeedback = false;
-      }, 1500);
-    }
-  }
-
-  /**
-   * Handle AI analysis button click.
-   * Triggers analysis if not already running.
-   */
-  async function handleAiAnalysis() {
-    // If already loading, do nothing (button shows progress)
-    if (isAiLoading) return;
-
-    if (!canRunAi) return;
-
-    // Check AI availability first
-    const available = await checkAi();
-    if (!available) {
-      // TODO: Show error toast or modal
-      console.error('AI not available:', smartDiffState.aiError);
-      return;
-    }
-
-    // Start analysis in background
-    // The button will show loading state
-    runChangesetAnalysis();
-  }
-
-  /**
-   * Create an artifact from a changeset summary.
-   */
-  function createArtifactFromSummary(summary: ChangesetSummary): Artifact {
-    // Generate title from summary (first 50 chars)
-    const title = summary.summary
-      .replace(/^#+\s*/, '') // Strip markdown headers
-      .substring(0, 50)
-      .trim();
-
-    // Format as markdown document
-    let content = '';
-
-    if (summary.summary) {
-      content += `# Summary\n\n${summary.summary}\n\n`;
-    }
-
-    if (summary.key_changes.length > 0) {
-      content += `# Key Changes\n\n`;
-      for (const change of summary.key_changes) {
-        content += `- ${change}\n`;
-      }
-      content += '\n';
-    }
-
-    if (summary.concerns.length > 0) {
-      content += `# Concerns\n\n`;
-      for (const concern of summary.concerns) {
-        content += `- ${concern}\n`;
-      }
-    }
-
-    return {
-      id: crypto.randomUUID(),
-      title: `AI Review: ${title}`,
-      content: content.trim(),
-      createdAt: new Date().toISOString(),
-    };
-  }
-
-  /**
-   * Run changeset analysis in background.
-   * Automatically saves results as an artifact when complete.
-   * Sets agentState.loading to show busy indicators in AgentPanel and tab bar.
-   */
-  async function runChangesetAnalysis() {
-    // Capture context at call time for the analysis request
-    const capturedAgentState = agentState;
-    const capturedRepoPath = repoState.currentPath ?? null;
-    const capturedSpec = diffSelection.spec;
-
-    // Set agent loading state to show "Working on it..." and tab spinner
-    if (capturedAgentState) {
-      capturedAgentState.loading = true;
-    }
-
-    try {
-      // Single call - backend handles file listing and content loading
-      const result = await runAnalysis(capturedRepoPath, capturedSpec);
-
-      if (result) {
-        // Reload comments for the tab where analysis was started
-        await onReloadCommentsForTab?.(capturedSpec, capturedRepoPath);
-
-        // Create and save artifact from the summary
-        const artifact = createArtifactFromSummary(result);
-
-        try {
-          await saveArtifact(capturedSpec, artifact, capturedRepoPath ?? undefined);
-          // Notify the tab to update its artifact list
-          onArtifactSaved?.(artifact, capturedRepoPath);
-        } catch (e) {
-          console.error('Failed to save artifact:', e);
-        }
-
-        // Clear the in-memory analysis results (they're saved as artifact now)
-        clearSmartDiffState();
-      }
-    } catch (e) {
-      console.error('Analysis failed:', e);
-    } finally {
-      // Clear agent loading state on the captured state (correct tab)
-      if (capturedAgentState) {
-        capturedAgentState.loading = false;
-      }
-    }
-  }
-
   /**
    * Get display string for a DiffSpec in the dropdown
    */
@@ -292,18 +126,6 @@
 
   // Register keyboard shortcuts
   onMount(() => {
-    const unregisterCopy = registerShortcut({
-      id: 'copy-comments',
-      keys: ['c'],
-      description: 'Copy all comments',
-      category: 'comments',
-      handler: () => {
-        if (commentsState.comments.length > 0) {
-          handleCopyComments();
-        }
-      },
-    });
-
     const unregisterTheme = registerShortcut({
       id: 'open-theme-picker',
       keys: ['p'],
@@ -327,7 +149,6 @@
     });
 
     return () => {
-      unregisterCopy();
       unregisterTheme();
       unregisterSettings();
     };
@@ -379,35 +200,8 @@
     </div>
   </div>
 
-  <!-- Center section: Actions (Commit, Comments, AI) -->
+  <!-- Center section: Actions (Comments, AI reveal toggle) -->
   <div class="section section-center">
-    {#if isWorkingTree}
-      <button
-        class="action-btn"
-        class:disabled={!canCommit}
-        onclick={() => canCommit && (showCommitModal = true)}
-        title={canCommit ? 'Commit' : 'No staged or unstaged changes'}
-        disabled={!canCommit}
-      >
-        <GitCommitHorizontal size={14} />
-      </button>
-    {/if}
-
-    <!-- AI Analysis button -->
-    <button
-      class="action-btn ai-btn"
-      class:loading={isAiLoading}
-      class:has-results={hasAiResults}
-      class:disabled={!canRunAi}
-      onclick={handleAiAnalysis}
-      title={isAiLoading ? 'Analyzing...' : hasAiResults ? 'View AI analysis' : 'Analyze with AI'}
-      disabled={!canRunAi && !hasAiResults}
-    >
-      <div class="ai-icon" class:spinning={isAiLoading}>
-        <Orbit size={14} />
-      </div>
-    </button>
-
     <!-- AI Annotations reveal toggle (only show when annotations exist) -->
     {#if hasFileAnnotations}
       <button
@@ -427,30 +221,13 @@
     <div class="comments-section">
       <MessageSquare size={14} />
       <span class="comment-count">{commentsState.comments.length}</span>
-      {#if commentsState.comments.length > 0}
-        {#if canSync}
-          <button
-            class="icon-btn sync-btn"
-            onclick={() => (showSyncModal = true)}
-            title="Sync comments to GitHub"
-          >
-            <Upload size={12} />
-          </button>
-        {/if}
+      {#if commentsState.comments.length > 0 && canSync}
         <button
-          class="icon-btn"
-          class:copied={copiedFeedback}
-          onclick={handleCopyComments}
-          title="Copy all comments (c)"
+          class="icon-btn sync-btn"
+          onclick={() => (showSyncModal = true)}
+          title="Sync comments to GitHub"
         >
-          {#if copiedFeedback}
-            <Check size={12} />
-          {:else}
-            <Copy size={12} />
-          {/if}
-        </button>
-        <button class="icon-btn delete-btn" onclick={deleteAllComments} title="Delete all comments">
-          <Trash2 size={12} />
+          <Upload size={12} />
         </button>
       {/if}
     </div>
@@ -512,17 +289,6 @@
     repoPath={repoState.currentPath}
     onSubmit={handlePRSubmit}
     onClose={() => (showPRModal = false)}
-  />
-{/if}
-
-{#if showCommitModal}
-  <CommitModal
-    repoPath={repoState.currentPath}
-    onCommit={() => {
-      showCommitModal = false;
-      onCommit?.();
-    }}
-    onClose={() => (showCommitModal = false)}
   />
 {/if}
 
@@ -742,14 +508,6 @@
     background-color: var(--bg-hover);
   }
 
-  .icon-btn.copied {
-    color: var(--status-added);
-  }
-
-  .icon-btn.delete-btn:hover {
-    color: var(--status-deleted);
-  }
-
   .icon-btn.sync-btn:hover {
     color: var(--ui-accent);
   }
@@ -823,47 +581,13 @@
     color: var(--text-primary);
   }
 
-  .action-btn:disabled,
-  .action-btn.disabled {
+  .action-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
 
   .action-btn :global(svg) {
     flex-shrink: 0;
-  }
-
-  /* AI Analysis button */
-  .ai-btn {
-    position: relative;
-    overflow: visible;
-  }
-
-  .ai-btn.has-results {
-    color: var(--ui-accent);
-  }
-
-  .ai-btn.has-results:hover:not(:disabled) {
-    color: var(--ui-accent);
-  }
-
-  .ai-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .ai-icon.spinning {
-    animation: spin 2s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
   }
 
   /* AI Annotations reveal toggle */

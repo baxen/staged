@@ -666,49 +666,6 @@
   <TopBar
     onPresetSelect={handlePresetSelect}
     onCustomDiff={handleCustomDiff}
-    onCommit={() => {
-      const tab = getActiveTab();
-      if (tab) handleFilesChanged(tab.repoPath);
-    }}
-    agentState={getActiveTab()?.agentState}
-    onReloadCommentsForTab={async (spec, repoPath) => {
-      // Find the tab that matches this spec/repoPath
-      const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-      if (!targetTab) {
-        console.warn('Could not find tab for repoPath:', repoPath);
-        return;
-      }
-
-      // Load comments from the database
-      const review = await import('./lib/services/review').then((m) =>
-        m.getReview(spec, repoPath ?? undefined)
-      );
-
-      // Update the target tab's comments state directly
-      targetTab.commentsState.comments = review.comments;
-      targetTab.commentsState.reviewedPaths = review.reviewed;
-      targetTab.commentsState.currentSpec = spec;
-      targetTab.commentsState.currentRepoPath = repoPath;
-
-      // Check if this is still the active tab
-      const activeTab = getActiveTab();
-      const isStillActive = activeTab?.id === targetTab.id;
-
-      if (isStillActive) {
-        // Sync to global state so UI updates immediately
-        commentsState.comments = review.comments;
-        commentsState.reviewedPaths = review.reviewed;
-        commentsState.currentSpec = spec;
-        commentsState.currentRepoPath = repoPath;
-      }
-    }}
-    onArtifactSaved={(artifact, repoPath) => {
-      // Find the tab that matches this repoPath and add the artifact
-      const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-      if (targetTab) {
-        targetTab.agentState.artifacts.push(artifact);
-      }
-    }}
   />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
@@ -765,6 +722,48 @@
           repoPath={repoState.currentPath}
           spec={diffSelection.spec}
           agentState={getActiveTab()?.agentState}
+          onCommit={() => {
+            const tab = getActiveTab();
+            if (tab) handleFilesChanged(tab.repoPath);
+          }}
+          onReloadCommentsForTab={async (spec, repoPath) => {
+            // Find the tab that matches this spec/repoPath
+            const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
+            if (!targetTab) {
+              console.warn('Could not find tab for repoPath:', repoPath);
+              return;
+            }
+
+            // Load comments from the database
+            const review = await import('./lib/services/review').then((m) =>
+              m.getReview(spec, repoPath ?? undefined)
+            );
+
+            // Update the target tab's comments state directly
+            targetTab.commentsState.comments = review.comments;
+            targetTab.commentsState.reviewedPaths = review.reviewed;
+            targetTab.commentsState.currentSpec = spec;
+            targetTab.commentsState.currentRepoPath = repoPath;
+
+            // Check if this is still the active tab
+            const activeTab = getActiveTab();
+            const isStillActive = activeTab?.id === targetTab.id;
+
+            if (isStillActive) {
+              // Sync to global state so UI updates immediately
+              commentsState.comments = review.comments;
+              commentsState.reviewedPaths = review.reviewed;
+              commentsState.currentSpec = spec;
+              commentsState.currentRepoPath = repoPath;
+            }
+          }}
+          onArtifactSaved={(artifact, repoPath) => {
+            // Find the tab that matches this repoPath and add the artifact
+            const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
+            if (targetTab) {
+              targetTab.agentState.artifacts.push(artifact);
+            }
+          }}
         />
       </aside>
     {/if}
