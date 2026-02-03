@@ -41,6 +41,7 @@ const SIDEBAR_POSITION_STORAGE_KEY = 'staged-sidebar-position';
 const SIDEBAR_WIDTH_STORAGE_KEY = 'staged-sidebar-width';
 const KEYBOARD_BINDINGS_STORAGE_KEY = 'staged-keyboard-bindings';
 const FEATURES_STORAGE_KEY = 'staged-features';
+const AI_AGENT_STORAGE_KEY = 'staged-ai-agent';
 const DEFAULT_SYNTAX_THEME: SyntaxThemeName = 'laserwave';
 const DEFAULT_SIDEBAR_POSITION: SidebarPosition = 'right';
 
@@ -72,9 +73,7 @@ export interface KeyboardBinding {
  * Known feature flags with their default values.
  * Add new flags here as the app evolves.
  */
-export const DEFAULT_FEATURES = {
-  agentPanel: false,
-} as const;
+export const DEFAULT_FEATURES = {} as const;
 
 export type FeatureFlag = keyof typeof DEFAULT_FEATURES;
 
@@ -95,6 +94,8 @@ export const preferences = $state({
   sidebarWidth: SIDEBAR_WIDTH_DEFAULT,
   /** Feature flags for experimental/optional features */
   features: { ...DEFAULT_FEATURES } as Record<string, boolean>,
+  /** Selected AI agent (null if not yet chosen) */
+  aiAgent: null as string | null,
 });
 
 // =============================================================================
@@ -442,6 +443,38 @@ export function loadSavedFeatures(): void {
 export function resetFeatureFlags(): void {
   preferences.features = { ...DEFAULT_FEATURES };
   localStorage.removeItem(FEATURES_STORAGE_KEY);
+}
+
+// =============================================================================
+// AI Agent Preference
+// =============================================================================
+
+/**
+ * Set the preferred AI agent.
+ */
+export function setAiAgent(agentId: string): void {
+  preferences.aiAgent = agentId;
+  localStorage.setItem(AI_AGENT_STORAGE_KEY, agentId);
+}
+
+/**
+ * Load saved AI agent preference.
+ * Returns true if a preference was found.
+ */
+export function loadSavedAiAgent(): boolean {
+  const saved = localStorage.getItem(AI_AGENT_STORAGE_KEY);
+  if (saved) {
+    preferences.aiAgent = saved;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Check if an AI agent has been selected.
+ */
+export function hasAiAgentSelected(): boolean {
+  return preferences.aiAgent !== null;
 }
 
 // =============================================================================

@@ -14,6 +14,9 @@
     Keyboard,
     RotateCcw,
     FlaskConical,
+    Bot,
+    ExternalLink,
+    RefreshCw,
   } from 'lucide-svelte';
   import {
     preferences,
@@ -24,8 +27,12 @@
     DEFAULT_FEATURES,
     setFeatureFlag,
     resetFeatureFlags,
+    setAiAgent,
     type SidebarPosition,
   } from './stores/preferences.svelte';
+  import { agentGlobalState } from './stores/agent.svelte';
+  import { discoverAcpProviders } from './services/ai';
+  import { openUrl } from './services/window';
   import {
     getAllShortcuts,
     formatShortcutKeys,
@@ -49,12 +56,7 @@
   let activeTab = $state<Tab>('layout');
 
   // Feature flag metadata for display
-  const featureMeta: Record<string, { label: string; description: string }> = {
-    agentPanel: {
-      label: 'Agent Panel',
-      description: 'Show AI agent panel for code assistance',
-    },
-  };
+  const featureMeta: Record<string, { label: string; description: string }> = {};
 
   // Get list of all feature flags with their current state
   function getFeatureFlags(): Array<{
@@ -93,6 +95,66 @@
   }
 
   let featureFlags = $derived(getFeatureFlags());
+
+  // Known agents with metadata
+  const KNOWN_AGENTS = [
+    {
+      id: 'goose',
+      label: 'Goose',
+      installUrl: 'https://github.com/block/goose',
+    },
+    {
+      id: 'claude',
+      label: 'Claude Code',
+      installUrl: 'https://github.com/anthropics/claude-code',
+    },
+  ];
+
+  // AI Agent state
+  let refreshingProviders = $state(false);
+
+  async function refreshProviders() {
+    refreshingProviders = true;
+
+    // Force UI update and paint before async work
+    await new Promise((resolve) => requestAnimationFrame(() => setTimeout(resolve, 0)));
+
+    // Ensure spinner shows for at least 400ms for better UX
+    const startTime = Date.now();
+
+    try {
+      const newProviders = await discoverAcpProviders();
+      // Only update if providers actually changed (avoid UI flicker)
+      const currentIds = agentGlobalState.availableProviders.map((p) => p.id).sort().join(',');
+      const newIds = newProviders.map((p) => p.id).sort().join(',');
+      if (currentIds !== newIds) {
+        agentGlobalState.availableProviders = newProviders;
+      }
+      agentGlobalState.providersLoaded = true;
+    } catch (e) {
+      console.error('Failed to refresh providers:', e);
+    } finally {
+      // Wait for minimum display time before hiding spinner
+      const elapsed = Date.now() - startTime;
+      const minDisplayTime = 400;
+      if (elapsed < minDisplayTime) {
+        await new Promise((resolve) => setTimeout(resolve, minDisplayTime - elapsed));
+      }
+      refreshingProviders = false;
+    }
+  }
+
+  function isAgentAvailable(agentId: string): boolean {
+    return agentGlobalState.availableProviders.some((p) => p.id === agentId);
+  }
+
+  function getAgentLabel(agentId: string): string {
+    return KNOWN_AGENTS.find((a) => a.id === agentId)?.label ?? agentId;
+  }
+
+  function openInstallUrl(url: string) {
+    openUrl(url);
+  }
 
   // Keyboard rebinding state
   let editingShortcutId = $state<string | null>(null);
@@ -318,8 +380,8 @@
           class:active={activeTab === 'layout'}
           onclick={() => (activeTab = 'layout')}
         >
-          <PanelLeft size={14} />
-          Layout
+          <Settings size={14} />
+          General
         </button>
         <button
           class="tab"
@@ -329,14 +391,16 @@
           <Keyboard size={14} />
           Keyboard
         </button>
-        <button
-          class="tab"
-          class:active={activeTab === 'features'}
-          onclick={() => (activeTab = 'features')}
-        >
-          <FlaskConical size={14} />
-          Features
-        </button>
+        {#if featureFlags.length > 0}
+          <button
+            class="tab"
+            class:active={activeTab === 'features'}
+            onclick={() => (activeTab = 'features')}
+          >
+            <FlaskConical size={14} />
+            Features
+          </button>
+        {/if}
       </div>
 
       <!-- Layout Tab -->
@@ -364,6 +428,54 @@
                 <PanelRight size={14} />
                 Right
               </button>
+            </div>
+          </div>
+
+          <div class="section-divider"></div>
+
+          <div class="setting-section">
+            <div class="section-header">
+              <div class="section-title">
+                <Bot size={14} />
+                AI Agent
+              </div>
+              <button
+                class="refresh-btn-small"
+                onclick={refreshProviders}
+                disabled={refreshingProviders}
+                title="Check for newly installed agents"
+              >
+                <span class="spin-container" class:spinning={refreshingProviders}><RefreshCw size={12} /></span>
+              </button>
+            </div>
+            <div class="agents-list-settings">
+              {#each KNOWN_AGENTS as agent}
+                {@const available = isAgentAvailable(agent.id)}
+                <div class="agent-row" class:unavailable={!available}>
+                  <button
+                    class="agent-select-btn"
+                    class:selected={preferences.aiAgent === agent.id}
+                    disabled={!available}
+                    onclick={() => available && setAiAgent(agent.id)}
+                  >
+                    <span class="agent-name">{agent.label}</span>
+                    {#if !available}
+                      <span class="agent-status">Not installed</span>
+                    {:else if preferences.aiAgent === agent.id}
+                      <span class="agent-status selected">Selected</span>
+                    {/if}
+                  </button>
+                  {#if !available}
+                    <button
+                      class="install-link"
+                      onclick={() => openInstallUrl(agent.installUrl)}
+                      title="Install {agent.label}"
+                    >
+                      <ExternalLink size={12} />
+                    </button>
+                  {/if}
+                </div>
+              {/each}
             </div>
           </div>
         </div>
@@ -659,6 +771,150 @@
     background: var(--bg-chrome);
     color: var(--text-primary);
     box-shadow: var(--shadow-subtle);
+  }
+
+  /* Section Divider */
+  .section-divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 20px 0;
+  }
+
+  /* AI Agent Section */
+  .setting-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .section-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: var(--size-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .section-title :global(svg) {
+    color: var(--text-muted);
+  }
+
+  .refresh-btn-small {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px;
+    background: none;
+    border: none;
+    color: var(--text-faint);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.1s, background-color 0.1s;
+  }
+
+  .refresh-btn-small:not(:disabled):hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+  }
+
+  .refresh-btn-small:disabled {
+    cursor: not-allowed;
+  }
+
+  .agents-list-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .agent-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .agent-select-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 12px;
+    background: var(--bg-primary);
+    border: 2px solid transparent;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: border-color 0.15s, background-color 0.15s;
+  }
+
+  .agent-select-btn:not(:disabled):hover {
+    background: var(--bg-hover);
+  }
+
+  .agent-select-btn.selected {
+    border-color: var(--ui-accent);
+  }
+
+  .agent-select-btn:disabled {
+    cursor: default;
+    opacity: 0.6;
+  }
+
+  .agent-name {
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+  }
+
+  .agent-status {
+    font-size: var(--size-xs);
+    color: var(--text-faint);
+  }
+
+  .agent-status.selected {
+    color: var(--ui-accent);
+  }
+
+  .install-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    background: none;
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: color 0.1s, border-color 0.1s;
+  }
+
+  .install-link:hover {
+    color: var(--text-primary);
+    border-color: var(--border-emphasis);
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  .spin-container {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .spin-container.spinning {
+    animation: spin 1s linear infinite;
   }
 
   /* Keyboard Tab */

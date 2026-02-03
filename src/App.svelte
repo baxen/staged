@@ -9,6 +9,7 @@
   import TopBar from './lib/TopBar.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
+  import AgentSetupModal from './lib/AgentSetupModal.svelte';
   import TabBar from './lib/TabBar.svelte';
   import { listRefs } from './lib/services/git';
   import { getWindowLabel, installCli } from './lib/services/window';
@@ -26,7 +27,8 @@
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
   import { createDiffSelection } from './lib/stores/diffSelection.svelte';
-  import { createAgentState } from './lib/stores/agent.svelte';
+  import { createAgentState, agentGlobalState } from './lib/stores/agent.svelte';
+  import { discoverAcpProviders } from './lib/services/ai';
   import { DiffSpec, gitRefName } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
@@ -51,6 +53,8 @@
     resetSidebarWidth,
     getCustomKeyboardBindings,
     registerPreferenceShortcuts,
+    loadSavedAiAgent,
+    hasAiAgentSelected,
   } from './lib/stores/preferences.svelte';
   import { loadCustomBindings } from './lib/services/keyboard';
   import { registerShortcut } from './lib/services/keyboard';
@@ -92,6 +96,8 @@
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
   let showFolderPicker = $state(false);
+  let showAgentSetupModal = $state(false);
+  let unsubscribeWindowFocus: Unsubscribe | null = null;
   let suggestedRepos = $state<RecentRepo[]>([]);
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
@@ -538,6 +544,12 @@
     loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
+    // Check if AI agent has been selected, show setup modal if not
+    const hasAgent = loadSavedAiAgent();
+    if (!hasAgent) {
+      showAgentSetupModal = true;
+    }
+
     // Pre-load suggested repos (Spotlight search runs in background)
     findRecentRepos(24, 10).then((repos) => {
       suggestedRepos = repos;
@@ -593,6 +605,20 @@
       unsubscribeMenuCloseTab = await listen('menu:close-tab', handleMenuCloseTab);
       unsubscribeMenuCloseWindow = await listen('menu:close-window', handleMenuCloseWindow);
       unsubscribeMenuInstallCli = await listen('menu:install-cli', handleMenuInstallCli);
+
+      // Listen for window focus to refresh AI providers (user may have installed one)
+      const currentWindow = getCurrentWindow();
+      unsubscribeWindowFocus = await currentWindow.onFocusChanged(async ({ payload: focused }) => {
+        if (focused) {
+          try {
+            const providers = await discoverAcpProviders();
+            agentGlobalState.availableProviders = providers;
+            agentGlobalState.providersLoaded = true;
+          } catch (e) {
+            console.error('Failed to refresh providers on focus:', e);
+          }
+        }
+      });
 
       // Initialize repo state (resolves canonical path, adds to recent repos)
       const repoPath = await initRepoState();
@@ -652,6 +678,7 @@
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();
     unsubscribeMenuInstallCli?.();
+    unsubscribeWindowFocus?.();
     // Cleanup sidebar resize listeners
     document.removeEventListener('mousemove', handleSidebarResizeMove);
     document.removeEventListener('mouseup', handleSidebarResizeEnd);
@@ -712,16 +739,10 @@
   />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
-    {#if showEmptyState && !preferences.features.agentPanel}
-      <!-- Full-width empty state (only when agent panel disabled) -->
-      <section class="main-content full-width">
+    <section class="main-content">
+      {#if showEmptyState}
         <EmptyState />
-      </section>
-    {:else}
-      <section class="main-content">
-        {#if showEmptyState}
-          <EmptyState />
-        {:else if diffState.loading}
+      {:else if diffState.loading}
           <div class="loading-state">
             <p>Loading...</p>
           </div>
@@ -767,7 +788,6 @@
           agentState={getActiveTab()?.agentState}
         />
       </aside>
-    {/if}
   </div>
 </main>
 
@@ -794,6 +814,10 @@
     onSelect={handleFolderSelect}
     onClose={() => (showFolderPicker = false)}
   />
+{/if}
+
+{#if showAgentSetupModal}
+  <AgentSetupModal onComplete={() => (showAgentSetupModal = false)} />
 {/if}
 
 <style>
