@@ -294,7 +294,6 @@
 
   /* Make all interactive elements non-draggable */
   .top-bar button,
-  .top-bar [role='button'],
   .top-bar .dropdown {
     -webkit-app-region: no-drag;
   }
