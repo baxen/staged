@@ -203,6 +203,9 @@ pub struct Artifact {
     /// Error message if status is Error
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// Session ID for viewing the generation conversation
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
 }
 
 impl Artifact {
@@ -225,6 +228,7 @@ impl Artifact {
             },
             status: ArtifactStatus::Complete,
             error_message: None,
+            session_id: None,
         }
     }
 
@@ -243,6 +247,7 @@ impl Artifact {
             },
             status: ArtifactStatus::Generating,
             error_message: None,
+            session_id: None,
         }
     }
 
@@ -409,6 +414,19 @@ impl Store {
                 [],
             )?;
             conn.execute("ALTER TABLE artifacts ADD COLUMN error_message TEXT", [])?;
+        }
+
+        // Check if session_id column exists on artifacts, add if not
+        let has_session_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('artifacts') WHERE name = 'session_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_session_id {
+            conn.execute("ALTER TABLE artifacts ADD COLUMN session_id TEXT", [])?;
         }
 
         Ok(())
@@ -682,8 +700,8 @@ impl Store {
             serde_json::to_string(&artifact.data).map_err(|e| StoreError::new(e.to_string()))?;
 
         conn.execute(
-            "INSERT INTO artifacts (id, project_id, title, artifact_type, data_json, created_at, updated_at, parent_artifact_id, status, error_message)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT INTO artifacts (id, project_id, title, artifact_type, data_json, created_at, updated_at, parent_artifact_id, status, error_message, session_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 &artifact.id,
                 &artifact.project_id,
@@ -695,6 +713,7 @@ impl Store {
                 &artifact.parent_artifact_id,
                 artifact.status.as_str(),
                 &artifact.error_message,
+                &artifact.session_id,
             ],
         )?;
 
@@ -712,7 +731,7 @@ impl Store {
     pub fn get_artifact(&self, id: &str) -> Result<Option<Artifact>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message
+            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message, session_id
              FROM artifacts WHERE id = ?1",
             params![id],
             |row| {
@@ -735,6 +754,7 @@ impl Store {
                     data,
                     status: ArtifactStatus::parse(&status_str),
                     error_message: row.get(8)?,
+                    session_id: row.get(9)?,
                 })
             },
         )
@@ -746,7 +766,7 @@ impl Store {
     pub fn list_artifacts(&self, project_id: &str) -> Result<Vec<Artifact>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message
+            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message, session_id
              FROM artifacts WHERE project_id = ?1 ORDER BY updated_at DESC",
         )?;
         let artifacts = stmt
@@ -770,6 +790,7 @@ impl Store {
                     data,
                     status: ArtifactStatus::parse(&status_str),
                     error_message: row.get(8)?,
+                    session_id: row.get(9)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -785,7 +806,7 @@ impl Store {
     ) -> Result<Vec<Artifact>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message
+            "SELECT id, project_id, title, data_json, created_at, updated_at, parent_artifact_id, status, error_message, session_id
              FROM artifacts WHERE project_id = ?1 AND artifact_type = ?2 ORDER BY updated_at DESC",
         )?;
         let artifacts = stmt
@@ -809,6 +830,7 @@ impl Store {
                     data,
                     status: ArtifactStatus::parse(&status_str),
                     error_message: row.get(8)?,
+                    session_id: row.get(9)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?;
@@ -912,6 +934,17 @@ impl Store {
     pub fn delete_artifact(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM artifacts WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Set the session ID for an artifact.
+    pub fn set_artifact_session(&self, artifact_id: &str, session_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE artifacts SET session_id = ?1, updated_at = ?2 WHERE id = ?3",
+            params![session_id, now, artifact_id],
+        )?;
         Ok(())
     }
 
