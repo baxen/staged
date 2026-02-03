@@ -143,10 +143,10 @@ pub struct CommitInfo {
 /// Returns commits in reverse chronological order (newest first).
 pub fn get_commits_since_base(worktree: &Path, base: &str) -> Result<Vec<CommitInfo>, GitError> {
     // Format: sha|short_sha|subject|author|timestamp
-    let format = "%H|%h|%s|%an|%ct";
+    let format = "--format=%H|%h|%s|%an|%ct";
     let range = format!("{}..HEAD", base);
 
-    let output = cli::run(worktree, &["log", "--format", format, &range])?;
+    let output = cli::run(worktree, &["log", format, &range])?;
 
     let mut commits = Vec::new();
     for line in output.lines() {
