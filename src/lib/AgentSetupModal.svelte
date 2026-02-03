@@ -28,7 +28,7 @@
       id: 'claude',
       label: 'Claude Code',
       description: 'AI coding assistant by Anthropic',
-      installUrl: 'https://github.com/anthropics/claude-code',
+      installUrl: 'https://github.com/zed-industries/claude-code-acp',
     },
   ];
 

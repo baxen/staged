@@ -93,7 +93,7 @@
     {
       id: 'claude',
       label: 'Claude Code',
-      installUrl: 'https://github.com/anthropics/claude-code',
+      installUrl: 'https://github.com/zed-industries/claude-code-acp',
     },
   ];
 
