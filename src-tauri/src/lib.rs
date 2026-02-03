@@ -526,8 +526,11 @@ use ai::{
 /// Discover available ACP providers on the system.
 /// Returns a list of providers that are installed and working.
 #[tauri::command]
-fn discover_acp_providers() -> Vec<AcpProviderInfo> {
-    ai::discover_acp_providers()
+async fn discover_acp_providers() -> Vec<AcpProviderInfo> {
+    // Run blocking shell operations on a separate thread to avoid blocking the event loop
+    tokio::task::spawn_blocking(ai::discover_acp_providers)
+        .await
+        .unwrap_or_default()
 }
 
 /// Check if an AI agent is available (via ACP).
@@ -954,6 +957,12 @@ fn get_window_label(window: tauri::Window) -> String {
     window.label().to_string()
 }
 
+/// Open a URL in the default browser.
+#[tauri::command]
+fn open_url(url: &str) -> Result<(), String> {
+    open::that(url).map_err(|e| e.to_string())
+}
+
 /// Get the initial repository path from CLI arguments.
 /// Returns the canonicalized path if a valid directory was provided, otherwise None.
 #[tauri::command]
@@ -1328,6 +1337,7 @@ pub fn run() {
             unwatch_repo,
             // Window commands
             get_window_label,
+            open_url,
             // CLI commands
             get_initial_path,
             install_cli,

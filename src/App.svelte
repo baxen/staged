@@ -9,6 +9,7 @@
   import TopBar from './lib/TopBar.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
+  import AgentSetupModal from './lib/AgentSetupModal.svelte';
   import TabBar from './lib/TabBar.svelte';
   import { listRefs } from './lib/services/git';
   import { getWindowLabel, installCli } from './lib/services/window';
@@ -26,7 +27,8 @@
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
   import { createDiffSelection } from './lib/stores/diffSelection.svelte';
-  import { createAgentState, type Artifact } from './lib/stores/agent.svelte';
+  import { createAgentState, agentGlobalState, type Artifact } from './lib/stores/agent.svelte';
+  import { discoverAcpProviders } from './lib/services/ai';
   import { DiffSpec, gitRefName } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
@@ -53,6 +55,8 @@
     resetSidebarWidth,
     getCustomKeyboardBindings,
     registerPreferenceShortcuts,
+    loadSavedAiAgent,
+    hasAiAgentSelected,
   } from './lib/stores/preferences.svelte';
   import { loadCustomBindings } from './lib/services/keyboard';
   import { registerShortcut } from './lib/services/keyboard';
@@ -94,6 +98,8 @@
   let unsubscribeWatcher: Unsubscribe | null = null;
   let showFileSearch = $state(false);
   let showFolderPicker = $state(false);
+  let showAgentSetupModal = $state(false);
+  let unsubscribeWindowFocus: Unsubscribe | null = null;
   let suggestedRepos = $state<RecentRepo[]>([]);
   let unsubscribeMenuOpenFolder: Unsubscribe | null = null;
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
@@ -549,6 +555,12 @@
     loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
 
+    // Check if AI agent has been selected, show setup modal if not
+    const hasAgent = loadSavedAiAgent();
+    if (!hasAgent) {
+      showAgentSetupModal = true;
+    }
+
     // Pre-load suggested repos (Spotlight search runs in background)
     findRecentRepos(24, 10).then((repos) => {
       suggestedRepos = repos;
@@ -605,6 +617,20 @@
       unsubscribeMenuCloseTab = await listen('menu:close-tab', handleMenuCloseTab);
       unsubscribeMenuCloseWindow = await listen('menu:close-window', handleMenuCloseWindow);
       unsubscribeMenuInstallCli = await listen('menu:install-cli', handleMenuInstallCli);
+
+      // Listen for window focus to refresh AI providers (user may have installed one)
+      const currentWindow = getCurrentWindow();
+      unsubscribeWindowFocus = await currentWindow.onFocusChanged(async ({ payload: focused }) => {
+        if (focused) {
+          try {
+            const providers = await discoverAcpProviders();
+            agentGlobalState.availableProviders = providers;
+            agentGlobalState.providersLoaded = true;
+          } catch (e) {
+            console.error('Failed to refresh providers on focus:', e);
+          }
+        }
+      });
 
       // Initialize repo state (resolves canonical path, adds to recent repos)
       const repoPath = await initRepoState();
@@ -665,6 +691,7 @@
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();
     unsubscribeMenuInstallCli?.();
+    unsubscribeWindowFocus?.();
     // Cleanup sidebar resize listeners
     document.removeEventListener('mousemove', handleSidebarResizeMove);
     document.removeEventListener('mouseup', handleSidebarResizeEnd);
@@ -682,104 +709,55 @@
   <TopBar onPresetSelect={handlePresetSelect} onCustomDiff={handleCustomDiff} />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
-    {#if showEmptyState && !preferences.features.agentPanel}
-      <!-- Full-width empty state (only when agent panel disabled) -->
-      <section class="main-content full-width">
+    <section class="main-content">
+      {#if showEmptyState}
         <EmptyState />
-      </section>
-    {:else}
-      <section class="main-content">
-        {#if showEmptyState}
-          <EmptyState />
-        {:else if diffState.loading}
-          <div class="loading-state">
-            <p>Loading...</p>
-          </div>
-        {:else if diffState.error}
-          <div class="error-state">
-            <AlertCircle size={18} />
-            <p class="error-message">{diffState.error}</p>
-          </div>
-        {:else}
-          <DiffViewer
-            diff={currentDiff}
-            sizeBase={preferences.sizeBase}
-            syntaxThemeVersion={preferences.syntaxThemeVersion}
-            loading={diffState.loadingFile !== null}
-            isReferenceFile={isCurrentFileReference}
-            agentState={getActiveTab()?.agentState}
-          />
-        {/if}
-      </section>
-      <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
-        <!-- Resize handle -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="sidebar-resize-handle"
-          class:left={preferences.sidebarPosition === 'left'}
-          class:dragging={isDraggingSidebar}
-          onmousedown={handleSidebarResizeStart}
-          ondblclick={handleSidebarResizeDoubleClick}
-        >
-          <div class="resize-handle-bar"></div>
+      {:else if diffState.loading}
+        <div class="loading-state">
+          <p>Loading...</p>
         </div>
-
-        <Sidebar
-          files={diffState.files}
-          loading={diffState.loading}
-          onFileSelect={selectFile}
-          selectedFile={diffState.selectedFile}
-          {isWorkingTree}
-          onAddReferenceFile={() => (showFileSearch = true)}
-          onRemoveReferenceFile={handleRemoveReferenceFile}
-          repoPath={repoState.currentPath}
-          spec={diffSelection.spec}
+      {:else if diffState.error}
+        <div class="error-state">
+          <AlertCircle size={18} />
+          <p class="error-message">{diffState.error}</p>
+        </div>
+      {:else}
+        <DiffViewer
+          diff={currentDiff}
+          sizeBase={preferences.sizeBase}
+          syntaxThemeVersion={preferences.syntaxThemeVersion}
+          loading={diffState.loadingFile !== null}
+          isReferenceFile={isCurrentFileReference}
           agentState={getActiveTab()?.agentState}
-          onCommit={() => {
-            const tab = getActiveTab();
-            if (tab) handleFilesChanged(tab.repoPath);
-          }}
-          onReloadCommentsForTab={async (spec: DiffSpecType, repoPath: string | null) => {
-            // Find the tab that matches this spec/repoPath
-            const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-            if (!targetTab) {
-              console.warn('Could not find tab for repoPath:', repoPath);
-              return;
-            }
-
-            // Load comments from the database
-            const review = await import('./lib/services/review').then((m) =>
-              m.getReview(spec, repoPath ?? undefined)
-            );
-
-            // Update the target tab's comments state directly
-            targetTab.commentsState.comments = review.comments;
-            targetTab.commentsState.reviewedPaths = review.reviewed;
-            targetTab.commentsState.currentSpec = spec;
-            targetTab.commentsState.currentRepoPath = repoPath;
-
-            // Check if this is still the active tab
-            const activeTab = getActiveTab();
-            const isStillActive = activeTab?.id === targetTab.id;
-
-            if (isStillActive) {
-              // Sync to global state so UI updates immediately
-              commentsState.comments = review.comments;
-              commentsState.reviewedPaths = review.reviewed;
-              commentsState.currentSpec = spec;
-              commentsState.currentRepoPath = repoPath;
-            }
-          }}
-          onArtifactSaved={(artifact: Artifact, repoPath: string | null) => {
-            // Find the tab that matches this repoPath and add the artifact
-            const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
-            if (targetTab) {
-              targetTab.agentState.artifacts.push(artifact);
-            }
-          }}
         />
-      </aside>
-    {/if}
+      {/if}
+    </section>
+    <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
+      <!-- Resize handle -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="sidebar-resize-handle"
+        class:left={preferences.sidebarPosition === 'left'}
+        class:dragging={isDraggingSidebar}
+        onmousedown={handleSidebarResizeStart}
+        ondblclick={handleSidebarResizeDoubleClick}
+      >
+        <div class="resize-handle-bar"></div>
+      </div>
+
+      <Sidebar
+        files={diffState.files}
+        loading={diffState.loading}
+        onFileSelect={selectFile}
+        selectedFile={diffState.selectedFile}
+        {isWorkingTree}
+        onAddReferenceFile={() => (showFileSearch = true)}
+        onRemoveReferenceFile={handleRemoveReferenceFile}
+        repoPath={repoState.currentPath}
+        spec={diffSelection.spec}
+        agentState={getActiveTab()?.agentState}
+      />
+    </aside>
   </div>
 </main>
 
@@ -806,6 +784,10 @@
     onSelect={handleFolderSelect}
     onClose={() => (showFolderPicker = false)}
   />
+{/if}
+
+{#if showAgentSetupModal}
+  <AgentSetupModal onComplete={() => (showAgentSetupModal = false)} />
 {/if}
 
 <style>

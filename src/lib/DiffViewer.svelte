@@ -2084,11 +2084,9 @@
         >
           <MessageSquarePlus size={12} />
         </button>
-        {#if preferences.features.agentPanel}
-          <button class="range-btn agent-btn" onclick={handleAskAgent} title="Ask agent about this">
-            <Wand2 size={12} />
-          </button>
-        {/if}
+        <button class="range-btn agent-btn" onclick={handleAskAgent} title="Ask agent about this">
+          <Wand2 size={12} />
+        </button>
         <button class="range-btn" onclick={clearLineSelection} title="Clear selection (Esc)">
           <X size={12} />
         </button>
@@ -2125,8 +2123,8 @@
       />
     {/if}
 
-    <!-- Agent prompt editor (feature-gated) -->
-    {#if preferences.features.agentPanel && agentPromptOnLines && agentPromptEditorStyle}
+    <!-- Agent prompt editor -->
+    {#if agentPromptOnLines && agentPromptEditorStyle}
       {@const lineCount = agentPromptOnLines.end - agentPromptOnLines.start + 1}
       <div
         class="agent-prompt-editor"

@@ -1050,7 +1050,7 @@
     <div class="loading-state">
       <p>Loading...</p>
     </div>
-  {:else if files.length === 0 && !preferences.features.agentPanel}
+  {:else if files.length === 0}
     <div class="empty-state">
       <p>No changes</p>
       {#if isWorkingTree}
@@ -1245,8 +1245,8 @@
         </ul>
       {/if}
 
-      <!-- Agent Chat section (feature-gated) -->
-      {#if preferences.features.agentPanel && agentState}
+      <!-- Agent Chat section -->
+      {#if agentState}
         <div class="section-header agent-header">
           <div class="section-left"></div>
           <div class="section-divider">
@@ -1271,7 +1271,7 @@
     </div>
 
     <!-- Agent Panel outside file-list for flex layout (takes remaining space) -->
-    {#if preferences.features.agentPanel && agentState}
+    {#if agentState}
       <AgentPanel {repoPath} {spec} {files} {selectedFile} {agentState} />
     {/if}
   {/if}
