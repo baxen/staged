@@ -113,10 +113,7 @@ export async function listPullRequests(repoPath?: string): Promise<PullRequest[]
  * Search for pull requests on GitHub using a query string.
  * Uses GitHub's search syntax.
  */
-export async function searchPullRequests(
-  query: string,
-  repoPath?: string
-): Promise<PullRequest[]> {
+export async function searchPullRequests(query: string, repoPath?: string): Promise<PullRequest[]> {
   return invoke<PullRequest[]>('search_pull_requests', {
     repoPath: repoPath ?? null,
     query,
