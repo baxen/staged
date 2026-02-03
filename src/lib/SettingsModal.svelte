@@ -67,7 +67,7 @@
   }> {
     const flags: Array<{ id: string; label: string; description: string; enabled: boolean }> = [];
 
-    // Include all known flags from DEFAULT_FEATURES
+    // Only include flags defined in DEFAULT_FEATURES (ignore legacy stored flags)
     for (const [id, defaultValue] of Object.entries(DEFAULT_FEATURES)) {
       const meta = featureMeta[id] || { label: id, description: '' };
       flags.push({
@@ -76,19 +76,6 @@
         description: meta.description,
         enabled: preferences.features[id] ?? defaultValue,
       });
-    }
-
-    // Also include any flags that are set but not in DEFAULT_FEATURES (for flexibility)
-    for (const [id, enabled] of Object.entries(preferences.features)) {
-      if (!(id in DEFAULT_FEATURES)) {
-        const meta = featureMeta[id] || { label: id, description: '' };
-        flags.push({
-          id,
-          label: meta.label,
-          description: meta.description,
-          enabled,
-        });
-      }
     }
 
     return flags;
