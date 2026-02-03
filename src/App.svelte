@@ -818,7 +818,7 @@
     display: flex;
     flex: 1;
     overflow: hidden;
-    padding: 0 8px 8px 8px;
+    padding: 12px 8px;
     gap: 8px;
   }
 

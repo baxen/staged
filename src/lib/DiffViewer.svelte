@@ -2285,7 +2285,7 @@
 
   /* Spine / Divider */
   .spine {
-    width: 24px;
+    width: 16px;
     flex-shrink: 0;
     display: flex;
     flex-direction: column;
