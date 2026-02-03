@@ -35,6 +35,8 @@ interface SmartDiffState {
   aiToolName: string | null;
   /** Error message if AI check failed */
   aiError: string | null;
+  /** Error message if analysis failed */
+  analysisError: string | null;
   /** Global toggle for showing annotations */
   showAnnotations: boolean;
   /** Currently focused annotation ID (for keyboard nav) */
@@ -51,6 +53,7 @@ export const smartDiffState: SmartDiffState = $state({
   aiAvailable: null,
   aiToolName: null,
   aiError: null,
+  analysisError: null,
   showAnnotations: true,
   activeAnnotationId: null,
   changesetSummary: null,
@@ -107,6 +110,9 @@ export async function runAnalysis(
   repoPath: string | null,
   spec: DiffSpec
 ): Promise<ChangesetSummary | null> {
+  // Clear any previous analysis error
+  smartDiffState.analysisError = null;
+
   // Check AI availability first
   const available = await checkAi();
   if (!available) {
@@ -168,6 +174,7 @@ export async function runAnalysis(
     return summary;
   } catch (e) {
     console.error('Failed to analyze diff:', e);
+    smartDiffState.analysisError = e instanceof Error ? e.message : String(e);
     return null;
   } finally {
     smartDiffState.loading = false;
@@ -319,4 +326,11 @@ export function clearFileResult(filePath: string): void {
   if (result?.annotations.some((a) => a.id === smartDiffState.activeAnnotationId)) {
     smartDiffState.activeAnnotationId = null;
   }
+}
+
+/**
+ * Clear the analysis error (e.g., when user dismisses the error dialog).
+ */
+export function clearAnalysisError(): void {
+  smartDiffState.analysisError = null;
 }
