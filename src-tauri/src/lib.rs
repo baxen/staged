@@ -1178,7 +1178,7 @@ fn extract_title_from_markdown(content: &str, fallback_prompt: &str) -> String {
 // Branch Commands (git-integrated workflow)
 // =============================================================================
 
-use store::{Branch, BranchSession};
+use store::{Branch, BranchNote, BranchSession};
 
 /// Commit info for frontend display.
 #[derive(serde::Serialize)]
@@ -1512,6 +1512,224 @@ fn get_branch_head(state: State<'_, Arc<Store>>, branch_id: String) -> Result<St
 
     let worktree = Path::new(&branch.worktree_path);
     git::get_head_sha(worktree).map_err(|e| e.to_string())
+}
+
+// =============================================================================
+// Branch Note Commands
+// =============================================================================
+
+/// Response from starting a branch note generation.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartBranchNoteResponse {
+    branch_note_id: String,
+    ai_session_id: String,
+}
+
+/// Start generating a new note on a branch.
+/// Creates an AI session, then a branch_note record, and sends the prompt.
+#[tauri::command(rename_all = "camelCase")]
+async fn start_branch_note(
+    state: State<'_, Arc<Store>>,
+    session_manager: State<'_, Arc<SessionManager>>,
+    branch_id: String,
+    title: String,
+    prompt: String,
+) -> Result<StartBranchNoteResponse, String> {
+    // Get the branch to find the worktree path
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    // Check if there's already a generating note
+    if let Some(generating) = state
+        .get_generating_note(&branch_id)
+        .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "Branch already has a note being generated: {}",
+            generating.id
+        ));
+    }
+
+    // Create an AI session in the worktree directory
+    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    let ai_session_id = session_manager
+        .create_session(worktree_path, None)
+        .await
+        .map_err(|e| format!("Failed to create AI session: {}", e))?;
+
+    // Create the branch note record
+    let branch_note = BranchNote::new_generating(&branch_id, &ai_session_id, &title, &prompt);
+    state
+        .create_branch_note(&branch_note)
+        .map_err(|e| format!("Failed to create branch note: {}", e))?;
+
+    // Send the prompt (this runs async in background)
+    if let Err(e) = session_manager.send_prompt(&ai_session_id, prompt).await {
+        // Clean up on failure
+        let _ = state.delete_branch_note(&branch_note.id);
+        return Err(format!("Failed to send prompt: {}", e));
+    }
+
+    Ok(StartBranchNoteResponse {
+        branch_note_id: branch_note.id,
+        ai_session_id,
+    })
+}
+
+/// List all notes for a branch.
+#[tauri::command(rename_all = "camelCase")]
+fn list_branch_notes(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Vec<BranchNote>, String> {
+    state
+        .list_branch_notes(&branch_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get a branch note by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_branch_note(
+    state: State<'_, Arc<Store>>,
+    note_id: String,
+) -> Result<Option<BranchNote>, String> {
+    state.get_branch_note(&note_id).map_err(|e| e.to_string())
+}
+
+/// Get the currently generating note for a branch (if any).
+#[tauri::command(rename_all = "camelCase")]
+fn get_generating_note(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Option<BranchNote>, String> {
+    state
+        .get_generating_note(&branch_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get a branch note by its AI session ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_branch_note_by_ai_session(
+    state: State<'_, Arc<Store>>,
+    ai_session_id: String,
+) -> Result<Option<BranchNote>, String> {
+    state
+        .get_branch_note_by_ai_session(&ai_session_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Mark a branch note as completed with content.
+#[tauri::command(rename_all = "camelCase")]
+fn complete_branch_note(
+    state: State<'_, Arc<Store>>,
+    note_id: String,
+    content: String,
+) -> Result<(), String> {
+    state
+        .update_branch_note_completed(&note_id, &content)
+        .map_err(|e| e.to_string())
+}
+
+/// Mark a branch note as failed with an error message.
+#[tauri::command(rename_all = "camelCase")]
+fn fail_branch_note(
+    state: State<'_, Arc<Store>>,
+    note_id: String,
+    error_message: String,
+) -> Result<(), String> {
+    state
+        .update_branch_note_error(&note_id, &error_message)
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a branch note.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_branch_note(state: State<'_, Arc<Store>>, note_id: String) -> Result<(), String> {
+    state
+        .delete_branch_note(&note_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Recover an orphaned note for a branch.
+/// If there's a "generating" note but the AI session is idle, extracts the final
+/// message content and marks the note as complete.
+#[tauri::command(rename_all = "camelCase")]
+fn recover_orphaned_note(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Option<BranchNote>, String> {
+    // Check if there's a generating note
+    let generating = state
+        .get_generating_note(&branch_id)
+        .map_err(|e| e.to_string())?;
+
+    let Some(note) = generating else {
+        return Ok(None);
+    };
+
+    // Get the AI session to extract the final message
+    let Some(ai_session_id) = &note.ai_session_id else {
+        // No AI session - mark as error
+        state
+            .update_branch_note_error(&note.id, "No AI session associated with note")
+            .map_err(|e| e.to_string())?;
+        return state.get_branch_note(&note.id).map_err(|e| e.to_string());
+    };
+
+    // Get the session messages
+    let session = state
+        .get_session_full(ai_session_id)
+        .map_err(|e| e.to_string())?;
+
+    let Some(session) = session else {
+        state
+            .update_branch_note_error(&note.id, "AI session not found")
+            .map_err(|e| e.to_string())?;
+        return state.get_branch_note(&note.id).map_err(|e| e.to_string());
+    };
+
+    // Find the last assistant message and extract text content
+    let content = session
+        .messages
+        .iter()
+        .rev()
+        .find(|m| m.role == store::MessageRole::Assistant)
+        .map(|m| extract_text_from_assistant_content(&m.content))
+        .unwrap_or_default();
+
+    if content.is_empty() {
+        state
+            .update_branch_note_error(&note.id, "AI session produced no content")
+            .map_err(|e| e.to_string())?;
+    } else {
+        state
+            .update_branch_note_completed(&note.id, &content)
+            .map_err(|e| e.to_string())?;
+    }
+
+    state.get_branch_note(&note.id).map_err(|e| e.to_string())
+}
+
+/// Extract text content from an assistant message (which is JSON-encoded segments).
+fn extract_text_from_assistant_content(content: &str) -> String {
+    // Assistant content is stored as JSON array of segments
+    // Each segment is either { "type": "text", "text": "..." } or { "type": "toolCall", ... }
+    let segments: Vec<serde_json::Value> = serde_json::from_str(content).unwrap_or_default();
+
+    segments
+        .iter()
+        .filter_map(|seg| {
+            if seg.get("type")?.as_str()? == "text" {
+                seg.get("text")?.as_str().map(String::from)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 // =============================================================================
@@ -2000,6 +2218,16 @@ pub fn run() {
             recover_orphaned_session,
             get_branch_session_by_ai_session,
             get_branch_head,
+            // Branch note commands
+            start_branch_note,
+            list_branch_notes,
+            get_branch_note,
+            get_generating_note,
+            get_branch_note_by_ai_session,
+            complete_branch_note,
+            fail_branch_note,
+            delete_branch_note,
+            recover_orphaned_note,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

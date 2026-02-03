@@ -1,26 +1,30 @@
 <!--
   BranchCard.svelte - Card display for a tracked branch
 
-  Shows branch name, commit stack, and session controls.
+  Shows branch name and a unified timeline of commits and notes.
   Commits are displayed newest-first with the HEAD commit having a "Continue" option.
+  Notes are interleaved by timestamp and styled differently.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
     GitBranch,
-    GitCommit,
     Eye,
     Plus,
     Trash2,
     Loader2,
-    Clock,
     Play,
     MessageSquare,
+    FileText,
+    GitCommit,
+    ChevronDown,
   } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession } from './services/branch';
+  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
   import * as branchService from './services/branch';
   import SessionViewerModal from './SessionViewerModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
+  import NewNoteModal from './NewNoteModal.svelte';
+  import NoteViewerModal from './NoteViewerModal.svelte';
 
   interface Props {
     branch: Branch;
@@ -33,21 +37,88 @@
 
   let { branch, refreshKey = 0, onNewSession, onViewDiff, onDelete }: Props = $props();
 
+  // Timeline item types
+  type TimelineItem =
+    | { type: 'commit'; commit: CommitInfo; session: BranchSession | null; isHead: boolean }
+    | { type: 'note'; note: BranchNote }
+    | { type: 'running-session'; session: BranchSession }
+    | { type: 'generating-note'; note: BranchNote };
+
   // State
   let commits = $state<CommitInfo[]>([]);
+  let notes = $state<BranchNote[]>([]);
   let runningSession = $state<BranchSession | null>(null);
+  let generatingNote = $state<BranchNote | null>(null);
   let loading = $state(true);
 
   // Map of commit SHA to its associated session (for "View" button)
   let sessionsByCommit = $state<Map<string, BranchSession>>(new Map());
+
+  // Unified timeline (computed from commits and notes)
+  let timeline = $derived.by(() => {
+    const items: TimelineItem[] = [];
+
+    // Add generating note at top if exists
+    if (generatingNote) {
+      items.push({ type: 'generating-note', note: generatingNote });
+    }
+
+    // Add running session at top if exists
+    if (runningSession) {
+      items.push({ type: 'running-session', session: runningSession });
+    }
+
+    // Combine commits and notes, sort by timestamp (newest first)
+    const combined: Array<{ timestamp: number; item: TimelineItem }> = [];
+
+    commits.forEach((commit, index) => {
+      combined.push({
+        timestamp: commit.timestamp,
+        item: {
+          type: 'commit',
+          commit,
+          session: sessionsByCommit.get(commit.sha) || null,
+          isHead: index === 0 && !runningSession,
+        },
+      });
+    });
+
+    notes
+      .filter((n) => n.status !== 'generating')
+      .forEach((note) => {
+        combined.push({
+          // Note timestamps are in milliseconds, convert to seconds for comparison
+          timestamp: Math.floor(note.createdAt / 1000),
+          item: { type: 'note', note },
+        });
+      });
+
+    // Sort by timestamp descending (newest first)
+    combined.sort((a, b) => b.timestamp - a.timestamp);
+
+    items.push(...combined.map((c) => c.item));
+
+    return items;
+  });
 
   // Session viewer modal state
   let showSessionViewer = $state(false);
   let viewingSession = $state<BranchSession | null>(null);
   let isViewingLive = $state(false);
 
+  // Note viewer modal state
+  let showNoteViewer = $state(false);
+  let viewingNote = $state<BranchNote | null>(null);
+  let isNoteGenerating = $state(false);
+
   // Continue session modal state
   let showContinueModal = $state(false);
+
+  // New note modal state
+  let showNewNoteModal = $state(false);
+
+  // Dropdown state
+  let showNewDropdown = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -64,12 +135,16 @@
   async function loadData() {
     loading = true;
     try {
-      const [commitsResult, sessionResult] = await Promise.all([
+      const [commitsResult, sessionResult, notesResult, generatingNoteResult] = await Promise.all([
         branchService.getBranchCommits(branch.id),
         branchService.getRunningSession(branch.id),
+        branchService.listBranchNotes(branch.id),
+        branchService.getGeneratingNote(branch.id),
       ]);
       commits = commitsResult;
       runningSession = sessionResult;
+      notes = notesResult;
+      generatingNote = generatingNoteResult;
 
       // Load sessions for each commit (for "View" buttons)
       const sessionsMap = new Map<string, BranchSession>();
@@ -105,13 +180,17 @@
     return date.toLocaleDateString();
   }
 
+  // Format relative time from milliseconds
+  function formatRelativeTimeMs(timestamp: number): string {
+    return formatRelativeTime(Math.floor(timestamp / 1000));
+  }
+
   function handleDelete(e: MouseEvent) {
     e.stopPropagation();
     onDelete?.();
   }
 
   function handleContinue() {
-    // Open the continue modal (same as new session, but for continuation)
     showContinueModal = true;
   }
 
@@ -135,13 +214,54 @@
     isViewingLive = false;
   }
 
+  function handleViewNote(note: BranchNote, generating: boolean = false) {
+    viewingNote = note;
+    isNoteGenerating = generating;
+    showNoteViewer = true;
+  }
+
+  function closeNoteViewer() {
+    showNoteViewer = false;
+    viewingNote = null;
+    isNoteGenerating = false;
+  }
+
   function handleSessionStarted(branchSessionId: string, aiSessionId: string) {
-    console.log('Continue session started:', { branchSessionId, aiSessionId });
+    console.log('Session started:', { branchSessionId, aiSessionId });
     showContinueModal = false;
-    // Reload data to show the new running session
     loadData();
   }
+
+  function handleNoteStarted(branchNoteId: string, aiSessionId: string) {
+    console.log('Note started:', { branchNoteId, aiSessionId });
+    showNewNoteModal = false;
+    loadData();
+  }
+
+  function handleNewCommit() {
+    showNewDropdown = false;
+    onNewSession?.();
+  }
+
+  function handleNewNote() {
+    showNewDropdown = false;
+    showNewNoteModal = true;
+  }
+
+  function toggleDropdown() {
+    showNewDropdown = !showNewDropdown;
+  }
+
+  // Close dropdown when clicking outside
+  function handleClickOutside(e: MouseEvent) {
+    const target = e.target as HTMLElement;
+    if (!target.closest('.new-dropdown-container')) {
+      showNewDropdown = false;
+    }
+  }
 </script>
+
+<svelte:window on:click={handleClickOutside} />
 
 <div class="branch-card">
   <div class="card-header">
@@ -165,23 +285,32 @@
         <Loader2 size={14} class="spinner" />
         <span>Loading...</span>
       </div>
+    {:else if timeline.length === 0}
+      <p class="no-items">No commits or notes yet</p>
     {:else}
-      <!-- Commits list (with running session as skeleton at top) -->
-      {#if commits.length > 0 || runningSession}
-        <div class="commits-list">
-          <!-- Running session as skeleton commit -->
-          {#if runningSession}
-            <button class="commit-row skeleton-commit" onclick={handleWatchSession}>
-              <div class="commit-marker">
-                <Loader2 size={12} class="spinner skeleton-spinner" />
-                {#if commits.length > 0}
-                  <div class="commit-line"></div>
+      <div class="timeline">
+        {#each timeline as item, index (item.type === 'commit' ? item.commit.sha : item.type === 'note' ? item.note.id : item.type === 'running-session' ? 'running' : 'generating')}
+          {#if item.type === 'generating-note'}
+            <!-- Generating note skeleton -->
+            <button
+              class="timeline-row skeleton-row"
+              onclick={() => handleViewNote(item.note, true)}
+            >
+              <div class="timeline-marker">
+                <Loader2 size={12} class="spinner note-spinner" />
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
                 {/if}
               </div>
-              <div class="commit-info">
-                <span class="commit-subject skeleton-subject">{runningSession.prompt}</span>
-                <div class="commit-meta">
-                  <span class="commit-sha skeleton-sha">generating...</span>
+              <div class="timeline-content">
+                <div class="timeline-icon note-icon generating">
+                  <FileText size={12} />
+                </div>
+                <div class="timeline-info">
+                  <span class="timeline-title skeleton-title">{item.note.title}</span>
+                  <div class="timeline-meta">
+                    <span class="skeleton-meta">generating...</span>
+                  </div>
                 </div>
               </div>
               <div class="watch-button">
@@ -189,63 +318,132 @@
                 Watch
               </div>
             </button>
-          {/if}
-
-          <!-- Real commits -->
-          {#each commits as commit, index (commit.sha)}
-            {@const commitSession = sessionsByCommit.get(commit.sha)}
-            <div class="commit-row" class:is-head={index === 0 && !runningSession}>
-              <div class="commit-marker">
-                {#if index === 0 && !runningSession}
-                  <div class="head-marker"></div>
-                {:else}
-                  <div class="commit-dot"></div>
-                {/if}
-                {#if index < commits.length - 1}
-                  <div class="commit-line"></div>
+          {:else if item.type === 'running-session'}
+            <!-- Running session skeleton -->
+            <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
+              <div class="timeline-marker">
+                <Loader2 size={12} class="spinner commit-spinner" />
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
                 {/if}
               </div>
-              <div class="commit-info">
-                <span class="commit-subject">{commit.subject}</span>
-                <div class="commit-meta">
-                  <span class="commit-sha">{commit.shortSha}</span>
-                  <span class="commit-time">{formatRelativeTime(commit.timestamp)}</span>
+              <div class="timeline-content">
+                <div class="timeline-icon commit-icon generating">
+                  <GitCommit size={12} />
+                </div>
+                <div class="timeline-info">
+                  <span class="timeline-title skeleton-title">{item.session.prompt}</span>
+                  <div class="timeline-meta">
+                    <span class="skeleton-meta">generating...</span>
+                  </div>
                 </div>
               </div>
-              <div class="commit-actions">
-                <!-- View button for commits with saved sessions -->
-                {#if commitSession}
+              <div class="watch-button">
+                <MessageSquare size={12} />
+                Watch
+              </div>
+            </button>
+          {:else if item.type === 'commit'}
+            <!-- Commit row -->
+            <div class="timeline-row" class:is-head={item.isHead}>
+              <div class="timeline-marker">
+                {#if item.isHead}
+                  <div class="head-marker"></div>
+                {:else}
+                  <div class="timeline-dot commit-dot"></div>
+                {/if}
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
+              </div>
+              <div class="timeline-content">
+                <div class="timeline-icon commit-icon">
+                  <GitCommit size={12} />
+                </div>
+                <div class="timeline-info">
+                  <span class="timeline-title">{item.commit.subject}</span>
+                  <div class="timeline-meta">
+                    <span class="commit-sha">{item.commit.shortSha}</span>
+                    <span class="timeline-time">{formatRelativeTime(item.commit.timestamp)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="timeline-actions">
+                {#if item.session}
                   <button
-                    class="view-button"
-                    onclick={() => handleViewSession(commitSession)}
+                    class="action-btn"
+                    onclick={() => handleViewSession(item.session!)}
                     title="View session"
                   >
                     <Eye size={12} />
                     View
                   </button>
                 {/if}
-                <!-- Continue button only on most recent commit (HEAD) when no running session -->
-                {#if index === 0 && !runningSession}
-                  <button class="continue-button" onclick={handleContinue}>
+                {#if item.isHead}
+                  <button class="action-btn" onclick={handleContinue}>
                     <Play size={12} />
                     Continue
                   </button>
                 {/if}
               </div>
             </div>
-          {/each}
-        </div>
-      {:else if !runningSession}
-        <p class="no-commits">No commits yet</p>
-      {/if}
+          {:else if item.type === 'note'}
+            <!-- Note row -->
+            <button class="timeline-row note-row" onclick={() => handleViewNote(item.note)}>
+              <div class="timeline-marker">
+                <div class="timeline-dot note-dot"></div>
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
+              </div>
+              <div class="timeline-content">
+                <div class="timeline-icon note-icon">
+                  <FileText size={12} />
+                </div>
+                <div class="timeline-info">
+                  <span class="timeline-title">{item.note.title}</span>
+                  <div class="timeline-meta">
+                    <span class="timeline-time">{formatRelativeTimeMs(item.note.createdAt)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="timeline-actions">
+                <span class="view-hint">
+                  <Eye size={12} />
+                  View
+                </span>
+              </div>
+            </button>
+          {/if}
+        {/each}
+      </div>
     {/if}
   </div>
 
   <div class="card-footer">
-    <button class="new-session-button" onclick={onNewSession} disabled={!!runningSession}>
-      <Plus size={14} />
-      New Session
-    </button>
+    <div class="new-dropdown-container">
+      <button
+        class="new-button"
+        onclick={toggleDropdown}
+        disabled={!!runningSession || !!generatingNote}
+      >
+        <Plus size={14} />
+        New
+        <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
+      </button>
+      {#if showNewDropdown}
+        <div class="dropdown-menu">
+          <button class="dropdown-item" onclick={handleNewCommit}>
+            <GitCommit size={14} />
+            New Commit
+          </button>
+          <button class="dropdown-item" onclick={handleNewNote}>
+            <FileText size={14} />
+            New Note
+          </button>
+        </div>
+      {/if}
+    </div>
   </div>
 </div>
 
@@ -259,12 +457,26 @@
   />
 {/if}
 
+<!-- Note viewer modal -->
+{#if showNoteViewer && viewingNote}
+  <NoteViewerModal note={viewingNote} isLive={isNoteGenerating} onClose={closeNoteViewer} />
+{/if}
+
 <!-- Continue session modal -->
 {#if showContinueModal}
   <NewSessionModal
     {branch}
     onClose={() => (showContinueModal = false)}
     onSessionStarted={handleSessionStarted}
+  />
+{/if}
+
+<!-- New note modal -->
+{#if showNewNoteModal}
+  <NewNoteModal
+    {branch}
+    onClose={() => (showNewNoteModal = false)}
+    onNoteStarted={handleNoteStarted}
   />
 {/if}
 
@@ -353,25 +565,60 @@
     font-size: var(--size-sm);
   }
 
-  /* Commits list */
-  .commits-list {
+  .no-items {
+    margin: 0;
+    font-size: var(--size-sm);
+    color: var(--text-faint);
+    font-style: italic;
+  }
+
+  /* Timeline */
+  .timeline {
     display: flex;
     flex-direction: column;
   }
 
-  .commit-row {
+  .timeline-row {
     display: flex;
     align-items: flex-start;
-    gap: 12px;
+    gap: 10px;
     padding: 6px 0;
+    background: transparent;
+    border: none;
+    text-align: left;
+    width: 100%;
   }
 
-  .commit-marker {
+  .timeline-row.note-row {
+    cursor: pointer;
+    border-radius: 6px;
+    margin: -4px -6px;
+    padding: 10px 6px;
+    transition: background-color 0.15s ease;
+  }
+
+  .timeline-row.note-row:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .timeline-row.skeleton-row {
+    cursor: pointer;
+    border-radius: 6px;
+    margin: -4px -6px;
+    padding: 10px 6px;
+    transition: background-color 0.15s ease;
+  }
+
+  .timeline-row.skeleton-row:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .timeline-marker {
     display: flex;
     flex-direction: column;
     align-items: center;
     width: 12px;
-    padding-top: 4px;
+    padding-top: 6px;
   }
 
   .head-marker {
@@ -384,14 +631,21 @@
       0 0 0 3px var(--ui-accent);
   }
 
-  .commit-dot {
+  .timeline-dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
+  }
+
+  .commit-dot {
     background-color: var(--border-emphasis);
   }
 
-  .commit-line {
+  .note-dot {
+    background-color: var(--text-accent);
+  }
+
+  .timeline-line {
     flex: 1;
     width: 2px;
     min-height: 20px;
@@ -399,12 +653,50 @@
     margin-top: 4px;
   }
 
-  .commit-info {
+  .timeline-content {
+    flex: 1;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .timeline-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+
+  .commit-icon {
+    background-color: rgba(63, 185, 80, 0.15);
+    color: var(--status-added);
+  }
+
+  .commit-icon.generating {
+    background-color: rgba(63, 185, 80, 0.1);
+    color: var(--status-added);
+  }
+
+  .note-icon {
+    background-color: rgba(88, 166, 255, 0.15);
+    color: var(--text-accent);
+  }
+
+  .note-icon.generating {
+    background-color: rgba(88, 166, 255, 0.1);
+    color: var(--text-accent);
+  }
+
+  .timeline-info {
     flex: 1;
     min-width: 0;
   }
 
-  .commit-subject {
+  .timeline-title {
     display: block;
     font-size: var(--size-sm);
     color: var(--text-primary);
@@ -413,7 +705,12 @@
     white-space: nowrap;
   }
 
-  .commit-meta {
+  .skeleton-title {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .timeline-meta {
     display: flex;
     align-items: center;
     gap: 8px;
@@ -426,20 +723,34 @@
     color: var(--text-faint);
   }
 
-  .commit-time {
+  .timeline-time {
     font-size: var(--size-xs);
     color: var(--text-faint);
   }
 
-  .commit-actions {
+  .skeleton-meta {
+    font-size: var(--size-xs);
+    color: var(--text-faint);
+    background: linear-gradient(
+      90deg,
+      var(--bg-hover) 25%,
+      var(--bg-primary) 50%,
+      var(--bg-hover) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+
+  .timeline-actions {
     display: flex;
     align-items: center;
     gap: 6px;
     flex-shrink: 0;
   }
 
-  .view-button,
-  .continue-button {
+  .action-btn {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -454,90 +765,26 @@
     flex-shrink: 0;
   }
 
-  .view-button:hover,
-  .continue-button:hover {
+  .action-btn:hover {
     border-color: var(--ui-accent);
     color: var(--ui-accent);
     background-color: var(--bg-hover);
   }
 
-  .no-commits {
-    margin: 0;
-    font-size: var(--size-sm);
-    color: var(--text-faint);
-    font-style: italic;
-  }
-
-  /* Footer */
-  .card-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: 12px 16px;
-    border-top: 1px solid var(--border-subtle);
-  }
-
-  .new-session-button {
+  .view-hint {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background-color: transparent;
-    border: 1px solid var(--border-muted);
-    border-radius: 6px;
-    color: var(--text-muted);
-    font-size: var(--size-sm);
-    cursor: pointer;
-    transition: all 0.15s ease;
+    gap: 4px;
+    padding: 4px 10px;
+    color: var(--text-faint);
+    font-size: var(--size-xs);
+    opacity: 0;
+    transition: opacity 0.15s ease;
   }
 
-  .new-session-button:hover:not(:disabled) {
-    border-color: var(--ui-accent);
-    color: var(--ui-accent);
-    background-color: var(--bg-hover);
-  }
-
-  .new-session-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  /* Skeleton commit (running session) */
-  .skeleton-commit {
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    text-align: left;
-    width: 100%;
-    border-radius: 6px;
-    margin: -4px;
-    padding: 10px;
-    transition: background-color 0.15s ease;
-  }
-
-  .skeleton-commit:hover {
-    background-color: var(--bg-hover);
-  }
-
-  :global(.skeleton-spinner) {
-    color: var(--ui-accent);
-  }
-
-  .skeleton-subject {
-    color: var(--text-muted);
-    font-style: italic;
-  }
-
-  .skeleton-sha {
-    background: linear-gradient(
-      90deg,
-      var(--bg-hover) 25%,
-      var(--bg-primary) 50%,
-      var(--bg-hover) 75%
-    );
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
-    border-radius: 4px;
-    padding: 0 4px;
+  .note-row:hover .view-hint {
+    opacity: 1;
+    color: var(--text-accent);
   }
 
   .watch-button {
@@ -554,23 +801,104 @@
     flex-shrink: 0;
   }
 
-  .skeleton-commit:hover .watch-button {
+  .skeleton-row:hover .watch-button {
     border-color: var(--ui-accent);
     color: var(--ui-accent);
   }
 
-  @keyframes shimmer {
-    0% {
-      background-position: 200% 0;
-    }
-    100% {
-      background-position: -200% 0;
-    }
+  /* Footer */
+  .card-footer {
+    display: flex;
+    justify-content: flex-end;
+    padding: 12px 16px;
+    border-top: 1px solid var(--border-subtle);
   }
 
-  /* Spinner animation */
+  .new-dropdown-container {
+    position: relative;
+  }
+
+  .new-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .new-button:hover:not(:disabled) {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
+  }
+
+  .new-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  :global(.chevron) {
+    transition: transform 0.15s ease;
+  }
+
+  :global(.chevron.open) {
+    transform: rotate(180deg);
+  }
+
+  .dropdown-menu {
+    position: absolute;
+    bottom: 100%;
+    right: 0;
+    margin-bottom: 4px;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    z-index: 100;
+    min-width: 140px;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    text-align: left;
+  }
+
+  .dropdown-item:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .dropdown-item :global(svg) {
+    color: var(--text-muted);
+  }
+
+  /* Spinner animations */
   :global(.spinner) {
     animation: spin 1s linear infinite;
+  }
+
+  :global(.commit-spinner) {
+    color: var(--status-added);
+  }
+
+  :global(.note-spinner) {
+    color: var(--text-accent);
   }
 
   @keyframes spin {
@@ -579,6 +907,15 @@
     }
     to {
       transform: rotate(360deg);
+    }
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
     }
   }
 </style>

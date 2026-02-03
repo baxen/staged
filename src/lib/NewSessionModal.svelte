@@ -37,6 +37,21 @@
     return parts[parts.length - 1] || path;
   }
 
+  // Build the full prompt with instructions for commit-focused work
+  function buildCommitPrompt(userPrompt: string): string {
+    return `You are working on a feature branch. Your goal is to complete the following task and create a git commit with your changes.
+
+TASK: ${userPrompt}
+
+Guidelines:
+- Make the necessary code changes to complete the task
+- When finished, create a git commit with a clear, descriptive commit message
+- The commit message should summarize what was done
+- Keep changes focused and atomic - one logical change per session
+
+Begin working on the task now.`;
+  }
+
   async function handleStart() {
     if (!prompt.trim()) return;
 
@@ -44,7 +59,8 @@
     error = null;
 
     try {
-      const result = await startBranchSession(branch.id, prompt.trim());
+      const fullPrompt = buildCommitPrompt(prompt.trim());
+      const result = await startBranchSession(branch.id, fullPrompt);
 
       // Notify parent that session started
       onSessionStarted?.(result.branchSessionId, result.aiSessionId);

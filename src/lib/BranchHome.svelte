@@ -61,7 +61,7 @@
   /**
    * Handle AI session status changes.
    * When an AI session transitions to 'idle', look up the corresponding branch session
-   * and mark it as completed (checking for new commits).
+   * or note and mark it as completed.
    */
   async function handleSessionStatus(event: SessionStatusEvent) {
     // Only care about transitions to idle (session complete)
@@ -69,25 +69,23 @@
       return;
     }
 
-    // Look up the branch session by AI session ID
+    // First, check if this is a branch session (commit)
     const branchSession = await branchService.getBranchSessionByAiSession(event.sessionId);
-    if (!branchSession) {
-      // Not a branch session (might be a chat session)
+    if (branchSession && branchSession.status === 'running') {
+      console.log('AI session completed, recovering branch session:', branchSession.id);
+      await branchService.recoverOrphanedSession(branchSession.branchId);
+      refreshKey++;
       return;
     }
 
-    // Only process if it's still marked as running
-    if (branchSession.status !== 'running') {
+    // Next, check if this is a branch note
+    const branchNote = await branchService.getBranchNoteByAiSession(event.sessionId);
+    if (branchNote && branchNote.status === 'generating') {
+      console.log('AI session completed, recovering branch note:', branchNote.id);
+      await branchService.recoverOrphanedNote(branchNote.branchId);
+      refreshKey++;
       return;
     }
-
-    console.log('AI session completed, recovering branch session:', branchSession.id);
-
-    // Use the recovery mechanism to check for commits and update status
-    await branchService.recoverOrphanedSession(branchSession.branchId);
-
-    // Trigger UI refresh
-    refreshKey++;
   }
 
   async function loadBranches() {
