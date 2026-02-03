@@ -235,6 +235,7 @@ impl agent_client_protocol::Client for StagedAcpClient {
     async fn session_notification(&self, notification: SessionNotification) -> AcpResult<()> {
         use agent_client_protocol::SessionUpdate;
 
+        log::debug!("[ACP Notification] session_notification: {:?}", notification);
         match &notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let AcpContentBlock::Text(text) = &chunk.content {
@@ -242,9 +243,7 @@ impl agent_client_protocol::Client for StagedAcpClient {
                     accumulated.push_str(&text.text);
                 }
             }
-            _ => {
-                log::debug!("Ignoring session update: {:?}", notification.update);
-            }
+            _ => {}
         }
 
         Ok(())
@@ -386,10 +385,12 @@ async fn run_acp_session_inner(
     let client_info = Implementation::new("staged", env!("CARGO_PKG_VERSION"));
     let init_request = InitializeRequest::new(ProtocolVersion::LATEST).client_info(client_info);
 
+    log::debug!("[ACP Request] initialize: {:?}", init_request);
     let init_response = connection
         .initialize(init_request)
         .await
         .map_err(|e| format!("Failed to initialize ACP connection: {:?}", e))?;
+    log::debug!("[ACP Response] initialize: {:?}", init_response);
 
     if let Some(agent_info) = &init_response.agent_info {
         log::info!(
@@ -407,31 +408,40 @@ async fn run_acp_session_inner(
             let load_request =
                 LoadSessionRequest::new(SessionId::new(existing_id), working_dir.to_path_buf());
 
+            log::debug!("[ACP Request] load_session: {:?}", load_request);
             match connection.load_session(load_request).await {
-                Ok(_) => {
+                Ok(load_response) => {
+                    log::debug!("[ACP Response] load_session: {:?}", load_response);
                     log::info!("Resumed session: {}", existing_id);
                     (SessionId::new(existing_id), false)
                 }
                 Err(e) => {
                     // Session not found or error - create a new one
+                    log::debug!("[ACP Response] load_session error: {:?}", e);
                     log::warn!(
                         "Failed to load session {}: {:?}, creating new session",
                         existing_id,
                         e
                     );
+                    let new_session_request = NewSessionRequest::new(working_dir.to_path_buf());
+                    log::debug!("[ACP Request] new_session: {:?}", new_session_request);
                     let session_response = connection
-                        .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
+                        .new_session(new_session_request)
                         .await
                         .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
+                    log::debug!("[ACP Response] new_session: {:?}", session_response);
                     (session_response.session_id, true)
                 }
             }
         } else {
             // Create new session
+            let new_session_request = NewSessionRequest::new(working_dir.to_path_buf());
+            log::debug!("[ACP Request] new_session: {:?}", new_session_request);
             let session_response = connection
-                .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
+                .new_session(new_session_request)
                 .await
                 .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
+            log::debug!("[ACP Response] new_session: {:?}", session_response);
             log::info!("Created new session: {}", session_response.session_id.0);
             (session_response.session_id, true)
         };
@@ -453,10 +463,12 @@ async fn run_acp_session_inner(
         vec![AcpContentBlock::Text(TextContent::new(full_prompt))],
     );
 
-    connection
+    log::debug!("[ACP Request] prompt: {:?}", prompt_request);
+    let prompt_response = connection
         .prompt(prompt_request)
         .await
         .map_err(|e| format!("Failed to send prompt: {:?}", e))?;
+    log::debug!("[ACP Response] prompt: {:?}", prompt_response);
 
     // Clean up the child process
     let _ = child.kill().await;
