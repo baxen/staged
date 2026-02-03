@@ -142,8 +142,7 @@ pub fn discover_acp_providers() -> Vec<AcpProviderInfo> {
         });
     }
 
-    // For testing: change "claude-code-acp" to "claude-code-acp-fake" to simulate not installed
-    if find_agent("claude-code-acp-fake", AcpAgent::Claude).is_some() {
+    if find_agent("claude-code-acp", AcpAgent::Claude).is_some() {
         providers.push(AcpProviderInfo {
             id: "claude".to_string(),
             label: "Claude Code".to_string(),
