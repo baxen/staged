@@ -32,6 +32,13 @@ export async function installCli(): Promise<string> {
 }
 
 /**
+ * Open a URL in the default browser.
+ */
+export async function openUrl(url: string): Promise<void> {
+  return invoke<void>('open_url', { url });
+}
+
+/**
  * Get the current window instance.
  */
 export { getCurrentWindow };

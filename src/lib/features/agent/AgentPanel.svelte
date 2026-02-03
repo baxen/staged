@@ -37,6 +37,7 @@
     type AgentState,
   } from '../../stores/agent.svelte';
   import { commentsState } from '../../stores/comments.svelte';
+  import { preferences } from '../../stores/preferences.svelte';
   import type { DiffSpec, FileDiffSummary } from '../../types';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
@@ -129,8 +130,16 @@
           agentGlobalState.availableProviders = providers;
           agentGlobalState.providersLoaded = true;
 
-          // If current provider is not available, switch to first available valid one
-          if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
+          // Use saved preference if available, otherwise fall back to first available
+          const savedAgent = preferences.aiAgent;
+          if (
+            savedAgent &&
+            providers.some((p) => p.id === savedAgent) &&
+            isValidProvider(savedAgent)
+          ) {
+            agentState.provider = savedAgent as AcpProvider;
+          } else if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
+            // If current provider is not available, switch to first available valid one
             const firstValidId = providers.map((p) => p.id).find(isValidProvider);
             if (firstValidId) {
               agentState.provider = firstValidId;
@@ -140,6 +149,16 @@
         .catch((e) => {
           console.error('Failed to discover ACP providers:', e);
         });
+    } else {
+      // Providers already loaded - check if we should use the saved preference
+      const savedAgent = preferences.aiAgent;
+      if (
+        savedAgent &&
+        agentGlobalState.availableProviders.some((p) => p.id === savedAgent) &&
+        isValidProvider(savedAgent)
+      ) {
+        agentState.provider = savedAgent as AcpProvider;
+      }
     }
 
     // Load artifacts from database
