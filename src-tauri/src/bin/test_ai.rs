@@ -76,7 +76,7 @@ async fn test_real_diff(range: &str, repo_path: &str) {
     // Run analysis - the backend handles file listing and content loading
     println!("Analyzing diff with AI via ACP (this may take a few seconds)...\n");
 
-    match ai::analyze_diff(repo, &spec).await {
+    match ai::analyze_diff(repo, &spec, None).await {
         Ok(result) => {
             println!("═══════════════════════════════════════════════════════════════");
             println!("                     CHANGESET ANALYSIS");

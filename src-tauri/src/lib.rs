@@ -546,15 +546,19 @@ fn check_ai_available() -> Result<String, String> {
 ///
 /// This is the main AI entry point - handles file listing, content loading,
 /// and AI analysis in one call. Frontend just provides the diff spec.
+///
+/// The provider parameter specifies which ACP provider to use (e.g., "goose" or "claude").
+/// If not specified, defaults to the first available provider.
 #[tauri::command(rename_all = "camelCase")]
 async fn analyze_diff(
     repo_path: Option<String>,
     spec: DiffSpec,
+    provider: Option<String>,
 ) -> Result<ChangesetAnalysis, String> {
     let path = get_repo_path(repo_path.as_deref()).to_path_buf();
 
     // analyze_diff is now async (uses ACP)
-    ai::analyze_diff(&path, &spec).await
+    ai::analyze_diff(&path, &spec, provider.as_deref()).await
 }
 
 /// Response from send_agent_prompt including session ID for continuity.
