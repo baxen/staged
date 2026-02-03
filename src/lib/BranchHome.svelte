@@ -13,6 +13,8 @@
   import { Plus, Sparkles, GitBranch } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession } from './services/branch';
   import * as branchService from './services/branch';
+  import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
+  import type { UnlistenFn } from '@tauri-apps/api/event';
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal from './NewBranchModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
@@ -21,6 +23,10 @@
   let branches = $state<Branch[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let refreshKey = $state(0);
+
+  // Event listener cleanup
+  let unlistenStatus: UnlistenFn | null = null;
 
   // Modal state
   let showNewBranchModal = $state(false);
@@ -44,10 +50,45 @@
     return parts[parts.length - 1] || path;
   }
 
-  // Load branches on mount
+  // Load branches on mount and set up session status listener
   onMount(async () => {
     await loadBranches();
+
+    // Listen for AI session status changes to update branch sessions
+    unlistenStatus = await listenToSessionStatus(handleSessionStatus);
   });
+
+  /**
+   * Handle AI session status changes.
+   * When an AI session transitions to 'idle', look up the corresponding branch session
+   * and mark it as completed (checking for new commits).
+   */
+  async function handleSessionStatus(event: SessionStatusEvent) {
+    // Only care about transitions to idle (session complete)
+    if (event.status.status !== 'idle') {
+      return;
+    }
+
+    // Look up the branch session by AI session ID
+    const branchSession = await branchService.getBranchSessionByAiSession(event.sessionId);
+    if (!branchSession) {
+      // Not a branch session (might be a chat session)
+      return;
+    }
+
+    // Only process if it's still marked as running
+    if (branchSession.status !== 'running') {
+      return;
+    }
+
+    console.log('AI session completed, recovering branch session:', branchSession.id);
+
+    // Use the recovery mechanism to check for commits and update status
+    await branchService.recoverOrphanedSession(branchSession.branchId);
+
+    // Trigger UI refresh
+    refreshKey++;
+  }
 
   async function loadBranches() {
     loading = true;
@@ -87,6 +128,12 @@
   function handleNewSession(branch: Branch) {
     sessionBranch = branch;
     showNewSessionModal = true;
+  }
+
+  function handleSessionStarted(branchSessionId: string, aiSessionId: string) {
+    console.log('Session started:', { branchSessionId, aiSessionId });
+    // Trigger refresh in all BranchCards
+    refreshKey++;
   }
 
   function handleViewDiff(branch: Branch) {
@@ -129,6 +176,7 @@
 
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown);
+    unlistenStatus?.();
   });
 </script>
 
@@ -165,6 +213,7 @@
               {#each repoBranches as branch (branch.id)}
                 <BranchCard
                   {branch}
+                  {refreshKey}
                   onNewSession={() => handleNewSession(branch)}
                   onViewDiff={() => handleViewDiff(branch)}
                   onDelete={() => handleDeleteBranch(branch.id)}
@@ -199,6 +248,7 @@
       showNewSessionModal = false;
       sessionBranch = null;
     }}
+    onSessionStarted={handleSessionStarted}
   />
 {/if}
 

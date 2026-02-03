@@ -7,13 +7,15 @@
 <script lang="ts">
   import { X, GitBranch, Loader2, Send } from 'lucide-svelte';
   import type { Branch } from './services/branch';
+  import { startBranchSession } from './services/branch';
 
   interface Props {
     branch: Branch;
     onClose: () => void;
+    onSessionStarted?: (branchSessionId: string, aiSessionId: string) => void;
   }
 
-  let { branch, onClose }: Props = $props();
+  let { branch, onClose, onSessionStarted }: Props = $props();
 
   // State
   let prompt = $state('');
@@ -42,15 +44,10 @@
     error = null;
 
     try {
-      // TODO: Wire up to session creation
-      // For now, just close the modal
-      console.log('Starting session with prompt:', prompt);
-      console.log('Branch:', branch.branchName);
-      console.log('Worktree:', branch.worktreePath);
+      const result = await startBranchSession(branch.id, prompt.trim());
 
-      // Simulate delay for now
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
+      // Notify parent that session started
+      onSessionStarted?.(result.branchSessionId, result.aiSessionId);
       onClose();
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);

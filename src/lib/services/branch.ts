@@ -26,6 +26,8 @@ export type BranchSessionStatus = 'running' | 'completed' | 'error';
 export interface BranchSession {
   id: string;
   branchId: string;
+  /** The AI session ID (for watching/resuming) */
+  aiSessionId: string | null;
   /** The commit SHA produced by this session (null while running) */
   commitSha: string | null;
   status: BranchSessionStatus;
@@ -131,4 +133,73 @@ export async function getSessionForCommit(
  */
 export async function getRunningSession(branchId: string): Promise<BranchSession | null> {
   return invoke<BranchSession | null>('get_running_session', { branchId });
+}
+
+// =============================================================================
+// Session Lifecycle
+// =============================================================================
+
+/** Response from starting a branch session */
+export interface StartBranchSessionResponse {
+  branchSessionId: string;
+  aiSessionId: string;
+}
+
+/**
+ * Start a new session on a branch.
+ * Creates a branch_session record, starts an AI session, and sends the prompt.
+ */
+export async function startBranchSession(
+  branchId: string,
+  prompt: string
+): Promise<StartBranchSessionResponse> {
+  return invoke<StartBranchSessionResponse>('start_branch_session', { branchId, prompt });
+}
+
+/**
+ * Mark a branch session as completed with a commit SHA.
+ */
+export async function completeBranchSession(
+  branchSessionId: string,
+  commitSha: string
+): Promise<void> {
+  return invoke<void>('complete_branch_session', { branchSessionId, commitSha });
+}
+
+/**
+ * Mark a branch session as failed with an error message.
+ */
+export async function failBranchSession(
+  branchSessionId: string,
+  errorMessage: string
+): Promise<void> {
+  return invoke<void>('fail_branch_session', { branchSessionId, errorMessage });
+}
+
+/**
+ * Cancel a running branch session (deletes the record).
+ * Used to recover from stuck sessions.
+ */
+export async function cancelBranchSession(branchSessionId: string): Promise<void> {
+  return invoke<void>('cancel_branch_session', { branchSessionId });
+}
+
+/**
+ * Recover orphaned sessions for a branch.
+ * If there's a "running" session but no live AI session, checks if commits were made
+ * and marks the session as completed or errored accordingly.
+ * Returns the updated session if one was recovered, null otherwise.
+ */
+export async function recoverOrphanedSession(branchId: string): Promise<BranchSession | null> {
+  return invoke<BranchSession | null>('recover_orphaned_session', { branchId });
+}
+
+/**
+ * Get a branch session by its AI session ID.
+ * Used to look up branch sessions when AI session status changes.
+ */
+export async function getBranchSessionByAiSession(
+  aiSessionId: string
+): Promise<BranchSession | null> {
+  return invoke<BranchSession | null>('get_branch_session_by_ai_session', { aiSessionId });
 }
