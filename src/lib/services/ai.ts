@@ -30,13 +30,15 @@ export async function checkAiAvailable(): Promise<string> {
  *
  * @param repoPath - Path to the repository (null for current directory)
  * @param spec - The diff specification (base..head)
+ * @param provider - Optional provider ID (e.g., 'goose' or 'claude')
  * @returns ChangesetAnalysis with summary, key changes, concerns, and per-file annotations
  */
 export async function analyzeDiff(
   repoPath: string | null,
-  spec: DiffSpec
+  spec: DiffSpec,
+  provider?: string | null
 ): Promise<ChangesetAnalysis> {
-  return invoke<ChangesetAnalysis>('analyze_diff', { repoPath, spec });
+  return invoke<ChangesetAnalysis>('analyze_diff', { repoPath, spec, provider: provider ?? null });
 }
 
 // =============================================================================

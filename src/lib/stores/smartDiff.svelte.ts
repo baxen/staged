@@ -19,6 +19,7 @@ import {
   deleteAllAnalyses,
   saveAiComments,
 } from '../services/ai';
+import { preferences } from './preferences.svelte';
 
 // =============================================================================
 // State
@@ -117,7 +118,8 @@ export async function runAnalysis(
 
   try {
     // Single backend call handles everything
-    const result = await analyzeDiff(repoPath, spec);
+    // Use the user's preferred AI agent if set
+    const result = await analyzeDiff(repoPath, spec, preferences.aiAgent);
 
     // Store changeset summary
     const summary: ChangesetSummary = {

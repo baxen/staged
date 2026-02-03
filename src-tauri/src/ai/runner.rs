@@ -5,16 +5,20 @@
 
 use std::path::Path;
 
-use super::acp_client::{find_acp_agent, run_acp_prompt, AcpAgent};
+use super::acp_client::{find_acp_agent, find_acp_agent_by_id, run_acp_prompt, AcpAgent};
 use super::prompt::{build_prompt_with_strategy, FileAnalysisInput, LARGE_FILE_THRESHOLD};
 use super::types::ChangesetAnalysis;
 use crate::git::{self, DiffSpec, FileContent};
 
-/// Find an available AI agent.
+/// Find an available AI agent, optionally by provider ID.
 ///
-/// Currently supports Goose via ACP.
-pub fn find_ai_tool() -> Option<AcpAgent> {
-    find_acp_agent()
+/// If `provider` is specified, looks for that specific provider.
+/// Otherwise, returns the default (Goose if available, then Claude).
+pub fn find_ai_tool(provider: Option<&str>) -> Option<AcpAgent> {
+    match provider {
+        Some(id) => find_acp_agent_by_id(id),
+        None => find_acp_agent(),
+    }
 }
 
 /// Check if output contains a context window error.
@@ -92,11 +96,19 @@ fn load_after_content_if_small(
 /// 4. Running AI analysis via ACP
 /// 5. Returning the complete result
 ///
-/// The frontend just needs to provide the diff spec.
-pub async fn analyze_diff(repo_path: &Path, spec: &DiffSpec) -> Result<ChangesetAnalysis, String> {
+/// The frontend just needs to provide the diff spec and optionally a provider ID.
+pub async fn analyze_diff(
+    repo_path: &Path,
+    spec: &DiffSpec,
+    provider: Option<&str>,
+) -> Result<ChangesetAnalysis, String> {
     // Find AI agent first (fail fast)
-    let agent = find_ai_tool().ok_or_else(|| {
-        "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
+    let agent = find_ai_tool(provider).ok_or_else(|| match provider {
+        Some(id) => format!(
+            "Provider '{}' not found. Run discover_acp_providers to see available providers.",
+            id
+        ),
+        None => "No AI agent found. Install Goose: https://github.com/block/goose".to_string(),
     })?;
 
     // List files in the diff
