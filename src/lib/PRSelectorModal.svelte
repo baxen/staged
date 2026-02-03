@@ -564,6 +564,7 @@
 
   .search-indicator :global(.spinner) {
     animation: spin 1s linear infinite;
+    transform-origin: center;
   }
 
   /* PR list */
