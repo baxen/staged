@@ -2,11 +2,11 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
 // =============================================================================
-// Types - Chat Sessions (new architecture)
+// Types - Sessions
 // =============================================================================
 
-/** A chat session (persisted in SQLite) */
-export interface ChatSession {
+/** A session (persisted in SQLite) */
+export interface Session {
   id: string;
   workingDir: string;
   agentId: string;
@@ -18,8 +18,8 @@ export interface ChatSession {
 /** Message role */
 export type MessageRole = 'user' | 'assistant';
 
-/** A message in a chat session */
-export interface ChatMessage {
+/** A message in a session */
+export interface Message {
   id: number;
   sessionId: string;
   role: MessageRole;
@@ -34,9 +34,9 @@ export type ContentSegment =
   | { type: 'toolCall'; id: string; title: string; status: string; locations?: string[] };
 
 /** Full session with all messages */
-export interface ChatSessionFull {
-  session: ChatSession;
-  messages: ChatMessage[];
+export interface SessionFull {
+  session: Session;
+  messages: Message[];
 }
 
 /** Parse assistant message content into segments */
@@ -139,68 +139,68 @@ export interface SessionErrorEvent {
 }
 
 // =============================================================================
-// Chat Session Commands (new architecture)
+// Session Commands
 // =============================================================================
 
 /**
- * Create a new chat session.
+ * Create a new session.
  * Returns the session ID.
  */
-export async function createChatSession(workingDir: string, agentId?: string): Promise<string> {
-  return invoke<string>('create_chat_session', {
+export async function createSession(workingDir: string, agentId?: string): Promise<string> {
+  return invoke<string>('create_session', {
     workingDir,
     agentId: agentId ?? null,
   });
 }
 
 /**
- * List all chat sessions.
+ * List all sessions.
  */
-export async function listChatSessions(): Promise<ChatSession[]> {
-  return invoke<ChatSession[]>('list_chat_sessions');
+export async function listSessions(): Promise<Session[]> {
+  return invoke<Session[]>('list_sessions');
 }
 
 /**
- * List chat sessions for a specific working directory.
+ * List sessions for a specific working directory.
  */
-export async function listChatSessionsForDir(workingDir: string): Promise<ChatSession[]> {
-  return invoke<ChatSession[]>('list_chat_sessions_for_dir', { workingDir });
+export async function listSessionsForDir(workingDir: string): Promise<Session[]> {
+  return invoke<Session[]>('list_sessions_for_dir', { workingDir });
 }
 
 /**
- * Get full session with all messages and tool calls.
+ * Get full session with all messages.
  */
-export async function getChatSession(sessionId: string): Promise<ChatSessionFull | null> {
-  return invoke<ChatSessionFull | null>('get_chat_session', { sessionId });
+export async function getSession(sessionId: string): Promise<SessionFull | null> {
+  return invoke<SessionFull | null>('get_session', { sessionId });
 }
 
 /**
  * Get session status (idle, processing, error).
  */
-export async function getChatSessionStatus(sessionId: string): Promise<SessionStatus> {
-  return invoke<SessionStatus>('get_chat_session_status', { sessionId });
+export async function getSessionStatus(sessionId: string): Promise<SessionStatus> {
+  return invoke<SessionStatus>('get_session_status', { sessionId });
 }
 
 /**
- * Send a prompt to a chat session.
+ * Send a prompt to a session.
  * Streams response via events, persists on completion.
  */
-export async function sendChatPrompt(sessionId: string, prompt: string): Promise<void> {
-  return invoke<void>('send_chat_prompt', { sessionId, prompt });
+export async function sendPrompt(sessionId: string, prompt: string): Promise<void> {
+  return invoke<void>('send_prompt', { sessionId, prompt });
 }
 
 /**
- * Delete a chat session.
+ * Delete a session.
  */
-export async function deleteChatSession(sessionId: string): Promise<void> {
-  return invoke<void>('delete_chat_session', { sessionId });
+export async function deleteSession(sessionId: string): Promise<void> {
+  return invoke<void>('delete_session', { sessionId });
 }
 
 /**
- * Update chat session title.
+ * Update session title.
  */
-export async function updateChatSessionTitle(sessionId: string, title: string): Promise<void> {
-  return invoke<void>('update_chat_session_title', { sessionId, title });
+export async function updateSessionTitle(sessionId: string, title: string): Promise<void> {
+  return invoke<void>('update_session_title', { sessionId, title });
 }
 
 // =============================================================================
@@ -306,3 +306,20 @@ export async function listenToSessionError(
     callback(event.payload);
   });
 }
+
+// =============================================================================
+// Backward Compatibility Aliases
+// =============================================================================
+
+// These aliases allow existing code to work without changes
+export type ChatSession = Session;
+export type ChatMessage = Message;
+export type ChatSessionFull = SessionFull;
+export const createChatSession = createSession;
+export const listChatSessions = listSessions;
+export const listChatSessionsForDir = listSessionsForDir;
+export const getChatSession = getSession;
+export const getChatSessionStatus = getSessionStatus;
+export const sendChatPrompt = sendPrompt;
+export const deleteChatSession = deleteSession;
+export const updateChatSessionTitle = updateSessionTitle;

@@ -84,7 +84,7 @@ export async function updateArtifact(
  * Delete an artifact.
  */
 export async function deleteArtifact(artifactId: string): Promise<void> {
-  return invoke('delete_project_artifact', { artifactId });
+  return invoke('delete_artifact', { artifactId });
 }
 
 // =============================================================================

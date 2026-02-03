@@ -8,10 +8,11 @@ pub mod git;
 pub mod project;
 mod recent_repos;
 pub mod review;
+pub mod store;
 mod themes;
 mod watcher;
 
-use ai::{ChatSessionFull, ChatStore, SessionManager, SessionStatus};
+use ai::{SessionManager, SessionStatus};
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
     PullRequest,
@@ -19,6 +20,7 @@ use git::{
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use store::{now_timestamp, Session, SessionFull, Store};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
@@ -615,10 +617,10 @@ async fn send_agent_prompt_streaming(
 // Chat Session Commands (new architecture)
 // =============================================================================
 
-/// Create a new chat session.
+/// Create a new session.
 /// Returns the session ID.
 #[tauri::command(rename_all = "camelCase")]
-async fn create_chat_session(
+async fn create_session(
     state: State<'_, Arc<SessionManager>>,
     working_dir: String,
     agent_id: Option<String>,
@@ -628,29 +630,29 @@ async fn create_chat_session(
         .await
 }
 
-/// List all chat sessions (from database).
+/// List all sessions (from database).
 #[tauri::command(rename_all = "camelCase")]
-fn list_chat_sessions(state: State<'_, Arc<ChatStore>>) -> Result<Vec<ai::ChatSession>, String> {
+fn list_sessions(state: State<'_, Arc<Store>>) -> Result<Vec<Session>, String> {
     state.list_sessions().map_err(|e| e.to_string())
 }
 
-/// List chat sessions for a specific working directory.
+/// List sessions for a specific working directory.
 #[tauri::command(rename_all = "camelCase")]
-fn list_chat_sessions_for_dir(
-    state: State<'_, Arc<ChatStore>>,
+fn list_sessions_for_dir(
+    state: State<'_, Arc<Store>>,
     working_dir: String,
-) -> Result<Vec<ai::ChatSession>, String> {
+) -> Result<Vec<Session>, String> {
     state
         .list_sessions_for_dir(&working_dir)
         .map_err(|e| e.to_string())
 }
 
-/// Get full session with all messages and tool calls.
+/// Get full session with all messages.
 #[tauri::command(rename_all = "camelCase")]
-fn get_chat_session(
-    state: State<'_, Arc<ChatStore>>,
+fn get_session(
+    state: State<'_, Arc<Store>>,
     session_id: String,
-) -> Result<Option<ChatSessionFull>, String> {
+) -> Result<Option<SessionFull>, String> {
     state
         .get_session_full(&session_id)
         .map_err(|e| e.to_string())
@@ -658,17 +660,17 @@ fn get_chat_session(
 
 /// Get session status (idle, processing, error).
 #[tauri::command(rename_all = "camelCase")]
-async fn get_chat_session_status(
+async fn get_session_status(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
 ) -> Result<SessionStatus, String> {
     state.get_session_status(&session_id).await
 }
 
-/// Send a prompt to a chat session.
+/// Send a prompt to a session.
 /// Streams response via events, persists to database on completion.
 #[tauri::command(rename_all = "camelCase")]
-async fn send_chat_prompt(
+async fn send_prompt(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
     prompt: String,
@@ -676,16 +678,16 @@ async fn send_chat_prompt(
     state.send_prompt(&session_id, prompt).await
 }
 
-/// Delete a chat session (removes from database).
+/// Delete a session (removes from database).
 #[tauri::command(rename_all = "camelCase")]
-fn delete_chat_session(state: State<'_, Arc<ChatStore>>, session_id: String) -> Result<(), String> {
+fn delete_session(state: State<'_, Arc<Store>>, session_id: String) -> Result<(), String> {
     state.delete_session(&session_id).map_err(|e| e.to_string())
 }
 
-/// Update chat session title.
+/// Update session title.
 #[tauri::command(rename_all = "camelCase")]
-fn update_chat_session_title(
-    state: State<'_, Arc<ChatStore>>,
+fn update_session_title(
+    state: State<'_, Arc<Store>>,
     session_id: String,
     title: String,
 ) -> Result<(), String> {
@@ -800,142 +802,141 @@ fn remove_reference_file(
 }
 
 // =============================================================================
-// Project Commands (new artifact-centric model)
+// Project Commands (artifact-centric model)
 // =============================================================================
 
-use project::{Artifact as ProjectArtifact, ArtifactData, ArtifactStatus, Project, Session};
+use project::{Artifact as ProjectArtifact, ArtifactData, ArtifactStatus, Project};
 
 /// Create a new project.
 #[tauri::command(rename_all = "camelCase")]
-fn create_project(name: String) -> Result<Project, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
+fn create_project(state: State<'_, Arc<Store>>, name: String) -> Result<Project, String> {
     let project = Project::new(name);
-    store.create_project(&project).map_err(|e| e.0)?;
+    state.create_project(&project).map_err(|e| e.to_string())?;
     Ok(project)
 }
 
 /// Get a project by ID.
 #[tauri::command(rename_all = "camelCase")]
-fn get_project(project_id: String) -> Result<Option<Project>, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.get_project(&project_id).map_err(|e| e.0)
+fn get_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Option<Project>, String> {
+    state.get_project(&project_id).map_err(|e| e.to_string())
 }
 
 /// List all projects.
 #[tauri::command(rename_all = "camelCase")]
-fn list_projects() -> Result<Vec<Project>, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.list_projects().map_err(|e| e.0)
+fn list_projects(state: State<'_, Arc<Store>>) -> Result<Vec<Project>, String> {
+    state.list_projects().map_err(|e| e.to_string())
 }
 
 /// Update a project's name.
 #[tauri::command(rename_all = "camelCase")]
-fn update_project(project_id: String, name: String) -> Result<(), String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.update_project(&project_id, &name).map_err(|e| e.0)
+fn update_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+    name: String,
+) -> Result<(), String> {
+    state
+        .update_project(&project_id, &name)
+        .map_err(|e| e.to_string())
 }
 
 /// Delete a project and all its artifacts.
 #[tauri::command(rename_all = "camelCase")]
-fn delete_project(project_id: String) -> Result<(), String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.delete_project(&project_id).map_err(|e| e.0)
+fn delete_project(state: State<'_, Arc<Store>>, project_id: String) -> Result<(), String> {
+    state.delete_project(&project_id).map_err(|e| e.to_string())
 }
 
 /// Create a new artifact.
 #[tauri::command(rename_all = "camelCase")]
 fn create_artifact(
+    state: State<'_, Arc<Store>>,
     project_id: String,
     title: String,
     data: ArtifactData,
 ) -> Result<ProjectArtifact, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    let now = chrono::Utc::now().to_rfc3339();
+    let now = now_timestamp();
     let artifact = ProjectArtifact {
         id: uuid::Uuid::new_v4().to_string(),
         project_id,
         title,
-        created_at: now.clone(),
+        created_at: now,
         updated_at: now,
         parent_artifact_id: None,
         data,
         status: ArtifactStatus::Complete,
         error_message: None,
     };
-    store.create_artifact(&artifact).map_err(|e| e.0)?;
+    state
+        .create_artifact(&artifact)
+        .map_err(|e| e.to_string())?;
     Ok(artifact)
 }
 
 /// Get an artifact by ID.
 #[tauri::command(rename_all = "camelCase")]
-fn get_artifact(artifact_id: String) -> Result<Option<ProjectArtifact>, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.get_artifact(&artifact_id).map_err(|e| e.0)
+fn get_artifact(
+    state: State<'_, Arc<Store>>,
+    artifact_id: String,
+) -> Result<Option<ProjectArtifact>, String> {
+    state.get_artifact(&artifact_id).map_err(|e| e.to_string())
 }
 
 /// List artifacts in a project.
 #[tauri::command(rename_all = "camelCase")]
-fn list_artifacts(project_id: String) -> Result<Vec<ProjectArtifact>, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.list_artifacts(&project_id).map_err(|e| e.0)
+fn list_artifacts(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<ProjectArtifact>, String> {
+    state.list_artifacts(&project_id).map_err(|e| e.to_string())
 }
 
 /// Update an artifact.
 #[tauri::command(rename_all = "camelCase")]
 fn update_artifact(
+    state: State<'_, Arc<Store>>,
     artifact_id: String,
     title: Option<String>,
     data: Option<ArtifactData>,
 ) -> Result<(), String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store
+    state
         .update_artifact(&artifact_id, title.as_deref(), data.as_ref())
-        .map_err(|e| e.0)
+        .map_err(|e| e.to_string())
 }
 
 /// Delete an artifact from a project.
 #[tauri::command(rename_all = "camelCase")]
-fn delete_project_artifact(artifact_id: String) -> Result<(), String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.delete_artifact(&artifact_id).map_err(|e| e.0)
+fn delete_artifact(state: State<'_, Arc<Store>>, artifact_id: String) -> Result<(), String> {
+    state
+        .delete_artifact(&artifact_id)
+        .map_err(|e| e.to_string())
 }
 
 /// Add context links to an artifact (which artifacts were used as input).
 #[tauri::command(rename_all = "camelCase")]
 fn add_artifact_context(
+    state: State<'_, Arc<Store>>,
     artifact_id: String,
     context_artifact_ids: Vec<String>,
 ) -> Result<(), String> {
-    let store = project::get_store().map_err(|e| e.0)?;
     for context_id in context_artifact_ids {
-        store
+        state
             .add_context(&artifact_id, &context_id)
-            .map_err(|e| e.0)?;
+            .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
 
 /// Get the artifacts that were used as context when creating an artifact.
 #[tauri::command(rename_all = "camelCase")]
-fn get_artifact_context(artifact_id: String) -> Result<Vec<String>, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.get_context_artifacts(&artifact_id).map_err(|e| e.0)
-}
-
-/// Save a session (AI conversation transcript) for an artifact.
-#[tauri::command(rename_all = "camelCase")]
-fn save_session(artifact_id: String, transcript: String) -> Result<Session, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    let session = Session::new(artifact_id, transcript);
-    store.create_session(&session).map_err(|e| e.0)?;
-    Ok(session)
-}
-
-/// Get sessions for an artifact.
-#[tauri::command(rename_all = "camelCase")]
-fn get_sessions(artifact_id: String) -> Result<Vec<Session>, String> {
-    let store = project::get_store().map_err(|e| e.0)?;
-    store.get_sessions(&artifact_id).map_err(|e| e.0)
+fn get_artifact_context(
+    state: State<'_, Arc<Store>>,
+    artifact_id: String,
+) -> Result<Vec<String>, String> {
+    state
+        .get_context_artifacts(&artifact_id)
+        .map_err(|e| e.to_string())
 }
 
 /// System prompt for artifact generation.
@@ -961,13 +962,11 @@ Guidelines for your final response:
 #[tauri::command(rename_all = "camelCase")]
 async fn generate_artifact(
     app_handle: AppHandle,
+    state: State<'_, Arc<Store>>,
     project_id: String,
     prompt: String,
     context_artifact_ids: Vec<String>,
 ) -> Result<ProjectArtifact, String> {
-    // Get the project store
-    let store = project::get_store().map_err(|e| e.0)?;
-
     // Create a placeholder title from the prompt
     let placeholder_title = if prompt.len() > 50 {
         format!("{}...", &prompt[..47])
@@ -979,21 +978,31 @@ async fn generate_artifact(
     let artifact = ProjectArtifact::new_generating(&project_id, &placeholder_title);
 
     // Save to database
-    store.create_artifact(&artifact).map_err(|e| e.0)?;
+    state
+        .create_artifact(&artifact)
+        .map_err(|e| e.to_string())?;
 
     // Add context links
     for context_id in &context_artifact_ids {
-        store
+        state
             .add_context(&artifact.id, context_id)
-            .map_err(|e| e.0)?;
+            .map_err(|e| e.to_string())?;
     }
 
     // Clone what we need for the background task
     let artifact_for_task = artifact.clone();
+    let store_clone = state.inner().clone();
 
     // Spawn background task to run AI generation
     tauri::async_runtime::spawn(async move {
-        run_artifact_generation(app_handle, artifact_for_task, prompt, context_artifact_ids).await;
+        run_artifact_generation(
+            app_handle,
+            store_clone,
+            artifact_for_task,
+            prompt,
+            context_artifact_ids,
+        )
+        .await;
     });
 
     Ok(artifact)
@@ -1002,18 +1011,11 @@ async fn generate_artifact(
 /// Background task to run AI generation and update the artifact.
 async fn run_artifact_generation(
     app_handle: AppHandle,
+    store: Arc<Store>,
     artifact: ProjectArtifact,
     prompt: String,
     context_artifact_ids: Vec<String>,
 ) {
-    let store = match project::get_store() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to get store: {}", e.0);
-            return;
-        }
-    };
-
     // Find an AI agent
     let agent = match ai::find_acp_agent() {
         Some(a) => a,
@@ -1088,16 +1090,6 @@ async fn run_artifact_generation(
                 Some(&title),
                 Some(&data),
             );
-
-            // Save the session transcript
-            // Format: JSON array with user prompt and AI response
-            let transcript = serde_json::json!([
-                { "role": "user", "content": prompt },
-                { "role": "assistant", "content": result }
-            ])
-            .to_string();
-            let session = Session::new(&artifact.id, transcript);
-            let _ = store.create_session(&session);
         }
         Err(e) => {
             // Update artifact with error
@@ -1523,23 +1515,18 @@ pub fn run() {
             // Initialize the review store with app data directory
             review::init_store(app.handle()).map_err(|e| e.0)?;
 
-            // Initialize the project store with app data directory
-            project::init_store(app.handle()).map_err(|e| e.0)?;
-
-            // Initialize the chat store with app data directory
+            // Initialize the unified store (sessions, projects, artifacts)
             let app_data_dir = app
                 .path()
                 .app_data_dir()
                 .map_err(|e| format!("Cannot get app data dir: {}", e))?;
-            let chat_db_path = app_data_dir.join("chat.db");
-            let chat_store = Arc::new(
-                ChatStore::open(chat_db_path)
-                    .map_err(|e| format!("Failed to open chat store: {}", e))?,
-            );
-            app.manage(chat_store.clone());
+            let db_path = app_data_dir.join("data.db");
+            let store =
+                Arc::new(Store::open(db_path).map_err(|e| format!("Failed to open store: {}", e))?);
+            app.manage(store.clone());
 
             // Initialize the session manager
-            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), chat_store));
+            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), store));
             app.manage(session_manager);
 
             // Initialize the watcher handle (spawns background thread)
@@ -1592,15 +1579,15 @@ pub fn run() {
             discover_acp_providers,
             send_agent_prompt,
             send_agent_prompt_streaming,
-            // Chat session commands (new)
-            create_chat_session,
-            list_chat_sessions,
-            list_chat_sessions_for_dir,
-            get_chat_session,
-            get_chat_session_status,
-            send_chat_prompt,
-            delete_chat_session,
-            update_chat_session_title,
+            // Session commands
+            create_session,
+            list_sessions,
+            list_sessions_for_dir,
+            get_session,
+            get_session_status,
+            send_prompt,
+            delete_session,
+            update_session_title,
             // Review commands
             get_review,
             add_comment,
@@ -1623,11 +1610,9 @@ pub fn run() {
             get_artifact,
             list_artifacts,
             update_artifact,
-            delete_project_artifact,
+            delete_artifact,
             add_artifact_context,
             get_artifact_context,
-            save_session,
-            get_sessions,
             generate_artifact,
             // Theme commands
             get_custom_themes,
