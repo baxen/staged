@@ -26,10 +26,12 @@
     sessionId: string;
     /** Title to show in the header (e.g., the prompt) */
     title?: string;
+    /** Whether this is a live session (subscribes to streaming events) */
+    isLive?: boolean;
     onClose: () => void;
   }
 
-  let { sessionId, title, onClose }: Props = $props();
+  let { sessionId, title, isLive = true, onClose }: Props = $props();
 
   // ==========================================================================
   // State
@@ -68,9 +70,11 @@
   // ==========================================================================
 
   onMount(async () => {
-    // Set up event listeners first (so we don't miss any events)
-    unlistenUpdate = await listenToSessionUpdates(handleSessionUpdate);
-    unlistenStatus = await listenToSessionStatus(handleSessionStatus);
+    // Set up event listeners only for live sessions (so we don't miss any events)
+    if (isLive) {
+      unlistenUpdate = await listenToSessionUpdates(handleSessionUpdate);
+      unlistenStatus = await listenToSessionStatus(handleSessionStatus);
+    }
 
     // Load session data
     await loadSession();
@@ -96,9 +100,13 @@
       // Convert messages to display format
       messages = sessionData.messages.map(toDisplayMessage);
 
-      // Check if session is currently processing
-      const status = await getSessionStatus(sessionId);
-      isProcessing = status.status === 'processing';
+      // Check if session is currently processing (only for live sessions)
+      if (isLive) {
+        const status = await getSessionStatus(sessionId);
+        isProcessing = status.status === 'processing';
+      } else {
+        isProcessing = false;
+      }
 
       scrollToBottom();
     } catch (e) {

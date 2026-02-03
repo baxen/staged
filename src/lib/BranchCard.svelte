@@ -20,6 +20,7 @@
   import type { Branch, CommitInfo, BranchSession } from './services/branch';
   import * as branchService from './services/branch';
   import SessionViewerModal from './SessionViewerModal.svelte';
+  import NewSessionModal from './NewSessionModal.svelte';
 
   interface Props {
     branch: Branch;
@@ -37,9 +38,16 @@
   let runningSession = $state<BranchSession | null>(null);
   let loading = $state(true);
 
+  // Map of commit SHA to its associated session (for "View" button)
+  let sessionsByCommit = $state<Map<string, BranchSession>>(new Map());
+
   // Session viewer modal state
   let showSessionViewer = $state(false);
   let viewingSession = $state<BranchSession | null>(null);
+  let isViewingLive = $state(false);
+
+  // Continue session modal state
+  let showContinueModal = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -62,6 +70,18 @@
       ]);
       commits = commitsResult;
       runningSession = sessionResult;
+
+      // Load sessions for each commit (for "View" buttons)
+      const sessionsMap = new Map<string, BranchSession>();
+      await Promise.all(
+        commitsResult.map(async (commit) => {
+          const session = await branchService.getSessionForCommit(branch.id, commit.sha);
+          if (session && session.aiSessionId) {
+            sessionsMap.set(commit.sha, session);
+          }
+        })
+      );
+      sessionsByCommit = sessionsMap;
     } catch (e) {
       console.error('Failed to load branch data:', e);
     } finally {
@@ -90,21 +110,36 @@
     onDelete?.();
   }
 
-  function handleContinue(commit: CommitInfo) {
-    // TODO: Implement continue session (amend flow)
-    console.log('Continue session for commit:', commit.sha);
+  function handleContinue() {
+    // Open the continue modal (same as new session, but for continuation)
+    showContinueModal = true;
   }
 
   function handleWatchSession() {
     if (runningSession?.aiSessionId) {
       viewingSession = runningSession;
+      isViewingLive = true;
       showSessionViewer = true;
     }
+  }
+
+  function handleViewSession(session: BranchSession) {
+    viewingSession = session;
+    isViewingLive = false;
+    showSessionViewer = true;
   }
 
   function closeSessionViewer() {
     showSessionViewer = false;
     viewingSession = null;
+    isViewingLive = false;
+  }
+
+  function handleSessionStarted(branchSessionId: string, aiSessionId: string) {
+    console.log('Continue session started:', { branchSessionId, aiSessionId });
+    showContinueModal = false;
+    // Reload data to show the new running session
+    loadData();
   }
 </script>
 
@@ -158,6 +193,7 @@
 
           <!-- Real commits -->
           {#each commits as commit, index (commit.sha)}
+            {@const commitSession = sessionsByCommit.get(commit.sha)}
             <div class="commit-row" class:is-head={index === 0 && !runningSession}>
               <div class="commit-marker">
                 {#if index === 0 && !runningSession}
@@ -176,12 +212,26 @@
                   <span class="commit-time">{formatRelativeTime(commit.timestamp)}</span>
                 </div>
               </div>
-              {#if index === 0 && !runningSession}
-                <button class="continue-button" onclick={() => handleContinue(commit)}>
-                  <Play size={12} />
-                  Continue
-                </button>
-              {/if}
+              <div class="commit-actions">
+                <!-- View button for commits with saved sessions -->
+                {#if commitSession}
+                  <button
+                    class="view-button"
+                    onclick={() => handleViewSession(commitSession)}
+                    title="View session"
+                  >
+                    <Eye size={12} />
+                    View
+                  </button>
+                {/if}
+                <!-- Continue button only on most recent commit (HEAD) when no running session -->
+                {#if index === 0 && !runningSession}
+                  <button class="continue-button" onclick={handleContinue}>
+                    <Play size={12} />
+                    Continue
+                  </button>
+                {/if}
+              </div>
             </div>
           {/each}
         </div>
@@ -204,7 +254,17 @@
   <SessionViewerModal
     sessionId={viewingSession.aiSessionId}
     title={viewingSession.prompt}
+    isLive={isViewingLive}
     onClose={closeSessionViewer}
+  />
+{/if}
+
+<!-- Continue session modal -->
+{#if showContinueModal}
+  <NewSessionModal
+    {branch}
+    onClose={() => (showContinueModal = false)}
+    onSessionStarted={handleSessionStarted}
   />
 {/if}
 
@@ -371,6 +431,14 @@
     color: var(--text-faint);
   }
 
+  .commit-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .view-button,
   .continue-button {
     display: flex;
     align-items: center;
@@ -386,6 +454,7 @@
     flex-shrink: 0;
   }
 
+  .view-button:hover,
   .continue-button:hover {
     border-color: var(--ui-accent);
     color: var(--ui-accent);
