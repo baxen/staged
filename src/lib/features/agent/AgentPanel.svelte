@@ -748,6 +748,7 @@
 
   .agent-top {
     flex-shrink: 0;
+    padding-top: 8px;
   }
 
   .agent-bottom {
