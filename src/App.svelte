@@ -26,7 +26,7 @@
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
   import { createDiffSelection } from './lib/stores/diffSelection.svelte';
-  import { createAgentState } from './lib/stores/agent.svelte';
+  import { createAgentState, type Artifact } from './lib/stores/agent.svelte';
   import { DiffSpec, gitRefName } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
   import { initWatcher, watchRepo, type Unsubscribe } from './lib/services/statusEvents';
@@ -739,7 +739,7 @@
             const tab = getActiveTab();
             if (tab) handleFilesChanged(tab.repoPath);
           }}
-          onReloadCommentsForTab={async (spec, repoPath) => {
+          onReloadCommentsForTab={async (spec: DiffSpecType, repoPath: string | null) => {
             // Find the tab that matches this spec/repoPath
             const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
             if (!targetTab) {
@@ -770,7 +770,7 @@
               commentsState.currentRepoPath = repoPath;
             }
           }}
-          onArtifactSaved={(artifact, repoPath) => {
+          onArtifactSaved={(artifact: Artifact, repoPath: string | null) => {
             // Find the tab that matches this repoPath and add the artifact
             const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
             if (targetTab) {
