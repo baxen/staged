@@ -10,7 +10,8 @@
     // Allow drag from elements with drag-region class, or the tab-bar itself
     // but not from interactive elements
     const isInteractive = target.closest('button, a, input, [role="button"]');
-    const isDragRegion = target.classList.contains('drag-region') || target.classList.contains('tab-bar');
+    const isDragRegion =
+      target.classList.contains('drag-region') || target.classList.contains('tab-bar');
     if (!isInteractive && isDragRegion) {
       e.preventDefault();
       getCurrentWindow().startDragging();
@@ -134,7 +135,9 @@
   }
 
   /* Make interactive elements non-draggable */
-  .tab, .new-tab-btn, .close-btn {
+  .tab,
+  .new-tab-btn,
+  .close-btn {
     -webkit-app-region: no-drag;
   }
 
