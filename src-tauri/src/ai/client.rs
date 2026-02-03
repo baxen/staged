@@ -296,15 +296,15 @@ impl StreamingAcpClient {
     }
 
     /// Get the segments in order for storage
-    async fn get_segments(&self) -> Vec<crate::ai::chat_store::ContentSegment> {
+    async fn get_segments(&self) -> Vec<crate::store::ContentSegment> {
         let segments = self.segments.lock().await;
         segments
             .iter()
             .map(|seg| match seg {
                 ContentSegment::Text(text) => {
-                    crate::ai::chat_store::ContentSegment::Text { text: text.clone() }
+                    crate::store::ContentSegment::Text { text: text.clone() }
                 }
-                ContentSegment::ToolCall(tc) => crate::ai::chat_store::ContentSegment::ToolCall {
+                ContentSegment::ToolCall(tc) => crate::store::ContentSegment::ToolCall {
                     id: tc.id.clone(),
                     title: tc.title.clone(),
                     status: tc.status.clone(),
@@ -452,7 +452,7 @@ pub struct AcpPromptResult {
     /// The session ID (can be used to resume this session later)
     pub session_id: String,
     /// Content segments in order (for storage)
-    pub segments: Vec<crate::ai::chat_store::ContentSegment>,
+    pub segments: Vec<crate::store::ContentSegment>,
 }
 
 /// Run a one-shot prompt through ACP and return the response (no streaming)

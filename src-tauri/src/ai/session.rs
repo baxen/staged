@@ -3,9 +3,9 @@
 //! This is a thin layer that:
 //! - Tracks live agent subprocess connections
 //! - Buffers the current streaming turn
-//! - On turn complete, persists to ChatStore
+//! - On turn complete, persists to Store
 //!
-//! History is stored in SQLite via ChatStore. This module only handles
+//! History is stored in SQLite via Store. This module only handles
 //! live state that can't be persisted (agent connections, streaming buffers).
 
 use std::collections::HashMap;
@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 
-use super::chat_store::{generate_session_id, ChatSession, ChatStore, MessageRole};
 use super::client::{self, AcpAgent, AcpPromptResult};
+use crate::store::{generate_session_id, MessageRole, Session, Store};
 
 // =============================================================================
 // Types
@@ -53,7 +53,7 @@ pub struct LiveSessionInfo {
 
 /// Internal live session state
 struct LiveSession {
-    /// Our session ID (matches ChatStore)
+    /// Our session ID (matches Store)
     session_id: String,
     /// ACP session ID (from the agent - for session resumption)
     acp_session_id: Option<String>,
@@ -75,13 +75,13 @@ pub struct SessionManager {
     sessions: RwLock<HashMap<String, Arc<RwLock<LiveSession>>>>,
     /// Tauri app handle for emitting events
     app_handle: AppHandle,
-    /// Chat store for persistence
-    store: Arc<ChatStore>,
+    /// Store for persistence
+    store: Arc<Store>,
 }
 
 impl SessionManager {
     /// Create a new session manager
-    pub fn new(app_handle: AppHandle, store: Arc<ChatStore>) -> Self {
+    pub fn new(app_handle: AppHandle, store: Arc<Store>) -> Self {
         Self {
             sessions: RwLock::new(HashMap::new()),
             app_handle,
@@ -89,7 +89,7 @@ impl SessionManager {
         }
     }
 
-    /// Create a new chat session (persisted + live)
+    /// Create a new session (persisted + live)
     pub async fn create_session(
         &self,
         working_dir: PathBuf,
@@ -109,7 +109,7 @@ impl SessionManager {
             .unwrap_or_default()
             .as_millis() as i64;
 
-        let chat_session = ChatSession {
+        let session = Session {
             id: session_id.clone(),
             working_dir: working_dir.to_string_lossy().to_string(),
             agent_id: agent.name().to_string(),
@@ -119,7 +119,7 @@ impl SessionManager {
         };
 
         self.store
-            .create_session(&chat_session)
+            .create_session(&session)
             .map_err(|e| format!("Failed to create session: {}", e))?;
 
         // Create live session
@@ -152,13 +152,13 @@ impl SessionManager {
         }
 
         // Load from store and create live session
-        let chat_session = self
+        let session = self
             .store
             .get_session(session_id)
             .map_err(|e| format!("Failed to load session: {}", e))?
             .ok_or_else(|| format!("Session '{}' not found", session_id))?;
 
-        let agent = client::find_acp_agent_by_id(&chat_session.agent_id)
+        let agent = client::find_acp_agent_by_id(&session.agent_id)
             .or_else(client::find_acp_agent)
             .ok_or_else(|| "No AI agent found".to_string())?;
 
@@ -166,7 +166,7 @@ impl SessionManager {
             session_id: session_id.to_string(),
             acp_session_id: None, // Will be set on first prompt
             agent,
-            working_dir: PathBuf::from(&chat_session.working_dir),
+            working_dir: PathBuf::from(&session.working_dir),
             status: SessionStatus::Idle,
         };
 
@@ -316,7 +316,7 @@ impl SessionManager {
 
 /// Persist an assistant turn to the store
 fn persist_assistant_turn(
-    store: &ChatStore,
+    store: &Store,
     session_id: &str,
     result: &AcpPromptResult,
 ) -> Result<(), String> {
@@ -329,7 +329,7 @@ fn persist_assistant_turn(
 }
 
 /// Set session title from first prompt if not already set
-fn maybe_set_title(store: &ChatStore, session_id: &str, prompt: &str) -> Result<(), String> {
+fn maybe_set_title(store: &Store, session_id: &str, prompt: &str) -> Result<(), String> {
     let session = store
         .get_session(session_id)
         .map_err(|e| e.to_string())?
@@ -339,20 +339,15 @@ fn maybe_set_title(store: &ChatStore, session_id: &str, prompt: &str) -> Result<
         return Ok(());
     }
 
-    // Generate title from first ~50 chars of prompt
-    let title: String = prompt
-        .chars()
-        .take(50)
-        .collect::<String>()
-        .lines()
-        .next()
-        .unwrap_or("")
-        .to_string();
+    // Generate title from first ~50 chars of prompt, first line only
+    let first_line = prompt.lines().next().unwrap_or("");
+    let truncated: String = first_line.chars().take(50).collect();
+    let needs_ellipsis = first_line.chars().count() > 50;
 
-    let title = if title.len() < prompt.len() {
-        format!("{}...", title.trim())
+    let title = if needs_ellipsis {
+        format!("{}...", truncated.trim())
     } else {
-        title.trim().to_string()
+        truncated.trim().to_string()
     };
 
     if !title.is_empty() {

@@ -235,8 +235,8 @@ export interface NewEdit {
 export interface Project {
   id: string;
   name: string;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 /** Type-specific data for an artifact */
@@ -252,8 +252,8 @@ export interface Artifact {
   id: string;
   projectId: string;
   title: string;
-  createdAt: string;
-  updatedAt: string;
+  createdAt: number;
+  updatedAt: number;
   parentArtifactId?: string;
   /** Type-specific data (markdown content, commit info, etc.) */
   data: ArtifactData;
