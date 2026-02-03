@@ -5,6 +5,7 @@ mod files;
 pub mod github;
 mod refs;
 mod types;
+mod worktree;
 
 pub use cli::GitError;
 pub use commit::commit;
@@ -16,3 +17,7 @@ pub use github::{
 };
 pub use refs::{detect_default_branch, get_repo_root, list_refs, merge_base, resolve_ref};
 pub use types::*;
+pub use worktree::{
+    branch_exists, create_worktree, get_commits_since_base, get_head_sha, list_worktrees,
+    remove_worktree, worktree_path_for, CommitInfo,
+};

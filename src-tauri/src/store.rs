@@ -258,6 +258,140 @@ impl Artifact {
 }
 
 // =============================================================================
+// Branch Types (git-integrated workflow)
+// =============================================================================
+
+/// A tracked branch with an associated worktree.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Branch {
+    pub id: String,
+    /// Path to the original repository
+    pub repo_path: String,
+    /// Name of the branch (e.g., "feature/auth-flow")
+    pub branch_name: String,
+    /// Path to the worktree directory
+    pub worktree_path: String,
+    /// The branch we forked from (for computing diffs)
+    pub base_branch: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl Branch {
+    pub fn new(
+        repo_path: impl Into<String>,
+        branch_name: impl Into<String>,
+        worktree_path: impl Into<String>,
+        base_branch: impl Into<String>,
+    ) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            repo_path: repo_path.into(),
+            branch_name: branch_name.into(),
+            worktree_path: worktree_path.into(),
+            base_branch: base_branch.into(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create a Branch from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            repo_path: row.get(1)?,
+            branch_name: row.get(2)?,
+            worktree_path: row.get(3)?,
+            base_branch: row.get(4)?,
+            created_at: row.get(5)?,
+            updated_at: row.get(6)?,
+        })
+    }
+}
+
+/// Status of a branch session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchSessionStatus {
+    /// Session is currently running
+    Running,
+    /// Session completed successfully with a commit
+    #[default]
+    Completed,
+    /// Session encountered an error
+    Error,
+}
+
+impl BranchSessionStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BranchSessionStatus::Running => "running",
+            BranchSessionStatus::Completed => "completed",
+            BranchSessionStatus::Error => "error",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "running" => BranchSessionStatus::Running,
+            "error" => BranchSessionStatus::Error,
+            _ => BranchSessionStatus::Completed,
+        }
+    }
+}
+
+/// A session tied to a branch, producing a commit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchSession {
+    pub id: String,
+    pub branch_id: String,
+    /// The commit SHA produced by this session (null while running)
+    pub commit_sha: Option<String>,
+    pub status: BranchSessionStatus,
+    /// The user's prompt that started this session
+    pub prompt: String,
+    /// Error message if status is Error
+    pub error_message: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl BranchSession {
+    /// Create a new session in running state.
+    pub fn new_running(branch_id: impl Into<String>, prompt: impl Into<String>) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            branch_id: branch_id.into(),
+            commit_sha: None,
+            status: BranchSessionStatus::Running,
+            prompt: prompt.into(),
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create a BranchSession from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let status_str: String = row.get(3)?;
+        Ok(Self {
+            id: row.get(0)?,
+            branch_id: row.get(1)?,
+            commit_sha: row.get(2)?,
+            status: BranchSessionStatus::parse(&status_str),
+            prompt: row.get(4)?,
+            error_message: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    }
+}
+
+// =============================================================================
 // Error type
 // =============================================================================
 
@@ -388,6 +522,36 @@ impl Store {
 
             CREATE INDEX IF NOT EXISTS idx_artifacts_project ON artifacts(project_id);
             CREATE INDEX IF NOT EXISTS idx_artifacts_type ON artifacts(artifact_type);
+
+            -- =================================================================
+            -- Branches (git-integrated workflow)
+            -- =================================================================
+
+            CREATE TABLE IF NOT EXISTS branches (
+                id TEXT PRIMARY KEY,
+                repo_path TEXT NOT NULL,
+                branch_name TEXT NOT NULL,
+                worktree_path TEXT NOT NULL,
+                base_branch TEXT NOT NULL,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL,
+                UNIQUE(repo_path, branch_name)
+            );
+
+            CREATE TABLE IF NOT EXISTS branch_sessions (
+                id TEXT PRIMARY KEY,
+                branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                commit_sha TEXT,
+                status TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                error_message TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_branch_sessions_branch ON branch_sessions(branch_id);
+            CREATE INDEX IF NOT EXISTS idx_branch_sessions_commit ON branch_sessions(branch_id, commit_sha);
+            CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_path);
             "#,
         )?;
 
@@ -983,6 +1147,203 @@ impl Store {
             .query_map(params![context_artifact_id], |row| row.get(0))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(ids)
+    }
+
+    // =========================================================================
+    // Branch operations
+    // =========================================================================
+
+    /// Create a new branch
+    pub fn create_branch(&self, branch: &Branch) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO branches (id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                &branch.id,
+                &branch.repo_path,
+                &branch.branch_name,
+                &branch.worktree_path,
+                &branch.base_branch,
+                branch.created_at,
+                branch.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get a branch by ID
+    pub fn get_branch(&self, id: &str) -> Result<Option<Branch>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+             FROM branches WHERE id = ?1",
+            params![id],
+            Branch::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all branches, ordered by most recently updated
+    pub fn list_branches(&self) -> Result<Vec<Branch>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+             FROM branches ORDER BY updated_at DESC",
+        )?;
+        let branches = stmt
+            .query_map([], Branch::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(branches)
+    }
+
+    /// List branches for a specific repository
+    pub fn list_branches_for_repo(&self, repo_path: &str) -> Result<Vec<Branch>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+             FROM branches WHERE repo_path = ?1 ORDER BY updated_at DESC",
+        )?;
+        let branches = stmt
+            .query_map(params![repo_path], Branch::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(branches)
+    }
+
+    /// Delete a branch and all its sessions
+    pub fn delete_branch(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM branches WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Touch branch (update updated_at)
+    pub fn touch_branch(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branches SET updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Branch session operations
+    // =========================================================================
+
+    /// Create a new branch session
+    pub fn create_branch_session(&self, session: &BranchSession) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO branch_sessions (id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &session.id,
+                &session.branch_id,
+                &session.commit_sha,
+                session.status.as_str(),
+                &session.prompt,
+                &session.error_message,
+                session.created_at,
+                session.updated_at,
+            ],
+        )?;
+
+        // Also touch the branch
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branches SET updated_at = ?1 WHERE id = ?2",
+            params![now, &session.branch_id],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get a branch session by ID
+    pub fn get_branch_session(&self, id: &str) -> Result<Option<BranchSession>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+             FROM branch_sessions WHERE id = ?1",
+            params![id],
+            BranchSession::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all sessions for a branch
+    pub fn list_branch_sessions(&self, branch_id: &str) -> Result<Vec<BranchSession>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+             FROM branch_sessions WHERE branch_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let sessions = stmt
+            .query_map(params![branch_id], BranchSession::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(sessions)
+    }
+
+    /// Find the session for a specific commit on a branch
+    pub fn get_session_for_commit(
+        &self,
+        branch_id: &str,
+        commit_sha: &str,
+    ) -> Result<Option<BranchSession>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+             FROM branch_sessions WHERE branch_id = ?1 AND commit_sha = ?2",
+            params![branch_id, commit_sha],
+            BranchSession::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Get the currently running session for a branch (if any)
+    pub fn get_running_session(&self, branch_id: &str) -> Result<Option<BranchSession>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+             FROM branch_sessions WHERE branch_id = ?1 AND status = 'running'",
+            params![branch_id],
+            BranchSession::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Update a branch session's status and commit SHA
+    pub fn update_branch_session_completed(&self, id: &str, commit_sha: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branch_sessions SET status = 'completed', commit_sha = ?1, updated_at = ?2 WHERE id = ?3",
+            params![commit_sha, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Update a branch session to error state
+    pub fn update_branch_session_error(&self, id: &str, error_message: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branch_sessions SET status = 'error', error_message = ?1, updated_at = ?2 WHERE id = ?3",
+            params![error_message, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a branch session
+    pub fn delete_branch_session(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM branch_sessions WHERE id = ?1", params![id])?;
+        Ok(())
     }
 }
 

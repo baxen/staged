@@ -1214,6 +1214,184 @@ fn extract_title_from_markdown(content: &str, fallback_prompt: &str) -> String {
 }
 
 // =============================================================================
+// Branch Commands (git-integrated workflow)
+// =============================================================================
+
+use store::{Branch, BranchSession};
+
+/// Commit info for frontend display.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CommitInfo {
+    sha: String,
+    short_sha: String,
+    subject: String,
+    author: String,
+    timestamp: i64,
+}
+
+impl From<git::CommitInfo> for CommitInfo {
+    fn from(c: git::CommitInfo) -> Self {
+        Self {
+            sha: c.sha,
+            short_sha: c.short_sha,
+            subject: c.subject,
+            author: c.author,
+            timestamp: c.timestamp,
+        }
+    }
+}
+
+/// Create a new branch with a worktree.
+#[tauri::command(rename_all = "camelCase")]
+fn create_branch(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+    branch_name: String,
+) -> Result<Branch, String> {
+    let repo = Path::new(&repo_path);
+
+    // Detect the default branch to use as base
+    let base_branch = git::detect_default_branch(repo).map_err(|e| e.to_string())?;
+
+    // Create the worktree (this will fail atomically if branch already exists)
+    let worktree_path = git::create_worktree(repo, &branch_name, &base_branch).map_err(|e| {
+        // Provide user-friendly error for common case
+        let msg = e.to_string();
+        if msg.contains("already exists") {
+            format!("Branch '{}' already exists", branch_name)
+        } else {
+            msg
+        }
+    })?;
+
+    // Create the branch record
+    let branch = Branch::new(
+        &repo_path,
+        &branch_name,
+        worktree_path.to_string_lossy().to_string(),
+        &base_branch,
+    );
+
+    // If DB insert fails, clean up the worktree
+    if let Err(e) = state.create_branch(&branch) {
+        let _ = git::remove_worktree(repo, &worktree_path); // Best-effort cleanup
+        return Err(e.to_string());
+    }
+
+    Ok(branch)
+}
+
+/// Get a branch by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_branch(state: State<'_, Arc<Store>>, branch_id: String) -> Result<Option<Branch>, String> {
+    state.get_branch(&branch_id).map_err(|e| e.to_string())
+}
+
+/// List all branches.
+#[tauri::command(rename_all = "camelCase")]
+fn list_branches(state: State<'_, Arc<Store>>) -> Result<Vec<Branch>, String> {
+    state.list_branches().map_err(|e| e.to_string())
+}
+
+/// List branches for a specific repository.
+#[tauri::command(rename_all = "camelCase")]
+fn list_branches_for_repo(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+) -> Result<Vec<Branch>, String> {
+    state
+        .list_branches_for_repo(&repo_path)
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a branch and its worktree.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_branch(state: State<'_, Arc<Store>>, branch_id: String) -> Result<(), String> {
+    // Get the branch first
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    // Remove the worktree
+    let repo = Path::new(&branch.repo_path);
+    let worktree = Path::new(&branch.worktree_path);
+    if worktree.exists() {
+        git::remove_worktree(repo, worktree).map_err(|e| e.to_string())?;
+    }
+
+    // Delete from database
+    state.delete_branch(&branch_id).map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// Get commits for a branch since it diverged from base.
+#[tauri::command(rename_all = "camelCase")]
+fn get_branch_commits(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Vec<CommitInfo>, String> {
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    let worktree = Path::new(&branch.worktree_path);
+    let commits =
+        git::get_commits_since_base(worktree, &branch.base_branch).map_err(|e| e.to_string())?;
+
+    Ok(commits.into_iter().map(Into::into).collect())
+}
+
+/// Get sessions for a branch.
+#[tauri::command(rename_all = "camelCase")]
+fn list_branch_sessions(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Vec<BranchSession>, String> {
+    state
+        .list_branch_sessions(&branch_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get the session associated with a specific commit.
+#[tauri::command(rename_all = "camelCase")]
+fn get_session_for_commit(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+    commit_sha: String,
+) -> Result<Option<BranchSession>, String> {
+    state
+        .get_session_for_commit(&branch_id, &commit_sha)
+        .map_err(|e| e.to_string())
+}
+
+/// Get the currently running session for a branch (if any).
+#[tauri::command(rename_all = "camelCase")]
+fn get_running_session(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Option<BranchSession>, String> {
+    state
+        .get_running_session(&branch_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get the HEAD commit SHA for a branch's worktree.
+#[tauri::command(rename_all = "camelCase")]
+fn get_branch_head(state: State<'_, Arc<Store>>, branch_id: String) -> Result<String, String> {
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    let worktree = Path::new(&branch.worktree_path);
+    git::get_head_sha(worktree).map_err(|e| e.to_string())
+}
+
+// =============================================================================
 // Theme Commands
 // =============================================================================
 
@@ -1690,6 +1868,17 @@ pub fn run() {
             add_artifact_context,
             get_artifact_context,
             generate_artifact,
+            // Branch commands (git-integrated workflow)
+            create_branch,
+            get_branch,
+            list_branches,
+            list_branches_for_repo,
+            delete_branch,
+            get_branch_commits,
+            list_branch_sessions,
+            get_session_for_commit,
+            get_running_session,
+            get_branch_head,
             // Theme commands
             get_custom_themes,
             read_custom_theme,
