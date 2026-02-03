@@ -867,6 +867,7 @@ fn create_artifact(
         data,
         status: ArtifactStatus::Complete,
         error_message: None,
+        session_id: None,
     };
     state
         .create_artifact(&artifact)
@@ -1033,6 +1034,42 @@ async fn run_artifact_generation(
         }
     };
 
+    // Use current directory as working dir (artifacts aren't repo-specific)
+    let working_dir = match std::env::current_dir() {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = store.update_artifact_status(
+                &artifact.id,
+                ArtifactStatus::Error,
+                Some(&format!("Failed to get working directory: {}", e)),
+                None,
+                None,
+            );
+            let _ = emit_artifact_updated(&app_handle, &artifact.id);
+            return;
+        }
+    };
+
+    // Create a session for this artifact generation
+    let session_id = store::generate_session_id();
+    let now = store::now_timestamp();
+    let session = store::Session {
+        id: session_id.clone(),
+        working_dir: working_dir.to_string_lossy().to_string(),
+        agent_id: agent.name().to_string(),
+        title: Some(format!("Artifact: {}", artifact.title)),
+        created_at: now,
+        updated_at: now,
+    };
+
+    if let Err(e) = store.create_session(&session) {
+        log::error!("Failed to create session for artifact: {}", e);
+        // Continue without session - artifact will still work, just no session view
+    } else {
+        // Link session to artifact
+        let _ = store.set_artifact_session(&artifact.id, &session_id);
+    }
+
     // Build the full prompt with context
     let mut full_prompt = String::from(ARTIFACT_SYSTEM_PROMPT);
 
@@ -1057,29 +1094,21 @@ async fn run_artifact_generation(
     full_prompt.push_str(&prompt);
     full_prompt.push_str("\n\nPlease create a comprehensive artifact addressing this request. Remember: only your final message becomes the artifact, so make it complete and self-contained.");
 
-    // Use current directory as working dir (artifacts aren't repo-specific)
-    let working_dir = match std::env::current_dir() {
-        Ok(d) => d,
-        Err(e) => {
-            let _ = store.update_artifact_status(
-                &artifact.id,
-                ArtifactStatus::Error,
-                Some(&format!("Failed to get working directory: {}", e)),
-                None,
-                None,
-            );
-            let _ = emit_artifact_updated(&app_handle, &artifact.id);
-            return;
-        }
-    };
+    // Store the user message in the session
+    let _ = store.add_message(&session_id, store::MessageRole::User, &full_prompt);
 
-    // Call the AI
-    match ai::run_acp_prompt(&agent, &working_dir, &full_prompt).await {
+    // Call the AI with streaming (emits session-update events)
+    match ai::run_acp_prompt_streaming(&agent, &working_dir, &full_prompt, None, app_handle.clone())
+        .await
+    {
         Ok(result) => {
+            // Store the assistant response in the session
+            let _ = store.add_assistant_turn(&session_id, &result.segments);
+
             // Extract a title from the response
-            let title = extract_title_from_markdown(&result, &prompt);
+            let title = extract_title_from_markdown(&result.response, &prompt);
             let data = ArtifactData::Markdown {
-                content: result.clone(),
+                content: result.response.clone(),
             };
 
             // Update artifact with success

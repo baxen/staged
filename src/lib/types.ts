@@ -261,4 +261,6 @@ export interface Artifact {
   status: ArtifactStatus;
   /** Error message if status is 'error' */
   errorMessage?: string;
+  /** Session ID for viewing the generation conversation */
+  sessionId?: string;
 }
