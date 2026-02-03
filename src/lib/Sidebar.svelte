@@ -1078,7 +1078,10 @@
             </button>
           </div>
           <div class="section-divider">
-            <span class="divider-label">CHANGED ({needsReview.length})</span>
+            <span class="divider-label">CHANGED</span>
+            {#if needsReview.length > 0}
+              <span class="count-capsule">{needsReview.length}</span>
+            {/if}
           </div>
           <div class="section-right">
             {#if isWorkingTree}
@@ -1120,7 +1123,10 @@
             </button>
           </div>
           <div class="section-divider">
-            <span class="divider-label">REVIEWED ({reviewed.length})</span>
+            <span class="divider-label">REVIEWED</span>
+            {#if reviewed.length > 0}
+              <span class="count-capsule">{reviewed.length}</span>
+            {/if}
           </div>
           <div class="section-right">
             <!-- Show commit button here only if CHANGED section is empty (this is the first section) -->
@@ -1154,7 +1160,10 @@
       <div class="section-header">
         <div class="section-left"></div>
         <div class="section-divider">
-          <span class="divider-label">REFERENCE ({referenceFilesState.files.length})</span>
+          <span class="divider-label">REFERENCE</span>
+          {#if referenceFilesState.files.length > 0}
+            <span class="count-capsule">{referenceFilesState.files.length}</span>
+          {/if}
         </div>
         <div class="section-right">
           <button
@@ -1205,7 +1214,10 @@
       <div class="section-header comments-header">
         <div class="section-left"></div>
         <div class="section-divider">
-          <span class="divider-label">COMMENTS ({commentsState.comments.length})</span>
+          <span class="divider-label">COMMENTS</span>
+          {#if commentsState.comments.length > 0}
+            <span class="count-capsule">{commentsState.comments.length}</span>
+          {/if}
         </div>
         <div class="section-right">
           {#if commentsState.comments.length > 0}
@@ -1221,11 +1233,7 @@
                 <Copy size={12} />
               {/if}
             </button>
-            <button
-              class="delete-all-btn"
-              onclick={deleteAllComments}
-              title="Delete all comments"
-            >
+            <button class="delete-all-btn" onclick={deleteAllComments} title="Delete all comments">
               <Trash2 size={12} />
             </button>
           {/if}
@@ -1388,6 +1396,20 @@
     letter-spacing: 0.5px;
     color: var(--text-muted);
     text-transform: uppercase;
+  }
+
+  .count-capsule {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 16px;
+    height: 14px;
+    padding: 0 4px;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    border-radius: 7px;
+    font-size: 9px;
+    font-weight: 600;
   }
 
   .reviewed-section {

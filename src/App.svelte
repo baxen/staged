@@ -663,10 +663,7 @@
     <TabBar onNewTab={handleNewTab} onSwitchTab={handleTabSwitch} />
   {/if}
 
-  <TopBar
-    onPresetSelect={handlePresetSelect}
-    onCustomDiff={handleCustomDiff}
-  />
+  <TopBar onPresetSelect={handlePresetSelect} onCustomDiff={handleCustomDiff} />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
     {#if showEmptyState && !preferences.features.agentPanel}

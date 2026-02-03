@@ -4,18 +4,15 @@
     ChevronDown,
     Palette,
     Keyboard,
-    MessageSquare,
     Settings2,
     GitCompareArrows,
     GitPullRequest,
-    Upload,
     Eye,
     EyeOff,
   } from 'lucide-svelte';
   import DiffSelectorModal from './DiffSelectorModal.svelte';
   import PRSelectorModal from './PRSelectorModal.svelte';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
-  import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
@@ -26,23 +23,16 @@
     getDisplayLabel,
     type DiffPreset,
   } from './stores/diffSelection.svelte';
-  import { commentsState } from './stores/comments.svelte';
   import { repoState } from './stores/repoState.svelte';
   import { registerShortcut } from './services/keyboard';
-  import {
-    smartDiffState,
-    setAnnotationsRevealed,
-  } from './stores/smartDiff.svelte';
+  import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
     onCustomDiff: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
   }
 
-  let {
-    onPresetSelect,
-    onCustomDiff,
-  }: Props = $props();
+  let { onPresetSelect, onCustomDiff }: Props = $props();
 
   // Dropdown states
   let diffDropdownOpen = $state(false);
@@ -51,12 +41,8 @@
   let showCustomModal = $state(false);
   let showPRModal = $state(false);
   let showThemeModal = $state(false);
-  let showSyncModal = $state(false);
   let showShortcutsModal = $state(false);
   let showSettingsModal = $state(false);
-
-  // Can sync if viewing a PR with comments
-  let canSync = $derived(diffSelection.prNumber !== undefined && commentsState.comments.length > 0);
 
   // Smart diff state (for annotations reveal toggle)
   let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
@@ -200,7 +186,7 @@
     </div>
   </div>
 
-  <!-- Center section: Actions (Comments, AI reveal toggle) -->
+  <!-- Center section: AI reveal toggle -->
   <div class="section section-center">
     <!-- AI Annotations reveal toggle (only show when annotations exist) -->
     {#if hasFileAnnotations}
@@ -217,20 +203,6 @@
         {/if}
       </button>
     {/if}
-
-    <div class="comments-section">
-      <MessageSquare size={14} />
-      <span class="comment-count">{commentsState.comments.length}</span>
-      {#if commentsState.comments.length > 0 && canSync}
-        <button
-          class="icon-btn sync-btn"
-          onclick={() => (showSyncModal = true)}
-          title="Sync comments to GitHub"
-        >
-          <Upload size={12} />
-        </button>
-      {/if}
-    </div>
   </div>
 
   <!-- Right section: Settings -->
@@ -289,16 +261,6 @@
     repoPath={repoState.currentPath}
     onSubmit={handlePRSubmit}
     onClose={() => (showPRModal = false)}
-  />
-{/if}
-
-{#if showSyncModal && diffSelection.prNumber}
-  <GitHubSyncModal
-    prNumber={diffSelection.prNumber}
-    spec={diffSelection.spec}
-    repoPath={repoState.currentPath}
-    comments={commentsState.comments}
-    onClose={() => (showSyncModal = false)}
   />
 {/if}
 
@@ -469,24 +431,6 @@
     color: var(--text-muted);
   }
 
-  /* Comments section */
-  .comments-section {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 8px;
-    height: 24px;
-    background-color: var(--bg-primary);
-    border-radius: 6px;
-    color: var(--text-muted);
-    font-size: var(--size-xs);
-  }
-
-  .comment-count {
-    font-weight: 500;
-    min-width: 1ch;
-  }
-
   /* Icon buttons */
   .icon-btn {
     display: flex;
@@ -496,7 +440,7 @@
     background: none;
     border: none;
     border-radius: 4px;
-    color: var(--text-faint);
+    color: var(--text-muted);
     cursor: pointer;
     transition:
       color 0.1s,
@@ -506,10 +450,6 @@
   .icon-btn:hover {
     color: var(--text-primary);
     background-color: var(--bg-hover);
-  }
-
-  .icon-btn.sync-btn:hover {
-    color: var(--ui-accent);
   }
 
   /* Shortcuts picker */
