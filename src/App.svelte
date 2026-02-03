@@ -6,7 +6,7 @@
   import Sidebar from './lib/Sidebar.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
-  import TopBar from './lib/TopBar.svelte';
+
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
   import AgentSetupModal from './lib/AgentSetupModal.svelte';
@@ -705,8 +705,6 @@
     <!-- Spacer for traffic light buttons when no tabs -->
     <div class="titlebar-spacer" data-tauri-drag-region></div>
   {/if}
-
-  <TopBar />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
     <section class="main-content">

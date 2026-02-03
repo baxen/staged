@@ -1,7 +1,23 @@
 <script lang="ts">
-  import { X, Plus, FolderGit2, Loader2 } from 'lucide-svelte';
+  import { onMount } from 'svelte';
+  import {
+    X,
+    Plus,
+    FolderGit2,
+    Loader2,
+    Eye,
+    EyeOff,
+    Settings2,
+    Keyboard,
+    Palette,
+  } from 'lucide-svelte';
   import { windowState, closeTab } from './stores/tabState.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
+  import ThemeSelectorModal from './ThemeSelectorModal.svelte';
+  import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
+  import SettingsModal from './SettingsModal.svelte';
+  import { registerShortcut } from './services/keyboard';
+  import { smartDiffState, setAnnotationsRevealed } from './stores/smartDiff.svelte';
 
   function startDrag(e: PointerEvent) {
     // Only start drag on left mouse button
@@ -24,6 +40,15 @@
   }
 
   let { onNewTab, onSwitchTab }: Props = $props();
+
+  // Modal state
+  let showThemeModal = $state(false);
+  let showShortcutsModal = $state(false);
+  let showSettingsModal = $state(false);
+
+  // Smart diff state (for annotations reveal toggle)
+  let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
+  let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
 
   let tabRefs: (HTMLButtonElement | undefined)[] = $state([]);
   let indicatorStyle = $state('');
@@ -67,6 +92,36 @@
   function handleNewTab() {
     onNewTab();
   }
+
+  // Register keyboard shortcuts
+  onMount(() => {
+    const unregisterTheme = registerShortcut({
+      id: 'open-theme-picker',
+      keys: ['p'],
+      modifiers: { meta: true },
+      description: 'Theme picker',
+      category: 'view',
+      handler: () => {
+        showThemeModal = !showThemeModal;
+      },
+    });
+
+    const unregisterSettings = registerShortcut({
+      id: 'open-settings',
+      keys: [','],
+      modifiers: { meta: true },
+      description: 'Open settings',
+      category: 'view',
+      handler: () => {
+        showSettingsModal = !showSettingsModal;
+      },
+    });
+
+    return () => {
+      unregisterTheme();
+      unregisterSettings();
+    };
+  });
 </script>
 
 <div class="tab-bar drag-region" onpointerdown={startDrag}>
@@ -106,8 +161,61 @@
   <button class="new-tab-btn" onclick={handleNewTab} title="Open folder in new tab">
     <Plus size={16} />
   </button>
+
+  <!-- Spacer pushes action buttons to the right -->
   <div class="drag-spacer drag-region" data-tauri-drag-region></div>
+
+  <!-- Action buttons (right side) -->
+  <div class="tab-bar-actions">
+    {#if hasFileAnnotations}
+      <button
+        class="icon-btn reveal-btn"
+        class:active={annotationsRevealed}
+        onclick={() => setAnnotationsRevealed(!annotationsRevealed)}
+        title="Hold A to show explanation view"
+      >
+        {#if annotationsRevealed}
+          <Eye size={14} />
+        {:else}
+          <EyeOff size={14} />
+        {/if}
+      </button>
+    {/if}
+
+    <button class="icon-btn" onclick={() => (showSettingsModal = true)} title="Settings (⌘,)">
+      <Settings2 size={14} />
+    </button>
+
+    <button
+      class="icon-btn"
+      onclick={() => (showShortcutsModal = !showShortcutsModal)}
+      title="Keyboard shortcuts"
+    >
+      <Keyboard size={14} />
+    </button>
+
+    <button
+      class="icon-btn"
+      onclick={() => (showThemeModal = !showThemeModal)}
+      title="Select theme (⌘P)"
+    >
+      <Palette size={14} />
+    </button>
+  </div>
 </div>
+
+<!-- Modals -->
+{#if showThemeModal}
+  <ThemeSelectorModal onClose={() => (showThemeModal = false)} />
+{/if}
+
+{#if showShortcutsModal}
+  <KeyboardShortcutsModal onClose={() => (showShortcutsModal = false)} />
+{/if}
+
+{#if showSettingsModal}
+  <SettingsModal onClose={() => (showSettingsModal = false)} />
+{/if}
 
 <style>
   .tab-bar {
@@ -137,8 +245,45 @@
   /* Make interactive elements non-draggable */
   .tab,
   .new-tab-btn,
-  .close-btn {
+  .close-btn,
+  .icon-btn {
     -webkit-app-region: no-drag;
+  }
+
+  /* Tab bar action buttons */
+  .tab-bar-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-bottom: 3px;
+  }
+
+  .icon-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      color 0.1s,
+      background-color 0.1s;
+  }
+
+  .icon-btn:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
+  }
+
+  .reveal-btn.active {
+    color: var(--ui-accent);
+  }
+
+  .reveal-btn.active:hover {
+    color: var(--ui-accent);
   }
 
   .tabs {
