@@ -752,7 +752,7 @@
 
   .agent-bottom {
     flex-shrink: 0;
-    padding: 12px 0;
+    padding: 8px 0 0;
     margin-top: auto;
   }
 

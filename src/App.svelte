@@ -706,7 +706,7 @@
     <div class="titlebar-spacer" data-tauri-drag-region></div>
   {/if}
 
-  <TopBar onPresetSelect={handlePresetSelect} onCustomDiff={handleCustomDiff} />
+  <TopBar />
 
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
     <section class="main-content">
@@ -756,6 +756,8 @@
         repoPath={repoState.currentPath}
         spec={diffSelection.spec}
         agentState={getActiveTab()?.agentState}
+        onPresetSelect={handlePresetSelect}
+        onCustomDiff={handleCustomDiff}
       />
     </aside>
   </div>

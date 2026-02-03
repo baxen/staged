@@ -31,6 +31,9 @@
     GitCommitHorizontal,
     Orbit,
     Copy,
+    GitCompareArrows,
+    GitPullRequest,
+    Settings2,
   } from 'lucide-svelte';
   import {
     commentsState,
@@ -44,10 +47,23 @@
   import { preferences } from './stores/preferences.svelte';
   import AgentPanel from './features/agent/AgentPanel.svelte';
   import CommitModal from './CommitModal.svelte';
-  import type { DiffSpec, FileDiffSummary, FileDiff, ChangesetSummary } from './types';
+  import DiffSelectorModal from './DiffSelectorModal.svelte';
+  import PRSelectorModal from './PRSelectorModal.svelte';
+  import { DiffSpec, gitRefDisplay } from './types';
+  import type {
+    DiffSpec as DiffSpecType,
+    FileDiffSummary,
+    FileDiff,
+    ChangesetSummary,
+  } from './types';
   import type { AgentState, Artifact } from './stores/agent.svelte';
   import { repoState } from './stores/repoState.svelte';
-  import { diffSelection } from './stores/diffSelection.svelte';
+  import {
+    getPresets,
+    diffSelection,
+    getDisplayLabel,
+    type DiffPreset,
+  } from './stores/diffSelection.svelte';
   import {
     smartDiffState,
     checkAi,
@@ -105,7 +121,7 @@
     /** Repository path for AI agent */
     repoPath?: string | null;
     /** Current diff spec for artifact persistence */
-    spec?: DiffSpec | null;
+    spec?: DiffSpecType | null;
     /** Agent state for this tab's chat session */
     agentState?: AgentState | null;
     /** Called after a successful commit */
@@ -115,13 +131,17 @@
      * @param spec - The diff spec to load comments for
      * @param repoPath - The repo path
      */
-    onReloadCommentsForTab?: (spec: DiffSpec, repoPath: string | null) => Promise<void>;
+    onReloadCommentsForTab?: (spec: DiffSpecType, repoPath: string | null) => Promise<void>;
     /**
      * Callback when an artifact is saved (to update the tab's artifact list).
      * @param artifact - The saved artifact
      * @param repoPath - The repo path where the artifact belongs
      */
     onArtifactSaved?: (artifact: Artifact, repoPath: string | null) => void;
+    /** Called when user selects a preset diff */
+    onPresetSelect?: (preset: DiffPreset) => void;
+    /** Called when user selects a custom diff (from modal or PR selector) */
+    onCustomDiff?: (spec: DiffSpecType, label?: string, prNumber?: number) => Promise<void>;
   }
 
   let {
@@ -138,6 +158,8 @@
     onCommit,
     onReloadCommentsForTab,
     onArtifactSaved,
+    onPresetSelect,
+    onCustomDiff,
   }: Props = $props();
 
   let collapsedDirs = $state(new Set<string>());
@@ -146,8 +168,69 @@
   let showCommitModal = $state(false);
   let copiedFeedback = $state(false);
 
+  // Diff selector state
+  let diffDropdownOpen = $state(false);
+  let showCustomModal = $state(false);
+  let showPRModal = $state(false);
+
   // Commit button state
   let canCommit = $derived(isWorkingTree && files.length > 0);
+
+  // Get current display label for diff selector
+  let currentLabel = $derived(getDisplayLabel());
+
+  // Check if current selection matches a preset
+  function isPresetSelected(preset: DiffPreset): boolean {
+    return DiffSpec.display(preset.spec) === DiffSpec.display(diffSelection.spec);
+  }
+
+  // Get display string for a DiffSpec in the dropdown
+  function getSpecDisplay(spec: DiffSpecType): string {
+    return DiffSpec.display(spec);
+  }
+
+  // Get initial base string for the custom modal
+  function getInitialBase(): string {
+    return gitRefDisplay(diffSelection.spec.base);
+  }
+
+  // Get initial head string for the custom modal
+  function getInitialHead(): string {
+    return gitRefDisplay(diffSelection.spec.head);
+  }
+
+  function handlePresetSelect(preset: DiffPreset) {
+    diffDropdownOpen = false;
+    onPresetSelect?.(preset);
+  }
+
+  function handleCustomClick() {
+    diffDropdownOpen = false;
+    showCustomModal = true;
+  }
+
+  function handlePRClick() {
+    diffDropdownOpen = false;
+    showPRModal = true;
+  }
+
+  async function handlePRSubmit(spec: DiffSpecType, label: string, prNumber: number) {
+    // Modal will close itself after this completes
+    await onCustomDiff?.(spec, label, prNumber);
+  }
+
+  function handleCustomSubmit(spec: DiffSpecType) {
+    showCustomModal = false;
+    onCustomDiff?.(spec);
+  }
+
+  // Close dropdown when clicking outside
+  function handleClickOutside(event: MouseEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.diff-selector')) {
+      diffDropdownOpen = false;
+    }
+  }
 
   // AI analysis state
   let isAiLoading = $derived(smartDiffState.loading);
@@ -1042,22 +1125,55 @@
   {/each}
 {/snippet}
 
+<svelte:window onclick={handleClickOutside} />
+
 <div class="sidebar-content">
+  <!-- Diff selector -->
+  <div class="diff-selector">
+    <button
+      class="diff-selector-btn"
+      onclick={() => (diffDropdownOpen = !diffDropdownOpen)}
+      class:open={diffDropdownOpen}
+    >
+      <GitCompareArrows size={14} />
+      <span class="diff-label">{currentLabel}</span>
+      <ChevronDown size={12} />
+    </button>
+
+    {#if diffDropdownOpen}
+      <div class="dropdown diff-dropdown">
+        {#each getPresets() as preset}
+          <button
+            class="dropdown-item diff-item"
+            class:active={isPresetSelected(preset)}
+            onclick={() => handlePresetSelect(preset)}
+          >
+            <GitCompareArrows size={14} />
+            <div class="diff-item-content">
+              <span class="diff-item-label">{preset.label}</span>
+              <span class="diff-item-spec">{getSpecDisplay(preset.spec)}</span>
+            </div>
+          </button>
+        {/each}
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item custom-item" onclick={handlePRClick}>
+          <GitPullRequest size={12} />
+          <span>Pull Request...</span>
+        </button>
+        <button class="dropdown-item custom-item" onclick={handleCustomClick}>
+          <Settings2 size={12} />
+          <span>Custom range...</span>
+        </button>
+      </div>
+    {/if}
+  </div>
+
   <!-- Search bar -->
   <CrossFileSearchBar {files} {loadFileDiff} />
 
   {#if loading}
     <div class="loading-state">
       <p>Loading...</p>
-    </div>
-  {:else if files.length === 0}
-    <div class="empty-state">
-      <p>No changes</p>
-      {#if isWorkingTree}
-        <p class="empty-hint">Working tree is clean</p>
-      {:else}
-        <p class="empty-hint">No differences between refs</p>
-      {/if}
     </div>
   {:else}
     <div class="file-list">
@@ -1288,6 +1404,23 @@
   />
 {/if}
 
+{#if showCustomModal}
+  <DiffSelectorModal
+    initialBase={getInitialBase()}
+    initialHead={getInitialHead()}
+    onSubmit={handleCustomSubmit}
+    onClose={() => (showCustomModal = false)}
+  />
+{/if}
+
+{#if showPRModal}
+  <PRSelectorModal
+    repoPath={repoState.currentPath}
+    onSubmit={handlePRSubmit}
+    onClose={() => (showPRModal = false)}
+  />
+{/if}
+
 <style>
   .sidebar-content {
     display: flex;
@@ -1297,20 +1430,151 @@
     overflow-x: hidden;
   }
 
-  .loading-state,
-  .empty-state {
-    padding: 20px 16px;
-    text-align: center;
+  /* Diff selector */
+  .diff-selector {
+    position: relative;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  /* Reduce top margin of first section after diff selector */
+  .diff-selector + .file-list .section-header:first-child {
+    margin-top: 8px;
+  }
+
+  .diff-selector-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--bg-primary);
+    border: none;
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .diff-selector-btn:hover,
+  .diff-selector-btn.open {
+    background: var(--bg-hover);
+  }
+
+  .diff-selector-btn :global(svg) {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  .diff-selector-btn :global(svg:last-child) {
+    margin-left: auto;
+    transition: transform 0.15s;
+  }
+
+  .diff-selector-btn.open :global(svg:last-child) {
+    transform: rotate(180deg);
+  }
+
+  .diff-label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+  }
+
+  /* Dropdown */
+  .dropdown {
+    position: absolute;
+    top: 100%;
+    left: 8px;
+    right: 8px;
+    margin-top: 4px;
+    background: var(--bg-chrome);
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    box-shadow: var(--shadow-elevated);
+    overflow: hidden;
+    z-index: 100;
+  }
+
+  .diff-dropdown {
+    padding-bottom: 4px;
+  }
+
+  .dropdown-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: var(--size-xs);
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .dropdown-item:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .dropdown-item.active {
+    background-color: var(--bg-primary);
+  }
+
+  .diff-item {
+    align-items: flex-start;
+  }
+
+  .diff-item :global(svg) {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .diff-item-content {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .diff-item-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .diff-item-spec {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: calc(var(--size-xs) - 1px);
+    color: var(--text-faint);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .dropdown-divider {
+    height: 1px;
+    background: var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  .custom-item {
     color: var(--text-muted);
   }
 
-  .empty-state p {
-    margin: 0;
+  .custom-item :global(svg) {
+    color: var(--text-muted);
   }
 
-  .empty-hint {
-    font-size: var(--size-sm);
-    margin-top: 4px !important;
+  .loading-state {
+    padding: 20px 16px;
+    text-align: center;
+    color: var(--text-muted);
   }
 
   .view-toggle {
@@ -1340,7 +1604,7 @@
 
   .file-list {
     flex-shrink: 0;
-    padding: 8px 0;
+    padding: 0;
   }
 
   .tree-section {
@@ -1366,28 +1630,38 @@
 
   .section-left {
     display: flex;
+    align-items: center;
     justify-content: flex-start;
     gap: 4px;
   }
 
+  .section-left::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-muted);
+    margin-left: 4px;
+  }
+
   .section-right {
     display: flex;
+    align-items: center;
     justify-content: flex-end;
     gap: 4px;
+  }
+
+  .section-right::before {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border-muted);
+    margin-right: 4px;
   }
 
   .section-divider {
     display: flex;
     align-items: center;
-    gap: 8px;
-  }
-
-  .section-divider::before,
-  .section-divider::after {
-    content: '';
-    width: 16px;
-    height: 1px;
-    background: var(--border-muted);
+    gap: 6px;
   }
 
   .divider-label {
