@@ -9,6 +9,7 @@
   import EmptyState from './lib/EmptyState.svelte';
   import TopBar from './lib/TopBar.svelte';
   import ProjectHome from './lib/ProjectHome.svelte';
+  import BranchHome from './lib/BranchHome.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
   import TabBar from './lib/TabBar.svelte';
@@ -84,9 +85,9 @@
     openRepo,
     getRecentRepos,
   } from './lib/stores/repoState.svelte';
-  // View mode: 'projects' = artifact-centric view, 'diff' = traditional diff viewer
-  type ViewMode = 'projects' | 'diff';
-  let viewMode = $state<ViewMode>('projects');
+  // View mode: 'branches' = branch workflow, 'projects' = artifact-centric view, 'diff' = traditional diff viewer
+  type ViewMode = 'branches' | 'projects' | 'diff';
+  let viewMode = $state<ViewMode>('branches');
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -635,7 +636,10 @@
 </script>
 
 <main>
-  {#if viewMode === 'projects'}
+  {#if viewMode === 'branches'}
+    <!-- Branch-based workflow view -->
+    <BranchHome />
+  {:else if viewMode === 'projects'}
     <!-- Artifact-centric project view -->
     <ProjectHome />
   {:else}
