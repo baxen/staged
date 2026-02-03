@@ -344,7 +344,7 @@ async fn run_acp_session_inner(
         .spawn()
         .map_err(|e| format!("Failed to spawn {}: {}", agent_name, e))?;
 
-    // Get stdin/stdout
+    // Get stdin/stdout/stderr
     let stdin = child
         .stdin
         .take()
@@ -353,6 +353,21 @@ async fn run_acp_session_inner(
         .stdout
         .take()
         .ok_or_else(|| "Failed to get stdout from agent process".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "Failed to get stderr from agent process".to_string())?;
+
+    // Spawn a task to read and log stderr
+    let agent_name_for_stderr = agent_name.to_string();
+    tokio::task::spawn_local(async move {
+        use tokio::io::AsyncBufReadExt;
+        let reader = tokio::io::BufReader::new(stderr);
+        let mut lines = reader.lines();
+        while let Ok(Some(line)) = lines.next_line().await {
+            log::debug!("[ACP stderr {}] {}", agent_name_for_stderr, line);
+        }
+    });
 
     // Convert to futures-compatible async read/write
     let stdin_compat = stdin.compat_write();
