@@ -728,7 +728,7 @@
         if (smartDiffState.changesetSummary && capturedAgentState) {
           const artifact = createArtifactFromSummary(smartDiffState.changesetSummary);
           // Save to database
-          await saveArtifact(capturedRepoPath, capturedSpec, artifact);
+          await saveArtifact(capturedSpec, artifact, capturedRepoPath ?? undefined);
           // Add to UI immediately
           capturedAgentState.artifacts.push(artifact);
         }
@@ -1363,9 +1363,21 @@
             {#if hasFileAnnotations}
               <button
                 class="view-ai-btn"
-                class:active={showAnnotations}
-                onclick={() => toggleAnnotations()}
-                title={showAnnotations ? 'Hide AI annotations' : 'Show AI annotations'}
+                class:active={showAnnotations && smartDiffState.annotationsRevealed}
+                onclick={() => {
+                  // Toggle both showAnnotations and annotationsRevealed together
+                  // so clicking the eye directly shows/hides the overlay
+                  const newState = !smartDiffState.annotationsRevealed;
+                  if (newState) {
+                    // Turn on: ensure both flags are true
+                    if (!smartDiffState.showAnnotations) toggleAnnotations();
+                    smartDiffState.annotationsRevealed = true;
+                  } else {
+                    // Turn off: just hide the reveal
+                    smartDiffState.annotationsRevealed = false;
+                  }
+                }}
+                title={smartDiffState.annotationsRevealed ? 'Hide AI annotations' : 'Show AI annotations'}
               >
                 <Eye size={12} />
               </button>
@@ -2149,7 +2161,7 @@
     background: none;
     border: none;
     border-radius: 3px;
-    color: var(--text-accent);
+    color: var(--text-muted);
     cursor: pointer;
     transition:
       background-color 0.1s,
