@@ -6,7 +6,7 @@
   import Sidebar from './lib/Sidebar.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
-  import TopBar from './lib/TopBar.svelte';
+
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
   import AgentSetupModal from './lib/AgentSetupModal.svelte';
@@ -706,8 +706,6 @@
     <div class="titlebar-spacer" data-tauri-drag-region></div>
   {/if}
 
-  <TopBar onPresetSelect={handlePresetSelect} onCustomDiff={handleCustomDiff} />
-
   <div class="app-container" class:sidebar-left={preferences.sidebarPosition === 'left'}>
     <section class="main-content">
       {#if showEmptyState}
@@ -756,6 +754,8 @@
         repoPath={repoState.currentPath}
         spec={diffSelection.spec}
         agentState={getActiveTab()?.agentState}
+        onPresetSelect={handlePresetSelect}
+        onCustomDiff={handleCustomDiff}
       />
     </aside>
   </div>
@@ -818,7 +818,7 @@
     display: flex;
     flex: 1;
     overflow: hidden;
-    padding: 0 8px 8px 8px;
+    padding: 12px 8px;
     gap: 8px;
   }
 

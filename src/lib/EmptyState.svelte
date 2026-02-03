@@ -11,8 +11,8 @@
 <div class="empty-state-container">
   <GitTreeAnimation />
   <div class="message">
-    <p class="title">The current selection has no changes</p>
-    <p class="subtitle">Choose a repo and change set on the top left</p>
+    <p class="title">No changes to review</p>
+    <p class="subtitle">Select a different changeset, or chat with the agent to start working</p>
   </div>
 </div>
 
