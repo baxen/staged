@@ -1340,6 +1340,168 @@ fn get_running_session(
         .map_err(|e| e.to_string())
 }
 
+/// Response from starting a branch session
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StartBranchSessionResponse {
+    branch_session_id: String,
+    ai_session_id: String,
+}
+
+/// Start a new session on a branch.
+/// Creates an AI session, then a branch_session record linking to it, and sends the prompt.
+#[tauri::command(rename_all = "camelCase")]
+async fn start_branch_session(
+    state: State<'_, Arc<Store>>,
+    session_manager: State<'_, Arc<SessionManager>>,
+    branch_id: String,
+    prompt: String,
+) -> Result<StartBranchSessionResponse, String> {
+    // Get the branch to find the worktree path
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    // Check if there's already a running session
+    if let Some(running) = state
+        .get_running_session(&branch_id)
+        .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "Branch already has a running session: {}",
+            running.id
+        ));
+    }
+
+    // Create an AI session in the worktree directory FIRST
+    // This way we have the ai_session_id to store in the branch session
+    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    let ai_session_id = session_manager
+        .create_session(worktree_path, None)
+        .await
+        .map_err(|e| format!("Failed to create AI session: {}", e))?;
+
+    // Create the branch session record with the AI session ID
+    let branch_session = BranchSession::new_running(&branch_id, &ai_session_id, &prompt);
+    state
+        .create_branch_session(&branch_session)
+        .map_err(|e| format!("Failed to create branch session: {}", e))?;
+
+    // Send the prompt (this runs async in background)
+    if let Err(e) = session_manager.send_prompt(&ai_session_id, prompt).await {
+        // Clean up on failure
+        let _ = state.delete_branch_session(&branch_session.id);
+        return Err(format!("Failed to send prompt: {}", e));
+    }
+
+    Ok(StartBranchSessionResponse {
+        branch_session_id: branch_session.id,
+        ai_session_id,
+    })
+}
+
+/// Mark a branch session as completed with a commit SHA.
+#[tauri::command(rename_all = "camelCase")]
+fn complete_branch_session(
+    state: State<'_, Arc<Store>>,
+    branch_session_id: String,
+    commit_sha: String,
+) -> Result<(), String> {
+    state
+        .update_branch_session_completed(&branch_session_id, &commit_sha)
+        .map_err(|e| e.to_string())
+}
+
+/// Mark a branch session as failed with an error message.
+#[tauri::command(rename_all = "camelCase")]
+fn fail_branch_session(
+    state: State<'_, Arc<Store>>,
+    branch_session_id: String,
+    error_message: String,
+) -> Result<(), String> {
+    state
+        .update_branch_session_error(&branch_session_id, &error_message)
+        .map_err(|e| e.to_string())
+}
+
+/// Cancel a running branch session (deletes the record).
+/// Used to recover from stuck sessions.
+#[tauri::command(rename_all = "camelCase")]
+fn cancel_branch_session(
+    state: State<'_, Arc<Store>>,
+    branch_session_id: String,
+) -> Result<(), String> {
+    state
+        .delete_branch_session(&branch_session_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Recover orphaned sessions for a branch.
+/// If there's a "running" session but no live AI session, check if commits were made
+/// and mark the session as completed or errored accordingly.
+#[tauri::command(rename_all = "camelCase")]
+fn recover_orphaned_session(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+) -> Result<Option<BranchSession>, String> {
+    // Check if there's a running session
+    let running = state
+        .get_running_session(&branch_id)
+        .map_err(|e| e.to_string())?;
+
+    let Some(session) = running else {
+        return Ok(None);
+    };
+
+    // Get the branch to check for commits
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    // Get HEAD commit in the worktree
+    let worktree_path = std::path::Path::new(&branch.worktree_path);
+    let head_sha = git::get_head_sha(worktree_path).map_err(|e| e.to_string())?;
+
+    // Get commits since base to see if there are any new ones
+    let commits = git::get_commits_since_base(worktree_path, &branch.base_branch)
+        .map_err(|e| e.to_string())?;
+
+    if !commits.is_empty() {
+        // There are commits - mark session as completed with the HEAD commit
+        state
+            .update_branch_session_completed(&session.id, &head_sha)
+            .map_err(|e| e.to_string())?;
+
+        // Return the updated session
+        state
+            .get_branch_session(&session.id)
+            .map_err(|e| e.to_string())
+    } else {
+        // No commits - mark as error (session ran but produced nothing)
+        state
+            .update_branch_session_error(&session.id, "Session ended without creating a commit")
+            .map_err(|e| e.to_string())?;
+
+        state
+            .get_branch_session(&session.id)
+            .map_err(|e| e.to_string())
+    }
+}
+
+/// Get a branch session by its AI session ID.
+/// Used by the frontend to look up branch sessions when AI session status changes.
+#[tauri::command(rename_all = "camelCase")]
+fn get_branch_session_by_ai_session(
+    state: State<'_, Arc<Store>>,
+    ai_session_id: String,
+) -> Result<Option<BranchSession>, String> {
+    state
+        .get_branch_session_by_ai_session(&ai_session_id)
+        .map_err(|e| e.to_string())
+}
+
 /// Get the HEAD commit SHA for a branch's worktree.
 #[tauri::command(rename_all = "camelCase")]
 fn get_branch_head(state: State<'_, Arc<Store>>, branch_id: String) -> Result<String, String> {
@@ -1831,6 +1993,12 @@ pub fn run() {
             list_branch_sessions,
             get_session_for_commit,
             get_running_session,
+            start_branch_session,
+            complete_branch_session,
+            fail_branch_session,
+            cancel_branch_session,
+            recover_orphaned_session,
+            get_branch_session_by_ai_session,
             get_branch_head,
             // Theme commands
             get_custom_themes,

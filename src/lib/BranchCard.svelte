@@ -6,27 +6,51 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { GitBranch, GitCommit, Eye, Plus, Trash2, Loader2, Clock, Play } from 'lucide-svelte';
+  import {
+    GitBranch,
+    GitCommit,
+    Eye,
+    Plus,
+    Trash2,
+    Loader2,
+    Clock,
+    Play,
+    MessageSquare,
+  } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession } from './services/branch';
   import * as branchService from './services/branch';
+  import SessionViewerModal from './SessionViewerModal.svelte';
 
   interface Props {
     branch: Branch;
+    /** Increment to force a data refresh */
+    refreshKey?: number;
     onNewSession?: () => void;
     onViewDiff?: () => void;
     onDelete?: () => void;
   }
 
-  let { branch, onNewSession, onViewDiff, onDelete }: Props = $props();
+  let { branch, refreshKey = 0, onNewSession, onViewDiff, onDelete }: Props = $props();
 
   // State
   let commits = $state<CommitInfo[]>([]);
   let runningSession = $state<BranchSession | null>(null);
   let loading = $state(true);
 
-  // Load commits and running session
+  // Session viewer modal state
+  let showSessionViewer = $state(false);
+  let viewingSession = $state<BranchSession | null>(null);
+
+  // Load commits and running session on mount
   onMount(async () => {
     await loadData();
+  });
+
+  // Reload when refreshKey changes
+  $effect(() => {
+    if (refreshKey > 0) {
+      loadData();
+    }
   });
 
   async function loadData() {
@@ -72,8 +96,15 @@
   }
 
   function handleWatchSession() {
-    // TODO: Open session viewer
-    console.log('Watch running session');
+    if (runningSession?.aiSessionId) {
+      viewingSession = runningSession;
+      showSessionViewer = true;
+    }
+  }
+
+  function closeSessionViewer() {
+    showSessionViewer = false;
+    viewingSession = null;
   }
 </script>
 
@@ -100,24 +131,36 @@
         <span>Loading...</span>
       </div>
     {:else}
-      <!-- Running session indicator -->
-      {#if runningSession}
-        <button class="running-session" onclick={handleWatchSession}>
-          <div class="session-indicator">
-            <Loader2 size={12} class="spinner" />
-            <span class="session-label">Session running...</span>
-          </div>
-          <p class="session-prompt">{runningSession.prompt}</p>
-        </button>
-      {/if}
-
-      <!-- Commits list -->
-      {#if commits.length > 0}
+      <!-- Commits list (with running session as skeleton at top) -->
+      {#if commits.length > 0 || runningSession}
         <div class="commits-list">
-          {#each commits as commit, index (commit.sha)}
-            <div class="commit-row" class:is-head={index === 0}>
+          <!-- Running session as skeleton commit -->
+          {#if runningSession}
+            <button class="commit-row skeleton-commit" onclick={handleWatchSession}>
               <div class="commit-marker">
-                {#if index === 0}
+                <Loader2 size={12} class="spinner skeleton-spinner" />
+                {#if commits.length > 0}
+                  <div class="commit-line"></div>
+                {/if}
+              </div>
+              <div class="commit-info">
+                <span class="commit-subject skeleton-subject">{runningSession.prompt}</span>
+                <div class="commit-meta">
+                  <span class="commit-sha skeleton-sha">generating...</span>
+                </div>
+              </div>
+              <div class="watch-button">
+                <MessageSquare size={12} />
+                Watch
+              </div>
+            </button>
+          {/if}
+
+          <!-- Real commits -->
+          {#each commits as commit, index (commit.sha)}
+            <div class="commit-row" class:is-head={index === 0 && !runningSession}>
+              <div class="commit-marker">
+                {#if index === 0 && !runningSession}
                   <div class="head-marker"></div>
                 {:else}
                   <div class="commit-dot"></div>
@@ -155,6 +198,15 @@
     </button>
   </div>
 </div>
+
+<!-- Session viewer modal -->
+{#if showSessionViewer && viewingSession?.aiSessionId}
+  <SessionViewerModal
+    sessionId={viewingSession.aiSessionId}
+    title={viewingSession.prompt}
+    onClose={closeSessionViewer}
+  />
+{/if}
 
 <style>
   .branch-card {
@@ -239,49 +291,6 @@
     gap: 8px;
     color: var(--text-muted);
     font-size: var(--size-sm);
-  }
-
-  /* Running session */
-  .running-session {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    width: 100%;
-    padding: 10px 12px;
-    margin-bottom: 12px;
-    background-color: var(--bg-hover);
-    border: 1px solid var(--border-subtle);
-    border-radius: 6px;
-    cursor: pointer;
-    text-align: left;
-    transition: border-color 0.15s ease;
-  }
-
-  .running-session:hover {
-    border-color: var(--ui-accent);
-  }
-
-  .session-indicator {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    color: var(--ui-accent);
-    font-size: var(--size-xs);
-    font-weight: 500;
-  }
-
-  .session-label {
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .session-prompt {
-    margin: 0;
-    font-size: var(--size-sm);
-    color: var(--text-muted);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* Commits list */
@@ -421,6 +430,73 @@
   .new-session-button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  /* Skeleton commit (running session) */
+  .skeleton-commit {
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    border-radius: 6px;
+    margin: -4px;
+    padding: 10px;
+    transition: background-color 0.15s ease;
+  }
+
+  .skeleton-commit:hover {
+    background-color: var(--bg-hover);
+  }
+
+  :global(.skeleton-spinner) {
+    color: var(--ui-accent);
+  }
+
+  .skeleton-subject {
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  .skeleton-sha {
+    background: linear-gradient(
+      90deg,
+      var(--bg-hover) 25%,
+      var(--bg-primary) 50%,
+      var(--bg-hover) 75%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: 4px;
+    padding: 0 4px;
+  }
+
+  .watch-button {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .skeleton-commit:hover .watch-button {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+  }
+
+  @keyframes shimmer {
+    0% {
+      background-position: 200% 0;
+    }
+    100% {
+      background-position: -200% 0;
+    }
   }
 
   /* Spinner animation */

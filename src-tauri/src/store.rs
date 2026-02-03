@@ -348,6 +348,8 @@ impl BranchSessionStatus {
 pub struct BranchSession {
     pub id: String,
     pub branch_id: String,
+    /// The AI session ID (for watching/resuming)
+    pub ai_session_id: Option<String>,
     /// The commit SHA produced by this session (null while running)
     pub commit_sha: Option<String>,
     pub status: BranchSessionStatus,
@@ -361,11 +363,16 @@ pub struct BranchSession {
 
 impl BranchSession {
     /// Create a new session in running state.
-    pub fn new_running(branch_id: impl Into<String>, prompt: impl Into<String>) -> Self {
+    pub fn new_running(
+        branch_id: impl Into<String>,
+        ai_session_id: impl Into<String>,
+        prompt: impl Into<String>,
+    ) -> Self {
         let now = now_timestamp();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
             branch_id: branch_id.into(),
+            ai_session_id: Some(ai_session_id.into()),
             commit_sha: None,
             status: BranchSessionStatus::Running,
             prompt: prompt.into(),
@@ -377,16 +384,17 @@ impl BranchSession {
 
     /// Create a BranchSession from a database row.
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
-        let status_str: String = row.get(3)?;
+        let status_str: String = row.get(4)?;
         Ok(Self {
             id: row.get(0)?,
             branch_id: row.get(1)?,
-            commit_sha: row.get(2)?,
+            ai_session_id: row.get(2)?,
+            commit_sha: row.get(3)?,
             status: BranchSessionStatus::parse(&status_str),
-            prompt: row.get(4)?,
-            error_message: row.get(5)?,
-            created_at: row.get(6)?,
-            updated_at: row.get(7)?,
+            prompt: row.get(5)?,
+            error_message: row.get(6)?,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
         })
     }
 }
@@ -541,6 +549,7 @@ impl Store {
             CREATE TABLE IF NOT EXISTS branch_sessions (
                 id TEXT PRIMARY KEY,
                 branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                ai_session_id TEXT,
                 commit_sha TEXT,
                 status TEXT NOT NULL,
                 prompt TEXT NOT NULL,
@@ -591,6 +600,22 @@ impl Store {
 
         if !has_session_id {
             conn.execute("ALTER TABLE artifacts ADD COLUMN session_id TEXT", [])?;
+        }
+
+        // Check if ai_session_id column exists on branch_sessions, add if not
+        let has_ai_session_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('branch_sessions') WHERE name = 'ai_session_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_ai_session_id {
+            conn.execute(
+                "ALTER TABLE branch_sessions ADD COLUMN ai_session_id TEXT",
+                [],
+            )?;
         }
 
         Ok(())
@@ -1237,11 +1262,12 @@ impl Store {
     pub fn create_branch_session(&self, session: &BranchSession) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO branch_sessions (id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO branch_sessions (id, branch_id, ai_session_id, commit_sha, status, prompt, error_message, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             params![
                 &session.id,
                 &session.branch_id,
+                &session.ai_session_id,
                 &session.commit_sha,
                 session.status.as_str(),
                 &session.prompt,
@@ -1265,7 +1291,7 @@ impl Store {
     pub fn get_branch_session(&self, id: &str) -> Result<Option<BranchSession>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+            "SELECT id, branch_id, ai_session_id, commit_sha, status, prompt, error_message, created_at, updated_at
              FROM branch_sessions WHERE id = ?1",
             params![id],
             BranchSession::from_row,
@@ -1278,7 +1304,7 @@ impl Store {
     pub fn list_branch_sessions(&self, branch_id: &str) -> Result<Vec<BranchSession>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+            "SELECT id, branch_id, ai_session_id, commit_sha, status, prompt, error_message, created_at, updated_at
              FROM branch_sessions WHERE branch_id = ?1 ORDER BY created_at ASC",
         )?;
         let sessions = stmt
@@ -1295,7 +1321,7 @@ impl Store {
     ) -> Result<Option<BranchSession>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+            "SELECT id, branch_id, ai_session_id, commit_sha, status, prompt, error_message, created_at, updated_at
              FROM branch_sessions WHERE branch_id = ?1 AND commit_sha = ?2",
             params![branch_id, commit_sha],
             BranchSession::from_row,
@@ -1308,9 +1334,25 @@ impl Store {
     pub fn get_running_session(&self, branch_id: &str) -> Result<Option<BranchSession>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, branch_id, commit_sha, status, prompt, error_message, created_at, updated_at
+            "SELECT id, branch_id, ai_session_id, commit_sha, status, prompt, error_message, created_at, updated_at
              FROM branch_sessions WHERE branch_id = ?1 AND status = 'running'",
             params![branch_id],
+            BranchSession::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Get a branch session by its AI session ID
+    pub fn get_branch_session_by_ai_session(
+        &self,
+        ai_session_id: &str,
+    ) -> Result<Option<BranchSession>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, commit_sha, status, prompt, error_message, created_at, updated_at
+             FROM branch_sessions WHERE ai_session_id = ?1",
+            params![ai_session_id],
             BranchSession::from_row,
         )
         .optional()
