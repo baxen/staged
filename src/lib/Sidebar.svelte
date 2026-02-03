@@ -1377,7 +1377,9 @@
                     smartDiffState.annotationsRevealed = false;
                   }
                 }}
-                title={smartDiffState.annotationsRevealed ? 'Hide AI annotations' : 'Show AI annotations'}
+                title={smartDiffState.annotationsRevealed
+                  ? 'Hide AI annotations'
+                  : 'Show AI annotations'}
               >
                 <Eye size={12} />
               </button>
@@ -1939,14 +1941,14 @@
   /* Delete button for comments */
   .comment-delete-btn {
     position: absolute;
-    right: 8px;
+    right: 12px;
     top: 50%;
     transform: translateY(-50%);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 4px;
-    background: var(--bg-chrome);
+    background: none;
     border: none;
     border-radius: 4px;
     color: var(--text-faint);
@@ -1965,7 +1967,7 @@
 
   .comment-delete-btn:hover {
     color: var(--status-deleted);
-    background-color: var(--bg-hover);
+    background-color: var(--bg-primary);
   }
 
   /* AI comment styling */
