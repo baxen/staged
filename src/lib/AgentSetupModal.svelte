@@ -59,8 +59,14 @@
     try {
       const newProviders = await discoverAcpProviders();
       // Only update if providers actually changed (avoid UI flicker)
-      const currentIds = availableProviders.map((p) => p.id).sort().join(',');
-      const newIds = newProviders.map((p) => p.id).sort().join(',');
+      const currentIds = availableProviders
+        .map((p) => p.id)
+        .sort()
+        .join(',');
+      const newIds = newProviders
+        .map((p) => p.id)
+        .sort()
+        .join(',');
       if (currentIds !== newIds) {
         availableProviders = newProviders;
       }
@@ -144,10 +150,7 @@
                 {/if}
               </button>
               {#if !available}
-                <button
-                  class="install-btn"
-                  onclick={() => openInstallUrl(agent.installUrl)}
-                >
+                <button class="install-btn" onclick={() => openInstallUrl(agent.installUrl)}>
                   <ExternalLink size={12} />
                   Install
                 </button>
@@ -157,9 +160,7 @@
         </div>
 
         {#if availableProviders.length === 0}
-          <div class="no-agents-hint">
-            Install an AI agent and click Refresh to continue
-          </div>
+          <div class="no-agents-hint">Install an AI agent and click Refresh to continue</div>
         {/if}
       {/if}
     </div>
@@ -169,11 +170,7 @@
         <span class="spin-container" class:spinning={refreshing}><RefreshCw size={14} /></span>
         {refreshing ? 'Refreshing...' : 'Refresh'}
       </button>
-      <button
-        class="continue-btn"
-        onclick={handleContinue}
-        disabled={!selectedAgent || refreshing}
-      >
+      <button class="continue-btn" onclick={handleContinue} disabled={!selectedAgent || refreshing}>
         Continue
       </button>
     </footer>

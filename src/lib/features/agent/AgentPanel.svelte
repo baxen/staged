@@ -132,7 +132,11 @@
 
           // Use saved preference if available, otherwise fall back to first available
           const savedAgent = preferences.aiAgent;
-          if (savedAgent && providers.some((p) => p.id === savedAgent) && isValidProvider(savedAgent)) {
+          if (
+            savedAgent &&
+            providers.some((p) => p.id === savedAgent) &&
+            isValidProvider(savedAgent)
+          ) {
             agentState.provider = savedAgent as AcpProvider;
           } else if (providers.length > 0 && !providers.some((p) => p.id === agentState.provider)) {
             // If current provider is not available, switch to first available valid one

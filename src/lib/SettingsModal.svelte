@@ -112,8 +112,14 @@
     try {
       const newProviders = await discoverAcpProviders();
       // Only update if providers actually changed (avoid UI flicker)
-      const currentIds = agentGlobalState.availableProviders.map((p) => p.id).sort().join(',');
-      const newIds = newProviders.map((p) => p.id).sort().join(',');
+      const currentIds = agentGlobalState.availableProviders
+        .map((p) => p.id)
+        .sort()
+        .join(',');
+      const newIds = newProviders
+        .map((p) => p.id)
+        .sort()
+        .join(',');
       if (currentIds !== newIds) {
         agentGlobalState.availableProviders = newProviders;
       }
@@ -432,7 +438,9 @@
                 disabled={refreshingProviders}
                 title="Check for newly installed agents"
               >
-                <span class="spin-container" class:spinning={refreshingProviders}><RefreshCw size={12} /></span>
+                <span class="spin-container" class:spinning={refreshingProviders}
+                  ><RefreshCw size={12} /></span
+                >
               </button>
             </div>
             <div class="agents-list-settings">
@@ -803,7 +811,9 @@
     color: var(--text-faint);
     cursor: pointer;
     border-radius: 4px;
-    transition: color 0.1s, background-color 0.1s;
+    transition:
+      color 0.1s,
+      background-color 0.1s;
   }
 
   .refresh-btn-small:not(:disabled):hover {
@@ -837,7 +847,9 @@
     border: 2px solid transparent;
     border-radius: 6px;
     cursor: pointer;
-    transition: border-color 0.15s, background-color 0.15s;
+    transition:
+      border-color 0.15s,
+      background-color 0.15s;
   }
 
   .agent-select-btn:not(:disabled):hover {
@@ -877,7 +889,9 @@
     border-radius: 4px;
     color: var(--text-muted);
     cursor: pointer;
-    transition: color 0.1s, border-color 0.1s;
+    transition:
+      color 0.1s,
+      border-color 0.1s;
   }
 
   .install-link:hover {

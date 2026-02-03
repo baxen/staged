@@ -743,51 +743,51 @@
       {#if showEmptyState}
         <EmptyState />
       {:else if diffState.loading}
-          <div class="loading-state">
-            <p>Loading...</p>
-          </div>
-        {:else if diffState.error}
-          <div class="error-state">
-            <AlertCircle size={18} />
-            <p class="error-message">{diffState.error}</p>
-          </div>
-        {:else}
-          <DiffViewer
-            diff={currentDiff}
-            sizeBase={preferences.sizeBase}
-            syntaxThemeVersion={preferences.syntaxThemeVersion}
-            loading={diffState.loadingFile !== null}
-            isReferenceFile={isCurrentFileReference}
-            agentState={getActiveTab()?.agentState}
-          />
-        {/if}
-      </section>
-      <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
-        <!-- Resize handle -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
-        <div
-          class="sidebar-resize-handle"
-          class:left={preferences.sidebarPosition === 'left'}
-          class:dragging={isDraggingSidebar}
-          onmousedown={handleSidebarResizeStart}
-          ondblclick={handleSidebarResizeDoubleClick}
-        >
-          <div class="resize-handle-bar"></div>
+        <div class="loading-state">
+          <p>Loading...</p>
         </div>
-
-        <Sidebar
-          files={diffState.files}
-          loading={diffState.loading}
-          onFileSelect={selectFile}
-          selectedFile={diffState.selectedFile}
-          {isWorkingTree}
-          onAddReferenceFile={() => (showFileSearch = true)}
-          onRemoveReferenceFile={handleRemoveReferenceFile}
-          repoPath={repoState.currentPath}
-          spec={diffSelection.spec}
+      {:else if diffState.error}
+        <div class="error-state">
+          <AlertCircle size={18} />
+          <p class="error-message">{diffState.error}</p>
+        </div>
+      {:else}
+        <DiffViewer
+          diff={currentDiff}
+          sizeBase={preferences.sizeBase}
+          syntaxThemeVersion={preferences.syntaxThemeVersion}
+          loading={diffState.loadingFile !== null}
+          isReferenceFile={isCurrentFileReference}
           agentState={getActiveTab()?.agentState}
         />
-      </aside>
+      {/if}
+    </section>
+    <aside class="sidebar" style="--sidebar-width: {preferences.sidebarWidth}">
+      <!-- Resize handle -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div
+        class="sidebar-resize-handle"
+        class:left={preferences.sidebarPosition === 'left'}
+        class:dragging={isDraggingSidebar}
+        onmousedown={handleSidebarResizeStart}
+        ondblclick={handleSidebarResizeDoubleClick}
+      >
+        <div class="resize-handle-bar"></div>
+      </div>
+
+      <Sidebar
+        files={diffState.files}
+        loading={diffState.loading}
+        onFileSelect={selectFile}
+        selectedFile={diffState.selectedFile}
+        {isWorkingTree}
+        onAddReferenceFile={() => (showFileSearch = true)}
+        onRemoveReferenceFile={handleRemoveReferenceFile}
+        repoPath={repoState.currentPath}
+        spec={diffSelection.spec}
+        agentState={getActiveTab()?.agentState}
+      />
+    </aside>
   </div>
 </main>
 
