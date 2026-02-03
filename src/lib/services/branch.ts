@@ -48,6 +48,28 @@ export interface CommitInfo {
   timestamp: number;
 }
 
+/** Status of a branch note */
+export type BranchNoteStatus = 'generating' | 'complete' | 'error';
+
+/** A markdown note attached to a branch */
+export interface BranchNote {
+  id: string;
+  branchId: string;
+  /** The AI session ID (for viewing the generation conversation) */
+  aiSessionId: string | null;
+  /** Title of the note */
+  title: string;
+  /** Markdown content of the note */
+  content: string;
+  status: BranchNoteStatus;
+  /** The user's prompt that started this note */
+  prompt: string;
+  /** Error message if status is 'error' */
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // =============================================================================
 // Branch Operations
 // =============================================================================
@@ -202,4 +224,84 @@ export async function getBranchSessionByAiSession(
   aiSessionId: string
 ): Promise<BranchSession | null> {
   return invoke<BranchSession | null>('get_branch_session_by_ai_session', { aiSessionId });
+}
+
+// =============================================================================
+// Note Operations
+// =============================================================================
+
+/** Response from starting a branch note */
+export interface StartBranchNoteResponse {
+  branchNoteId: string;
+  aiSessionId: string;
+}
+
+/**
+ * Start generating a new note on a branch.
+ * Creates an AI session, a branch_note record, and sends the prompt.
+ */
+export async function startBranchNote(
+  branchId: string,
+  title: string,
+  prompt: string
+): Promise<StartBranchNoteResponse> {
+  return invoke<StartBranchNoteResponse>('start_branch_note', { branchId, title, prompt });
+}
+
+/**
+ * List all notes for a branch.
+ */
+export async function listBranchNotes(branchId: string): Promise<BranchNote[]> {
+  return invoke<BranchNote[]>('list_branch_notes', { branchId });
+}
+
+/**
+ * Get a branch note by ID.
+ */
+export async function getBranchNote(noteId: string): Promise<BranchNote | null> {
+  return invoke<BranchNote | null>('get_branch_note', { noteId });
+}
+
+/**
+ * Get the currently generating note for a branch (if any).
+ */
+export async function getGeneratingNote(branchId: string): Promise<BranchNote | null> {
+  return invoke<BranchNote | null>('get_generating_note', { branchId });
+}
+
+/**
+ * Get a branch note by its AI session ID.
+ */
+export async function getBranchNoteByAiSession(aiSessionId: string): Promise<BranchNote | null> {
+  return invoke<BranchNote | null>('get_branch_note_by_ai_session', { aiSessionId });
+}
+
+/**
+ * Mark a branch note as completed with content.
+ */
+export async function completeBranchNote(noteId: string, content: string): Promise<void> {
+  return invoke<void>('complete_branch_note', { noteId, content });
+}
+
+/**
+ * Mark a branch note as failed with an error message.
+ */
+export async function failBranchNote(noteId: string, errorMessage: string): Promise<void> {
+  return invoke<void>('fail_branch_note', { noteId, errorMessage });
+}
+
+/**
+ * Delete a branch note.
+ */
+export async function deleteBranchNote(noteId: string): Promise<void> {
+  return invoke<void>('delete_branch_note', { noteId });
+}
+
+/**
+ * Recover an orphaned note for a branch.
+ * If there's a "generating" note but the AI session is idle, extracts the final
+ * message content and marks the note as complete.
+ */
+export async function recoverOrphanedNote(branchId: string): Promise<BranchNote | null> {
+  return invoke<BranchNote | null>('recover_orphaned_note', { branchId });
 }

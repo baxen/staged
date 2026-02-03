@@ -400,6 +400,103 @@ impl BranchSession {
 }
 
 // =============================================================================
+// Branch Note types
+// =============================================================================
+
+/// Status of a branch note.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchNoteStatus {
+    /// Note is currently being generated
+    Generating,
+    /// Note generation completed successfully
+    #[default]
+    Complete,
+    /// Note generation encountered an error
+    Error,
+}
+
+impl BranchNoteStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BranchNoteStatus::Generating => "generating",
+            BranchNoteStatus::Complete => "complete",
+            BranchNoteStatus::Error => "error",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "generating" => BranchNoteStatus::Generating,
+            "error" => BranchNoteStatus::Error,
+            _ => BranchNoteStatus::Complete,
+        }
+    }
+}
+
+/// A markdown note attached to a branch (AI-generated documentation).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchNote {
+    pub id: String,
+    pub branch_id: String,
+    /// The AI session ID (for viewing the generation conversation)
+    pub ai_session_id: Option<String>,
+    /// Title of the note
+    pub title: String,
+    /// Markdown content of the note
+    pub content: String,
+    pub status: BranchNoteStatus,
+    /// The user's prompt that started this note
+    pub prompt: String,
+    /// Error message if status is Error
+    pub error_message: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl BranchNote {
+    /// Create a new note in generating state.
+    pub fn new_generating(
+        branch_id: impl Into<String>,
+        ai_session_id: impl Into<String>,
+        title: impl Into<String>,
+        prompt: impl Into<String>,
+    ) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            branch_id: branch_id.into(),
+            ai_session_id: Some(ai_session_id.into()),
+            title: title.into(),
+            content: String::new(),
+            status: BranchNoteStatus::Generating,
+            prompt: prompt.into(),
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create a BranchNote from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let status_str: String = row.get(5)?;
+        Ok(Self {
+            id: row.get(0)?,
+            branch_id: row.get(1)?,
+            ai_session_id: row.get(2)?,
+            title: row.get(3)?,
+            content: row.get(4)?,
+            status: BranchNoteStatus::parse(&status_str),
+            prompt: row.get(6)?,
+            error_message: row.get(7)?,
+            created_at: row.get(8)?,
+            updated_at: row.get(9)?,
+        })
+    }
+}
+
+// =============================================================================
 // Error type
 // =============================================================================
 
@@ -558,9 +655,23 @@ impl Store {
                 updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS branch_notes (
+                id TEXT PRIMARY KEY,
+                branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                ai_session_id TEXT,
+                title TEXT NOT NULL,
+                content TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                error_message TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_branch_sessions_branch ON branch_sessions(branch_id);
             CREATE INDEX IF NOT EXISTS idx_branch_sessions_commit ON branch_sessions(branch_id, commit_sha);
             CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_path);
+            CREATE INDEX IF NOT EXISTS idx_branch_notes_branch ON branch_notes(branch_id);
             "#,
         )?;
 
@@ -1385,6 +1496,121 @@ impl Store {
     pub fn delete_branch_session(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM branch_sessions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Branch note operations
+    // =========================================================================
+
+    /// Create a new branch note
+    pub fn create_branch_note(&self, note: &BranchNote) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO branch_notes (id, branch_id, ai_session_id, title, content, status, prompt, error_message, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            params![
+                &note.id,
+                &note.branch_id,
+                &note.ai_session_id,
+                &note.title,
+                &note.content,
+                note.status.as_str(),
+                &note.prompt,
+                &note.error_message,
+                note.created_at,
+                note.updated_at,
+            ],
+        )?;
+
+        // Also touch the branch
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branches SET updated_at = ?1 WHERE id = ?2",
+            params![now, &note.branch_id],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get a branch note by ID
+    pub fn get_branch_note(&self, id: &str) -> Result<Option<BranchNote>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, title, content, status, prompt, error_message, created_at, updated_at
+             FROM branch_notes WHERE id = ?1",
+            params![id],
+            BranchNote::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all notes for a branch, ordered by creation time
+    pub fn list_branch_notes(&self, branch_id: &str) -> Result<Vec<BranchNote>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, branch_id, ai_session_id, title, content, status, prompt, error_message, created_at, updated_at
+             FROM branch_notes WHERE branch_id = ?1 ORDER BY created_at ASC",
+        )?;
+        let notes = stmt
+            .query_map(params![branch_id], BranchNote::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(notes)
+    }
+
+    /// Get a branch note by its AI session ID
+    pub fn get_branch_note_by_ai_session(&self, ai_session_id: &str) -> Result<Option<BranchNote>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, title, content, status, prompt, error_message, created_at, updated_at
+             FROM branch_notes WHERE ai_session_id = ?1",
+            params![ai_session_id],
+            BranchNote::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Get the currently generating note for a branch (if any)
+    pub fn get_generating_note(&self, branch_id: &str) -> Result<Option<BranchNote>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, title, content, status, prompt, error_message, created_at, updated_at
+             FROM branch_notes WHERE branch_id = ?1 AND status = 'generating'",
+            params![branch_id],
+            BranchNote::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Update a branch note's content and mark as complete
+    pub fn update_branch_note_completed(&self, id: &str, content: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branch_notes SET status = 'complete', content = ?1, updated_at = ?2 WHERE id = ?3",
+            params![content, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Update a branch note to error state
+    pub fn update_branch_note_error(&self, id: &str, error_message: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branch_notes SET status = 'error', error_message = ?1, updated_at = ?2 WHERE id = ?3",
+            params![error_message, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a branch note
+    pub fn delete_branch_note(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM branch_notes WHERE id = ?1", params![id])?;
         Ok(())
     }
 }
