@@ -53,6 +53,10 @@ async-trait = "0.1"
 tokio-util = { version = "0.7", features = ["compat"] }
 futures = "0.3"
 
+# Action execution
+parking_lot = "0.12"
+once_cell = "1.19"
+
 [[bin]]
 name = "debug_diff"
 path = "src/bin/debug_diff.rs"

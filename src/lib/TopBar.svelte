@@ -24,6 +24,7 @@
   import GitHubSyncModal from './GitHubSyncModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
+  import ActionButton from './components/ActionButton.svelte';
   import { DiffSpec, gitRefDisplay } from './types';
   import type { DiffSpec as DiffSpecType, ChangesetSummary } from './types';
   import {
@@ -49,6 +50,16 @@
   } from './stores/smartDiff.svelte';
   import { saveArtifact } from './services/review';
   import type { AgentState, Artifact } from './stores/agent.svelte';
+  import {
+    actionsState,
+    getActiveCategories,
+    getActionsForCategory,
+    getCurrentActionForCategory,
+    getLatestExecutionForAction,
+    runAction,
+    stopAction,
+    type ActionsState,
+  } from './stores/actionsState.svelte';
 
   interface Props {
     onPresetSelect: (preset: DiffPreset) => void;
@@ -67,6 +78,12 @@
      * @param repoPath - The repo path where the artifact belongs
      */
     onArtifactSaved?: (artifact: Artifact, repoPath: string | null) => void;
+    /**
+     * Callback when user wants to chat about action output.
+     * @param actionName - Name of the action
+     * @param output - The action's output
+     */
+    onChatWithOutput?: (actionName: string, output: string) => void;
   }
 
   let {
@@ -76,6 +93,7 @@
     agentState = null,
     onReloadCommentsForTab,
     onArtifactSaved,
+    onChatWithOutput,
   }: Props = $props();
 
   // Dropdown states
@@ -106,6 +124,25 @@
   let canRunAi = $derived(diffState.files.length > 0 && !diffState.loading);
   let annotationsRevealed = $derived(smartDiffState.annotationsRevealed);
   let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
+
+  // Actions state
+  let activeCategories = $derived(getActiveCategories());
+  let hasActions = $derived(actionsState.discoveryStatus === 'complete' && activeCategories.length > 0);
+
+  // Action handlers
+  function handleRunAction(action: any) {
+    if (repoState.currentPath) {
+      runAction(action, repoState.currentPath);
+    }
+  }
+
+  function handleStopAction(executionId: string) {
+    stopAction(executionId);
+  }
+
+  function handleChatWithOutput(actionName: string, output: string) {
+    onChatWithOutput?.(actionName, output);
+  }
 
   // Check if current selection matches a preset
   function isPresetSelected(preset: DiffPreset): boolean {
@@ -383,7 +420,7 @@
   <div class="section section-center">
     {#if isWorkingTree}
       <button
-        class="action-btn"
+        class="action-btn commit-btn"
         class:disabled={!canCommit}
         onclick={() => canCommit && (showCommitModal = true)}
         title={canCommit ? 'Commit' : 'No staged or unstaged changes'}
@@ -391,6 +428,26 @@
       >
         <GitCommitHorizontal size={14} />
       </button>
+    {/if}
+
+    <!-- Repo action buttons -->
+    {#if hasActions}
+      <div class="actions-divider"></div>
+      {#each activeCategories as category}
+        {@const actions = getActionsForCategory(category)}
+        {@const currentAction = getCurrentActionForCategory(category)}
+        {@const execution = currentAction ? getLatestExecutionForAction(currentAction.id) : null}
+        <ActionButton
+          {category}
+          {actions}
+          {currentAction}
+          {execution}
+          onRun={handleRunAction}
+          onStop={handleStopAction}
+          onChat={handleChatWithOutput}
+        />
+      {/each}
+      <div class="actions-divider"></div>
     {/if}
 
     <!-- AI Analysis button -->
@@ -831,6 +888,14 @@
 
   .action-btn :global(svg) {
     flex-shrink: 0;
+  }
+
+  /* Actions divider */
+  .actions-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--border-subtle);
+    margin: 0 4px;
   }
 
   /* AI Analysis button */

@@ -89,6 +89,12 @@
     clearResults as clearSmartDiffResults,
     loadAnalysisFromDb,
   } from './lib/stores/smartDiff.svelte';
+  import {
+    createActionsState,
+    initActionEvents,
+    discoverActions,
+    actionsState,
+  } from './lib/stores/actionsState.svelte';
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -99,6 +105,7 @@
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
   let unsubscribeMenuInstallCli: Unsubscribe | null = null;
+  let unsubscribeActionEvents: (() => void) | null = null;
 
   // Sidebar resize state
   let isDraggingSidebar = $state(false);
@@ -406,6 +413,14 @@
 
       // Save state back to tab
       syncGlobalToTab();
+
+      // Discover actions for the repo (fire-and-forget, don't block initialization)
+      discoverActions(tab.repoPath).then(() => {
+        // Sync actions state back to tab
+        tab.actionsState.actions = actionsState.actions;
+        tab.actionsState.discoveryStatus = actionsState.discoveryStatus;
+        tab.actionsState.discoveryError = actionsState.discoveryError;
+      });
     } catch (e) {
       console.error('Failed to initialize tab:', e);
       diffState.error = e instanceof Error ? e.message : String(e);
@@ -474,7 +489,8 @@
       createCommentsState,
       createDiffSelection,
       createAgentState,
-      createReferenceFilesState
+      createReferenceFilesState,
+      createActionsState
     );
 
     // Start watching the new repo (idempotent - won't restart if already watching)
@@ -589,8 +605,12 @@
         createCommentsState,
         createDiffSelection,
         createAgentState,
-        createReferenceFilesState
+        createReferenceFilesState,
+        createActionsState
       );
+
+      // Initialize action event listeners
+      unsubscribeActionEvents = await initActionEvents();
 
       // Initialize watcher listener once (handles all repos)
       unsubscribeWatcher = await initWatcher(handleFilesChanged);
@@ -626,7 +646,8 @@
             createCommentsState,
             createDiffSelection,
             createAgentState,
-            createReferenceFilesState
+            createReferenceFilesState,
+            createActionsState
           );
         }
 
@@ -665,6 +686,7 @@
     unsubscribeMenuCloseTab?.();
     unsubscribeMenuCloseWindow?.();
     unsubscribeMenuInstallCli?.();
+    unsubscribeActionEvents?.();
     // Cleanup sidebar resize listeners
     document.removeEventListener('mousemove', handleSidebarResizeMove);
     document.removeEventListener('mouseup', handleSidebarResizeEnd);
@@ -720,6 +742,14 @@
       const targetTab = windowState.tabs.find((t) => t.repoPath === repoPath);
       if (targetTab) {
         targetTab.agentState.artifacts.push(artifact);
+      }
+    }}
+    onChatWithOutput={(actionName, output) => {
+      // Inject action output into the agent panel's input
+      const tab = getActiveTab();
+      if (tab?.agentState) {
+        const formattedInput = `Help me understand this output from running "${actionName}":\n\n\`\`\`\n${output}\n\`\`\``;
+        tab.agentState.input = formattedInput;
       }
     }}
   />

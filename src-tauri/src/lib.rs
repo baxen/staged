@@ -3,6 +3,7 @@
 //! This module provides the bridge between the frontend and the git/github modules.
 //! Supports CLI arguments: `staged [path]` opens the app with the specified directory.
 
+pub mod actions;
 pub mod ai;
 pub mod git;
 mod recent_repos;
@@ -599,6 +600,38 @@ async fn send_agent_prompt(
         response: result.response,
         session_id: result.session_id,
     })
+}
+
+// =============================================================================
+// Action Discovery and Execution Commands
+// =============================================================================
+
+use actions::RepoAction;
+
+/// Discover available actions in a repository using AI.
+#[tauri::command(rename_all = "camelCase")]
+async fn discover_actions(repo_path: Option<String>) -> Result<Vec<RepoAction>, String> {
+    let path = get_repo_path(repo_path.as_deref()).to_path_buf();
+    actions::discover_actions(&path).await
+}
+
+/// Run an action in the repository.
+/// Returns the execution_id immediately. Output is streamed via events.
+#[tauri::command(rename_all = "camelCase")]
+fn run_action(
+    app: AppHandle,
+    execution_id: String,
+    command: String,
+    repo_path: Option<String>,
+) -> Result<String, String> {
+    let path = get_repo_path(repo_path.as_deref()).to_path_buf();
+    actions::run_action(app, execution_id, command, path)
+}
+
+/// Stop a running action.
+#[tauri::command(rename_all = "camelCase")]
+fn stop_action(execution_id: String) -> Result<(), String> {
+    actions::stop_action(&execution_id)
 }
 
 // =============================================================================
@@ -1291,6 +1324,10 @@ pub fn run() {
             check_ai_available,
             discover_acp_providers,
             send_agent_prompt,
+            // Action commands
+            discover_actions,
+            run_action,
+            stop_action,
             // AI persistence commands
             save_changeset_summary,
             get_changeset_summary,
