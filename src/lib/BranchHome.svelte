@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Plus, Sparkles, GitBranch } from 'lucide-svelte';
+  import { Plus, Sparkles, Folder } from 'lucide-svelte';
   import type { Branch } from './services/branch';
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
@@ -190,6 +190,8 @@
         {#each [...branchesByRepo.entries()] as [repoPath, repoBranches] (repoPath)}
           <div class="repo-section">
             <div class="repo-header">
+              <Folder size={14} class="repo-icon" />
+              <span class="repo-name">{repoName(repoPath)}</span>
               <span class="repo-path">{repoPath}</span>
             </div>
             <div class="branches-list">
@@ -315,11 +317,23 @@
     display: flex;
     align-items: center;
     gap: 8px;
+    padding: 0 4px;
+  }
+
+  :global(.repo-icon) {
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .repo-name {
+    font-size: var(--size-md);
+    font-weight: 500;
+    color: var(--text-primary);
   }
 
   .repo-path {
-    font-size: var(--size-sm);
-    color: var(--text-muted);
+    font-size: var(--size-xs);
+    color: var(--text-faint);
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
   }
 
