@@ -12,7 +12,7 @@ pub struct ChangesetAnalysis {
     pub summary: String,
     pub key_changes: Vec<String>,
     pub concerns: Vec<String>,
-    pub file_annotations: std::collections::HashMap<String, Vec<FileAnnotation>>,
+    pub file_annotations: std::collections::HashMap<String, Vec<SmartDiffAnnotation>>,
 }
 
 /// Summary portion of changeset analysis (for storage).
@@ -61,21 +61,4 @@ pub enum AnnotationCategory {
     Warning,
     Suggestion,
     Context,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FileAnnotation {
-    pub line: usize,
-    pub message: String,
-    #[serde(default)]
-    pub severity: AnnotationSeverity,
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum AnnotationSeverity {
-    #[default]
-    Info,
-    Warning,
-    Error,
 }

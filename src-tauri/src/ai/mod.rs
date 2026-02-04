@@ -6,7 +6,7 @@
 //!
 //! - `session.rs` - SessionManager for live agent connections + streaming
 //! - `client.rs` - Core ACP client implementation (agent discovery, protocol)
-//! - `legacy/` - Reference code for diff analysis prompts (not wired up)
+//! - `analysis/` - Structured diff analysis: prompts, runner, and types for "Analyze with AI"
 //!
 //! Session/message persistence is handled by the unified Store (see `crate::store`).
 //!
@@ -19,8 +19,8 @@
 //!
 //! Live sessions (agent connections) are ephemeral. History survives app restart.
 
+pub mod analysis;
 mod client;
-pub mod legacy;
 pub mod session;
 
 // Re-export core ACP client functionality

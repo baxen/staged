@@ -12,7 +12,7 @@ pub mod store;
 mod themes;
 mod watcher;
 
-use ai::legacy::ChangesetAnalysis;
+use ai::analysis::ChangesetAnalysis;
 use ai::{SessionManager, SessionStatus};
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
@@ -562,7 +562,7 @@ async fn analyze_diff(
     let path = get_repo_path(repo_path.as_deref()).to_path_buf();
 
     // analyze_diff is now async (uses ACP)
-    ai::legacy::analyze_diff(&path, &spec, provider.as_deref()).await
+    ai::analysis::analyze_diff(&path, &spec, provider.as_deref()).await
 }
 
 /// Response from send_agent_prompt including session ID for continuity.
@@ -824,6 +824,115 @@ fn remove_reference_file(
     let store = review::get_store().map_err(|e| e.0)?;
     let id = make_diff_id(repo, &spec)?;
     store.remove_reference_file(&id, &path).map_err(|e| e.0)
+}
+
+// =============================================================================
+// Legacy Artifact Commands (DiffSpec-based, used by AgentPanel/Sidebar)
+// =============================================================================
+
+/// Simple artifact shape expected by the frontend (review.ts).
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyArtifact {
+    id: String,
+    title: String,
+    content: String,
+    created_at: String,
+}
+
+/// Derive a deterministic project ID from a DiffSpec for legacy artifact storage.
+fn diff_spec_project_id(repo: &Path, spec: &DiffSpec) -> Result<String, String> {
+    let diff_id = make_diff_id(repo, spec)?;
+    Ok(format!("diff:{}..{}", diff_id.before, diff_id.after))
+}
+
+/// Ensure a project exists for the given DiffSpec, creating one if needed.
+fn ensure_diff_project(store: &Store, repo: &Path, spec: &DiffSpec) -> Result<String, String> {
+    let diff_id = make_diff_id(repo, spec)?;
+    let project_id = format!("diff:{}..{}", diff_id.before, diff_id.after);
+    if store
+        .get_project(&project_id)
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        let project = Project {
+            id: project_id.clone(),
+            name: format!("{}..{}", diff_id.before, diff_id.after),
+            created_at: now_timestamp(),
+            updated_at: now_timestamp(),
+        };
+        store.create_project(&project).map_err(|e| e.to_string())?;
+    }
+    Ok(project_id)
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn get_artifacts(
+    state: State<'_, Arc<Store>>,
+    repo_path: Option<String>,
+    spec: DiffSpec,
+) -> Result<Vec<LegacyArtifact>, String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let project_id = diff_spec_project_id(repo, &spec)?;
+
+    // If no project exists yet, just return empty
+    if state
+        .get_project(&project_id)
+        .map_err(|e| e.to_string())?
+        .is_none()
+    {
+        return Ok(vec![]);
+    }
+
+    let artifacts = state
+        .list_artifacts(&project_id)
+        .map_err(|e| e.to_string())?;
+    Ok(artifacts
+        .into_iter()
+        .filter_map(|a| {
+            if let ArtifactData::Markdown { content } = a.data {
+                Some(LegacyArtifact {
+                    id: a.id,
+                    title: a.title,
+                    content,
+                    created_at: a.created_at.to_string(),
+                })
+            } else {
+                None
+            }
+        })
+        .collect())
+}
+
+#[tauri::command(rename_all = "camelCase")]
+fn save_artifact(
+    state: State<'_, Arc<Store>>,
+    repo_path: Option<String>,
+    spec: DiffSpec,
+    artifact: LegacyArtifact,
+) -> Result<(), String> {
+    let repo = get_repo_path(repo_path.as_deref());
+    let project_id = ensure_diff_project(&state, repo, &spec)?;
+    let now = now_timestamp();
+
+    let store_artifact = ProjectArtifact {
+        id: artifact.id,
+        project_id,
+        title: artifact.title,
+        data: ArtifactData::Markdown {
+            content: artifact.content,
+        },
+        created_at: now,
+        updated_at: now,
+        parent_artifact_id: None,
+        status: ArtifactStatus::Complete,
+        error_message: None,
+        session_id: None,
+    };
+
+    state
+        .create_artifact(&store_artifact)
+        .map_err(|e| e.to_string())
 }
 
 // =============================================================================
@@ -2219,7 +2328,7 @@ pub fn run() {
             fetch_pr,
             sync_review_to_github,
             invalidate_pr_cache,
-            // AI commands (legacy)
+            // AI commands (analysis)
             check_ai_available,
             discover_acp_providers,
             analyze_diff,
@@ -2243,6 +2352,9 @@ pub fn run() {
             clear_review,
             add_reference_file,
             remove_reference_file,
+            // Legacy artifact commands (DiffSpec-based, used by AgentPanel/Sidebar)
+            get_artifacts,
+            save_artifact,
             // Project commands (artifact-centric model)
             create_project,
             get_project,
