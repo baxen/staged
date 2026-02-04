@@ -6,16 +6,27 @@
 -->
 <script lang="ts">
   import { X, GitBranch, Loader2, Send } from 'lucide-svelte';
-  import type { Branch } from './services/branch';
+  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
   import { startBranchSession } from './services/branch';
+  import { buildTimelineContext } from './services/timelineContext';
 
   interface Props {
     branch: Branch;
+    commits?: CommitInfo[];
+    sessionsByCommit?: Map<string, BranchSession>;
+    notes?: BranchNote[];
     onClose: () => void;
     onSessionStarted?: (branchSessionId: string, aiSessionId: string) => void;
   }
 
-  let { branch, onClose, onSessionStarted }: Props = $props();
+  let {
+    branch,
+    commits = [],
+    sessionsByCommit = new Map(),
+    notes = [],
+    onClose,
+    onSessionStarted,
+  }: Props = $props();
 
   // State
   let prompt = $state('');
@@ -39,7 +50,17 @@
 
   // Build the full prompt with instructions for commit-focused work
   function buildCommitPrompt(userPrompt: string): string {
-    return `You are working on a feature branch. Your goal is to complete the following task and create a git commit with your changes.
+    const context = buildTimelineContext({
+      branchName: branch.branchName,
+      baseBranch: branch.baseBranch,
+      commits,
+      sessionsByCommit,
+      notes,
+    });
+
+    const contextBlock = context ? `${context}\n\n` : '';
+
+    return `${contextBlock}You are working on a feature branch. Your goal is to complete the following task and create a git commit with your changes.
 
 TASK: ${userPrompt}
 

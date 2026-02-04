@@ -5,16 +5,27 @@
 -->
 <script lang="ts">
   import { X, FileText, Loader2 } from 'lucide-svelte';
-  import type { Branch } from './services/branch';
+  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
   import * as branchService from './services/branch';
+  import { buildTimelineContext } from './services/timelineContext';
 
   interface Props {
     branch: Branch;
+    commits?: CommitInfo[];
+    sessionsByCommit?: Map<string, BranchSession>;
+    notes?: BranchNote[];
     onClose: () => void;
     onNoteStarted: (branchNoteId: string, aiSessionId: string) => void;
   }
 
-  let { branch, onClose, onNoteStarted }: Props = $props();
+  let {
+    branch,
+    commits = [],
+    sessionsByCommit = new Map(),
+    notes = [],
+    onClose,
+    onNoteStarted,
+  }: Props = $props();
 
   let title = $state('');
   let description = $state('');
@@ -23,7 +34,17 @@
 
   // Build the prompt for the AI - note-focused work
   function buildPrompt(): string {
-    return `You are creating a documentation artifact. Your task is to research and write a markdown document.
+    const context = buildTimelineContext({
+      branchName: branch.branchName,
+      baseBranch: branch.baseBranch,
+      commits,
+      sessionsByCommit,
+      notes,
+    });
+
+    const contextBlock = context ? `${context}\n\n` : '';
+
+    return `${contextBlock}You are creating a documentation artifact. Your task is to research and write a markdown document.
 
 TITLE: ${title}
 

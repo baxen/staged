@@ -2,7 +2,7 @@
   BranchCard.svelte - Card display for a tracked branch
 
   Shows branch name, base branch, and a unified timeline of commits and notes.
-  Commits are displayed newest-first with the HEAD commit having a "Continue" option.
+  Commits are displayed oldest-first (newest at bottom) with the HEAD commit having a "Continue" option.
   Notes are interleaved by timestamp and styled differently.
 -->
 <script lang="ts">
@@ -19,6 +19,7 @@
     GitCommit,
     ChevronDown,
     ChevronsUpDown,
+    MoreVertical,
   } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
   import * as branchService from './services/branch';
@@ -32,20 +33,12 @@
     branch: Branch;
     /** Increment to force a data refresh */
     refreshKey?: number;
-    onNewSession?: () => void;
     onViewDiff?: () => void;
     onDelete?: () => void;
     onBranchUpdated?: (branch: Branch) => void;
   }
 
-  let {
-    branch,
-    refreshKey = 0,
-    onNewSession,
-    onViewDiff,
-    onDelete,
-    onBranchUpdated,
-  }: Props = $props();
+  let { branch, refreshKey = 0, onViewDiff, onDelete, onBranchUpdated }: Props = $props();
 
   // Timeline item types
   type TimelineItem =
@@ -68,17 +61,7 @@
   let timeline = $derived.by(() => {
     const items: TimelineItem[] = [];
 
-    // Add generating note at top if exists
-    if (generatingNote) {
-      items.push({ type: 'generating-note', note: generatingNote });
-    }
-
-    // Add running session at top if exists
-    if (runningSession) {
-      items.push({ type: 'running-session', session: runningSession });
-    }
-
-    // Combine commits and notes, sort by timestamp (newest first)
+    // Combine commits and notes, sort by timestamp (oldest first)
     const combined: Array<{ timestamp: number; item: TimelineItem }> = [];
 
     commits.forEach((commit, index) => {
@@ -103,10 +86,20 @@
         });
       });
 
-    // Sort by timestamp descending (newest first)
-    combined.sort((a, b) => b.timestamp - a.timestamp);
+    // Sort by timestamp ascending (oldest first)
+    combined.sort((a, b) => a.timestamp - b.timestamp);
 
     items.push(...combined.map((c) => c.item));
+
+    // Add running session at bottom if exists
+    if (runningSession) {
+      items.push({ type: 'running-session', session: runningSession });
+    }
+
+    // Add generating note at bottom if exists
+    if (generatingNote) {
+      items.push({ type: 'generating-note', note: generatingNote });
+    }
 
     return items;
   });
@@ -132,6 +125,7 @@
 
   // Dropdown state
   let showNewDropdown = $state(false);
+  let showMoreMenu = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -198,11 +192,6 @@
     return formatRelativeTime(Math.floor(timestamp / 1000));
   }
 
-  function handleDelete(e: MouseEvent) {
-    e.stopPropagation();
-    onDelete?.();
-  }
-
   function handleContinue() {
     showContinueModal = true;
   }
@@ -253,7 +242,7 @@
 
   function handleNewCommit() {
     showNewDropdown = false;
-    onNewSession?.();
+    showContinueModal = true;
   }
 
   function handleNewNote() {
@@ -265,12 +254,30 @@
     showNewDropdown = !showNewDropdown;
   }
 
-  // Close dropdown when clicking outside
+  // Close dropdowns when clicking outside
   function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest('.new-dropdown-container')) {
       showNewDropdown = false;
     }
+    if (!target.closest('.more-menu-container')) {
+      showMoreMenu = false;
+    }
+  }
+
+  function toggleMoreMenu(e: MouseEvent) {
+    e.stopPropagation();
+    showMoreMenu = !showMoreMenu;
+  }
+
+  function handleViewDiff() {
+    showMoreMenu = false;
+    onViewDiff?.();
+  }
+
+  function handleDeleteFromMenu() {
+    showMoreMenu = false;
+    onDelete?.();
   }
 
   // Handle base branch change
@@ -306,13 +313,22 @@
         <ChevronsUpDown size={12} class="base-branch-chevron" />
       </button>
     </div>
-    <div class="header-actions">
-      <button class="action-button" onclick={onViewDiff} title="View diff">
-        <Eye size={14} />
+    <div class="more-menu-container">
+      <button class="more-button" onclick={toggleMoreMenu} title="More options">
+        <MoreVertical size={16} />
       </button>
-      <button class="action-button delete-button" onclick={handleDelete} title="Delete branch">
-        <Trash2 size={14} />
-      </button>
+      {#if showMoreMenu}
+        <div class="more-menu">
+          <button class="more-menu-item" onclick={handleViewDiff}>
+            <Eye size={14} />
+            View Diff
+          </button>
+          <button class="more-menu-item danger" onclick={handleDeleteFromMenu}>
+            <Trash2 size={14} />
+            Delete
+          </button>
+        </div>
+      {/if}
     </div>
   </div>
 
@@ -503,6 +519,9 @@
 {#if showContinueModal}
   <NewSessionModal
     {branch}
+    {commits}
+    {sessionsByCommit}
+    {notes}
     onClose={() => (showContinueModal = false)}
     onSessionStarted={handleSessionStarted}
   />
@@ -512,6 +531,9 @@
 {#if showNewNoteModal}
   <NewNoteModal
     {branch}
+    {commits}
+    {sessionsByCommit}
+    {notes}
     onClose={() => (showNewNoteModal = false)}
     onNoteStarted={handleNoteStarted}
   />
@@ -594,19 +616,12 @@
     color: var(--text-muted);
   }
 
-  .header-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    opacity: 0;
-    transition: opacity 0.15s ease;
+  /* More menu */
+  .more-menu-container {
+    position: relative;
   }
 
-  .branch-card:hover .header-actions {
-    opacity: 1;
-  }
-
-  .action-button {
+  .more-button {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -621,13 +636,54 @@
     transition: all 0.15s ease;
   }
 
-  .action-button:hover {
+  .more-button:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
   }
 
-  .action-button.delete-button:hover {
+  .more-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: 4px;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    z-index: 100;
+    min-width: 120px;
+  }
+
+  .more-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 10px 14px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+    text-align: left;
+  }
+
+  .more-menu-item:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .more-menu-item :global(svg) {
+    color: var(--text-muted);
+  }
+
+  .more-menu-item.danger:hover {
     background-color: var(--ui-danger-bg);
+    color: var(--ui-danger);
+  }
+
+  .more-menu-item.danger:hover :global(svg) {
     color: var(--ui-danger);
   }
 

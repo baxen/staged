@@ -11,14 +11,13 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { Plus, Sparkles, GitBranch } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession } from './services/branch';
+  import type { Branch } from './services/branch';
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import { confirm } from '@tauri-apps/plugin-dialog';
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal from './NewBranchModal.svelte';
-  import NewSessionModal from './NewSessionModal.svelte';
 
   // State
   let branches = $state<Branch[]>([]);
@@ -31,8 +30,6 @@
 
   // Modal state
   let showNewBranchModal = $state(false);
-  let showNewSessionModal = $state(false);
-  let sessionBranch = $state<Branch | null>(null);
 
   // Group branches by repo path
   let branchesByRepo = $derived.by(() => {
@@ -125,17 +122,6 @@
     }
   }
 
-  function handleNewSession(branch: Branch) {
-    sessionBranch = branch;
-    showNewSessionModal = true;
-  }
-
-  function handleSessionStarted(branchSessionId: string, aiSessionId: string) {
-    console.log('Session started:', { branchSessionId, aiSessionId });
-    // Trigger refresh in all BranchCards
-    refreshKey++;
-  }
-
   function handleViewDiff(branch: Branch) {
     // TODO: Open diff viewer with base..branch-tip
     console.log('View diff for branch:', branch.branchName);
@@ -162,9 +148,6 @@
       if (showNewBranchModal) {
         e.preventDefault();
         showNewBranchModal = false;
-      } else if (showNewSessionModal) {
-        e.preventDefault();
-        showNewSessionModal = false;
       }
       return;
     }
@@ -214,7 +197,6 @@
                 <BranchCard
                   {branch}
                   {refreshKey}
-                  onNewSession={() => handleNewSession(branch)}
                   onViewDiff={() => handleViewDiff(branch)}
                   onDelete={() => handleDeleteBranch(branch.id)}
                 />
@@ -238,18 +220,6 @@
 <!-- New branch modal -->
 {#if showNewBranchModal}
   <NewBranchModal onCreated={handleBranchCreated} onClose={() => (showNewBranchModal = false)} />
-{/if}
-
-<!-- New session modal -->
-{#if showNewSessionModal && sessionBranch}
-  <NewSessionModal
-    branch={sessionBranch}
-    onClose={() => {
-      showNewSessionModal = false;
-      sessionBranch = null;
-    }}
-    onSessionStarted={handleSessionStarted}
-  />
 {/if}
 
 <style>
