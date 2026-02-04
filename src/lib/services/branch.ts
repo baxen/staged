@@ -19,6 +19,16 @@ export interface Branch {
   updatedAt: number;
 }
 
+/** A git branch reference for base branch selection */
+export interface BranchRef {
+  /** Short name (e.g., "main", "origin/main") */
+  name: string;
+  /** Whether this is a remote-tracking branch */
+  isRemote: boolean;
+  /** The remote name if this is a remote branch (e.g., "origin") */
+  remote: string | null;
+}
+
 /** Status of a branch session */
 export type BranchSessionStatus = 'running' | 'completed' | 'error';
 
@@ -76,10 +86,14 @@ export interface BranchNote {
 
 /**
  * Create a new branch with a worktree.
- * The branch is created from the repo's default branch.
+ * If baseBranch is not provided, uses the detected default branch.
  */
-export async function createBranch(repoPath: string, branchName: string): Promise<Branch> {
-  return invoke<Branch>('create_branch', { repoPath, branchName });
+export async function createBranch(
+  repoPath: string,
+  branchName: string,
+  baseBranch?: string
+): Promise<Branch> {
+  return invoke<Branch>('create_branch', { repoPath, branchName, baseBranch });
 }
 
 /**
@@ -101,6 +115,22 @@ export async function listBranches(): Promise<Branch[]> {
  */
 export async function listBranchesForRepo(repoPath: string): Promise<Branch[]> {
   return invoke<Branch[]>('list_branches_for_repo', { repoPath });
+}
+
+/**
+ * List git branches (local and remote) for base branch selection.
+ * Returns branches sorted with local first, then remote.
+ */
+export async function listGitBranches(repoPath: string): Promise<BranchRef[]> {
+  return invoke<BranchRef[]>('list_git_branches', { repoPath });
+}
+
+/**
+ * Detect the default branch for a repository.
+ * Returns the remote-tracking branch (e.g., "origin/main") if available.
+ */
+export async function detectDefaultBranch(repoPath: string): Promise<string> {
+  return invoke<string>('detect_default_branch', { repoPath });
 }
 
 /**
