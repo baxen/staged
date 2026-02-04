@@ -80,8 +80,9 @@ Begin working on the task now.`;
     error = null;
 
     try {
-      const fullPrompt = buildCommitPrompt(prompt.trim());
-      const result = await startBranchSession(branch.id, fullPrompt);
+      const userPrompt = prompt.trim();
+      const fullPrompt = buildCommitPrompt(userPrompt);
+      const result = await startBranchSession(branch.id, userPrompt, fullPrompt);
 
       // Notify parent that session started
       onSessionStarted?.(result.branchSessionId, result.aiSessionId);

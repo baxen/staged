@@ -208,12 +208,21 @@ export interface StartBranchSessionResponse {
 /**
  * Start a new session on a branch.
  * Creates a branch_session record, starts an AI session, and sends the prompt.
+ *
+ * @param branchId - The branch to start the session on
+ * @param userPrompt - The user's original prompt (stored for display)
+ * @param fullPrompt - The full prompt with context to send to the AI
  */
 export async function startBranchSession(
   branchId: string,
-  prompt: string
+  userPrompt: string,
+  fullPrompt: string
 ): Promise<StartBranchSessionResponse> {
-  return invoke<StartBranchSessionResponse>('start_branch_session', { branchId, prompt });
+  return invoke<StartBranchSessionResponse>('start_branch_session', {
+    branchId,
+    userPrompt,
+    fullPrompt,
+  });
 }
 
 /**

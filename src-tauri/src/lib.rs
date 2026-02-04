@@ -1522,12 +1522,16 @@ struct StartBranchSessionResponse {
 
 /// Start a new session on a branch.
 /// Creates an AI session, then a branch_session record linking to it, and sends the prompt.
+///
+/// - `user_prompt`: The user's original prompt (stored for display in the UI)
+/// - `full_prompt`: The full prompt with context to send to the AI agent
 #[tauri::command(rename_all = "camelCase")]
 async fn start_branch_session(
     state: State<'_, Arc<Store>>,
     session_manager: State<'_, Arc<SessionManager>>,
     branch_id: String,
-    prompt: String,
+    user_prompt: String,
+    full_prompt: String,
 ) -> Result<StartBranchSessionResponse, String> {
     // Get the branch to find the worktree path
     let branch = state
@@ -1555,13 +1559,17 @@ async fn start_branch_session(
         .map_err(|e| format!("Failed to create AI session: {}", e))?;
 
     // Create the branch session record with the AI session ID
-    let branch_session = BranchSession::new_running(&branch_id, &ai_session_id, &prompt);
+    // Store the user's original prompt for display purposes
+    let branch_session = BranchSession::new_running(&branch_id, &ai_session_id, &user_prompt);
     state
         .create_branch_session(&branch_session)
         .map_err(|e| format!("Failed to create branch session: {}", e))?;
 
-    // Send the prompt (this runs async in background)
-    if let Err(e) = session_manager.send_prompt(&ai_session_id, prompt).await {
+    // Send the full prompt (with context) to the AI
+    if let Err(e) = session_manager
+        .send_prompt(&ai_session_id, full_prompt)
+        .await
+    {
         // Clean up on failure
         let _ = state.delete_branch_session(&branch_session.id);
         return Err(format!("Failed to send prompt: {}", e));
