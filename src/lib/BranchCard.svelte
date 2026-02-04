@@ -39,7 +39,14 @@
     onBranchUpdated?: (branch: Branch) => void;
   }
 
-  let { branch, refreshKey = 0, onViewDiff, onViewCommitDiff, onDelete, onBranchUpdated }: Props = $props();
+  let {
+    branch,
+    refreshKey = 0,
+    onViewDiff,
+    onViewCommitDiff,
+    onDelete,
+    onBranchUpdated,
+  }: Props = $props();
 
   // Timeline item types
   type TimelineItem =

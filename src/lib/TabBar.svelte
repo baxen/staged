@@ -1,6 +1,15 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { X, Plus, FolderGit2, Loader2, Settings2, Keyboard, Palette, ChevronLeft } from 'lucide-svelte';
+  import {
+    X,
+    Plus,
+    FolderGit2,
+    Loader2,
+    Settings2,
+    Keyboard,
+    Palette,
+    ChevronLeft,
+  } from 'lucide-svelte';
   import { windowState, closeTab } from './stores/tabState.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';

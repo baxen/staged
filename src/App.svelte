@@ -773,7 +773,16 @@
   {:else}
     <!-- Traditional diff viewer -->
     {#if windowState.tabs.length > 0}
-      <TabBar onNewTab={handleNewTab} onSwitchTab={handleTabSwitch} onBack={cameFromBranches ? () => { viewMode = 'branches'; cameFromBranches = false; } : undefined} />
+      <TabBar
+        onNewTab={handleNewTab}
+        onSwitchTab={handleTabSwitch}
+        onBack={cameFromBranches
+          ? () => {
+              viewMode = 'branches';
+              cameFromBranches = false;
+            }
+          : undefined}
+      />
     {:else}
       <!-- Spacer for traffic light buttons when no tabs -->
       <div class="titlebar-spacer" data-tauri-drag-region></div>
@@ -991,6 +1000,4 @@
     font-size: var(--size-md);
     margin: 0;
   }
-
-
 </style>
