@@ -19,12 +19,7 @@
     waitingText?: string;
   }
 
-  let {
-    messages,
-    streamingSegments,
-    isActive,
-    waitingText = 'Thinking...',
-  }: Props = $props();
+  let { messages, streamingSegments, isActive, waitingText = 'Thinking...' }: Props = $props();
 </script>
 
 {#each messages as message}

@@ -64,7 +64,7 @@
                       (tc.status as 'pending' | 'in_progress' | 'completed' | 'failed') ??
                       'completed',
                     kind: 'other',
-                    locations: tc.locations,
+                    locations: tc.locations ?? [],
                     preview: tc.resultPreview,
                   }}
                 />

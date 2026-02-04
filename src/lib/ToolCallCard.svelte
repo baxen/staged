@@ -58,7 +58,7 @@
     other: FileText,
   };
 
-  let Icon = $derived(kindIcons[tool.kind] ?? FileText);
+  let Icon = $derived(kindIcons[tool.kind as ToolKind] ?? FileText);
   let isRunning = $derived(tool.status === 'pending' || tool.status === 'in_progress');
   let isComplete = $derived(tool.status === 'completed');
   let isFailed = $derived(tool.status === 'failed');

@@ -308,10 +308,7 @@
               ? `line ${comment.span.start + 1}`
               : `lines ${comment.span.start + 1}-${comment.span.end}`;
 
-          const authorLabel = comment.author === 'ai' ? '[AI]' : '[User]';
-          const categoryLabel = comment.category ? ` (${comment.category})` : '';
-
-          context += `  ${authorLabel}${categoryLabel} @ ${lineInfo}: ${comment.content}\n`;
+          context += `  @ ${lineInfo}: ${comment.content}\n`;
         }
         context += '\n';
       }
@@ -356,12 +353,11 @@
       const promptWithContext = buildPromptWithContext(inputToSend, isNewSession);
 
       // Use streaming API - events will be handled by liveSessionStore
-      const result = await sendAgentPromptStreaming(
-        repoPath,
-        promptWithContext,
-        tabState.sessionId,
-        tabState.provider
-      );
+      const result = await sendAgentPromptStreaming(promptWithContext, {
+        repoPath: repoPath ?? undefined,
+        sessionId: tabState.sessionId ?? undefined,
+        provider: tabState.provider,
+      });
 
       // Write final response to the captured tab state
       tabState.response = result.response;

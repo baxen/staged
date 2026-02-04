@@ -171,7 +171,7 @@ function cleanupSession(sessionId: string) {
  */
 export function connectToSession(
   sessionId: string,
-  options: ConnectOptions = {},
+  options: ConnectOptions = {}
 ): StreamingSessionState {
   // Lazily initialize global listeners
   ensureListeners();

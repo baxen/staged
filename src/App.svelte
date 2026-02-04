@@ -550,7 +550,18 @@
   let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
 
   // Konami code: toggle between branch home and diff viewer
-  const konamiSequence = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+  const konamiSequence = [
+    'ArrowUp',
+    'ArrowUp',
+    'ArrowDown',
+    'ArrowDown',
+    'ArrowLeft',
+    'ArrowRight',
+    'ArrowLeft',
+    'ArrowRight',
+    'b',
+    'a',
+  ];
   let konamiIndex = 0;
   function handleKonamiKey(e: KeyboardEvent) {
     if (e.key === konamiSequence[konamiIndex]) {
@@ -794,7 +805,6 @@
       </aside>
     </div>
   {/if}
-
 </main>
 
 {#if showFileSearch}
@@ -949,5 +959,4 @@
     font-size: var(--size-md);
     margin: 0;
   }
-
 </style>

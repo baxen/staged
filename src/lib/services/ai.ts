@@ -345,5 +345,3 @@ export async function listenToSessionStatus(
     callback(event.payload);
   });
 }
-
-

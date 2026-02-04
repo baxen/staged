@@ -8,7 +8,7 @@
 //!   cargo run --bin test_ai -- HEAD~1..HEAD
 //!   cargo run --bin test_ai -- main..HEAD ./my-repo
 
-use staged_lib::{ai, ai::legacy, git};
+use staged_lib::{ai, git};
 use std::env;
 use std::path::Path;
 

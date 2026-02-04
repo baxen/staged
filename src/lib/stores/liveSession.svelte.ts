@@ -145,7 +145,7 @@ class LiveSessionStore {
           session.toolCalls.set(toolCallId, {
             id: toolCallId,
             title: tc.title ?? 'Tool Call',
-            status: tc.status ?? 'pending',
+            status: (tc.status as ToolCallStatus) ?? 'pending',
             kind: tc.kind ?? 'other',
             locations: tc.locations?.map((l: ToolCallLocation) => l.path) ?? [],
           });

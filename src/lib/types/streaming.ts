@@ -1,8 +1,4 @@
-import {
-  parseAssistantContent,
-  type Message,
-  type ContentSegment,
-} from '../services/ai';
+import { parseAssistantContent, type Message, type ContentSegment } from '../services/ai';
 
 /** A segment for display - text or tool call */
 export type DisplaySegment =

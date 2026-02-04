@@ -557,6 +557,7 @@ async fn run_acp_prompt_internal(
 }
 
 /// Internal function to run the ACP session (runs on LocalSet)
+#[allow(clippy::too_many_arguments)]
 async fn run_acp_session_inner(
     agent_path: &Path,
     agent_name: &str,
