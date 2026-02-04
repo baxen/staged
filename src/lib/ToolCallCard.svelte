@@ -25,7 +25,17 @@
     ChevronDown,
   } from 'lucide-svelte';
   import type { LiveToolCall } from './stores/liveSession.svelte';
-  type ToolKind = 'read' | 'edit' | 'delete' | 'move' | 'search' | 'execute' | 'think' | 'fetch' | 'switch_mode' | 'other';
+  type ToolKind =
+    | 'read'
+    | 'edit'
+    | 'delete'
+    | 'move'
+    | 'search'
+    | 'execute'
+    | 'think'
+    | 'fetch'
+    | 'switch_mode'
+    | 'other';
 
   interface Props {
     tool: LiveToolCall;
