@@ -1,16 +1,26 @@
 <!--
   NewBranchModal.svelte - Create a new branch with worktree
 
-  Two-step flow:
+  Three-step flow:
   1. Pick a repository (with search)
-  2. Enter branch name
+  2. Select base branch (local and remote branches)
+  3. Enter branch name
 
-  The branch is created from the repo's default branch with an isolated worktree.
+  The branch is created with an isolated worktree.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { X, Folder, GitBranch, ChevronRight, Search, Loader2, ArrowLeft } from 'lucide-svelte';
-  import type { Branch } from './services/branch';
+  import {
+    X,
+    Folder,
+    GitBranch,
+    ChevronRight,
+    Search,
+    Loader2,
+    ArrowLeft,
+    Globe,
+  } from 'lucide-svelte';
+  import type { Branch, BranchRef } from './services/branch';
   import * as branchService from './services/branch';
   import { listDirectory, getHomeDir, searchDirectories, type DirEntry } from './services/files';
 
@@ -22,9 +32,10 @@
   let { onCreated, onClose }: Props = $props();
 
   // State
-  type Step = 'repo' | 'name';
+  type Step = 'repo' | 'base' | 'name';
   let step = $state<Step>('repo');
   let selectedRepo = $state<string | null>(null);
+  let selectedBaseBranch = $state<string | null>(null);
   let branchName = $state('');
   let creating = $state(false);
   let error = $state<string | null>(null);
@@ -40,10 +51,24 @@
   let selectedIndex = $state(0);
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
+  // Base branch picker state
+  let baseBranchQuery = $state('');
+  let gitBranches = $state<BranchRef[]>([]);
+  let loadingBranches = $state(false);
+  let baseBranchSelectedIndex = $state(0);
+
   let inputEl: HTMLInputElement | null = $state(null);
+  let baseBranchInputEl: HTMLInputElement | null = $state(null);
   let branchInputEl: HTMLInputElement | null = $state(null);
 
   let isSearching = $derived(query.length >= 2);
+
+  // Filter branches by query
+  let filteredBranches = $derived.by(() => {
+    if (!baseBranchQuery) return gitBranches;
+    const q = baseBranchQuery.toLowerCase();
+    return gitBranches.filter((b) => b.name.toLowerCase().includes(q));
+  });
 
   // Initialize
   onMount(async () => {
@@ -56,6 +81,8 @@
   $effect(() => {
     if (step === 'repo' && inputEl) {
       inputEl.focus();
+    } else if (step === 'base' && baseBranchInputEl) {
+      baseBranchInputEl.focus();
     } else if (step === 'name' && branchInputEl) {
       branchInputEl.focus();
     }
@@ -107,6 +134,26 @@
     }
   }
 
+  async function loadGitBranches(repoPath: string) {
+    loadingBranches = true;
+    try {
+      const [branches, defaultBranch] = await Promise.all([
+        branchService.listGitBranches(repoPath),
+        branchService.detectDefaultBranch(repoPath),
+      ]);
+      gitBranches = branches;
+      selectedBaseBranch = defaultBranch;
+      // Find the index of the default branch
+      const defaultIndex = branches.findIndex((b) => b.name === defaultBranch);
+      baseBranchSelectedIndex = defaultIndex >= 0 ? defaultIndex : 0;
+    } catch (e) {
+      console.error('Failed to load branches:', e);
+      gitBranches = [];
+    } finally {
+      loadingBranches = false;
+    }
+  }
+
   // Get display items based on mode
   let displayItems = $derived.by(() => {
     if (isSearching) {
@@ -117,6 +164,13 @@
 
   function selectRepo(path: string) {
     selectedRepo = path;
+    step = 'base';
+    error = null;
+    loadGitBranches(path);
+  }
+
+  function selectBaseBranch(branchName: string) {
+    selectedBaseBranch = branchName;
     step = 'name';
     error = null;
   }
@@ -133,9 +187,15 @@
 
   function goBack() {
     if (step === 'name') {
+      step = 'base';
+      branchName = '';
+      error = null;
+    } else if (step === 'base') {
       step = 'repo';
       selectedRepo = null;
-      branchName = '';
+      selectedBaseBranch = null;
+      gitBranches = [];
+      baseBranchQuery = '';
       error = null;
     }
   }
@@ -162,7 +222,11 @@
     error = null;
 
     try {
-      const branch = await branchService.createBranch(selectedRepo, branchName.trim());
+      const branch = await branchService.createBranch(
+        selectedRepo,
+        branchName.trim(),
+        selectedBaseBranch ?? undefined
+      );
       onCreated(branch);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
@@ -174,7 +238,7 @@
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
-      if (step === 'name') {
+      if (step === 'name' || step === 'base') {
         goBack();
       } else {
         onClose();
@@ -195,6 +259,20 @@
       } else if (e.key === 'Backspace' && !query) {
         e.preventDefault();
         goUp();
+      }
+    } else if (step === 'base') {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        baseBranchSelectedIndex = Math.min(
+          baseBranchSelectedIndex + 1,
+          filteredBranches.length - 1
+        );
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        baseBranchSelectedIndex = Math.max(baseBranchSelectedIndex - 1, 0);
+      } else if (e.key === 'Enter' && filteredBranches.length > 0) {
+        e.preventDefault();
+        selectBaseBranch(filteredBranches[baseBranchSelectedIndex].name);
       }
     } else if (step === 'name') {
       if (e.key === 'Enter' && branchName.trim()) {
@@ -220,12 +298,20 @@
     onclick={(e) => e.stopPropagation()}
   >
     <div class="modal-header">
-      {#if step === 'name'}
+      {#if step === 'name' || step === 'base'}
         <button class="back-button" onclick={goBack}>
           <ArrowLeft size={16} />
         </button>
       {/if}
-      <h2>{step === 'repo' ? 'Select Repository' : 'New Branch'}</h2>
+      <h2>
+        {#if step === 'repo'}
+          Select Repository
+        {:else if step === 'base'}
+          Select Base Branch
+        {:else}
+          New Branch
+        {/if}
+      </h2>
       <button class="close-button" onclick={onClose}>
         <X size={18} />
       </button>
@@ -288,12 +374,69 @@
           {/each}
         {/if}
       </div>
+    {:else if step === 'base'}
+      <!-- Base branch picker -->
+      <div class="search-container">
+        <Search size={16} class="search-icon" />
+        <input
+          bind:this={baseBranchInputEl}
+          bind:value={baseBranchQuery}
+          type="text"
+          placeholder="Filter branches..."
+          class="search-input"
+        />
+      </div>
+
+      <div class="selected-repo-bar">
+        <GitBranch size={14} />
+        <span>{repoName(selectedRepo ?? '')}</span>
+      </div>
+
+      <div class="entries-list">
+        {#if loadingBranches}
+          <div class="loading">
+            <Loader2 size={16} class="spinner" />
+            <span>Loading branches...</span>
+          </div>
+        {:else if filteredBranches.length === 0}
+          <div class="empty">
+            {baseBranchQuery ? 'No matching branches' : 'No branches found'}
+          </div>
+        {:else}
+          {#each filteredBranches as branch, index (branch.name)}
+            <button
+              class="entry"
+              class:selected={index === baseBranchSelectedIndex}
+              class:default-branch={branch.name === selectedBaseBranch}
+              onclick={() => selectBaseBranch(branch.name)}
+            >
+              {#if branch.isRemote}
+                <Globe size={16} class="entry-icon remote-icon" />
+              {:else}
+                <GitBranch size={16} class="entry-icon local-icon" />
+              {/if}
+              <span class="entry-name">{branch.name}</span>
+              {#if branch.name === selectedBaseBranch}
+                <span class="default-badge">default</span>
+              {/if}
+            </button>
+          {/each}
+        {/if}
+      </div>
     {:else}
       <!-- Branch name input -->
       <div class="name-step">
-        <div class="selected-repo">
-          <GitBranch size={16} />
-          <span>{repoName(selectedRepo ?? '')}</span>
+        <div class="selected-info">
+          <div class="info-row">
+            <GitBranch size={14} />
+            <span class="info-label">Repository:</span>
+            <span class="info-value">{repoName(selectedRepo ?? '')}</span>
+          </div>
+          <div class="info-row">
+            <Globe size={14} />
+            <span class="info-label">Base:</span>
+            <span class="info-value">{selectedBaseBranch}</span>
+          </div>
         </div>
 
         <div class="input-group">
@@ -516,6 +659,43 @@
     flex-shrink: 0;
   }
 
+  /* Base branch picker */
+  .selected-repo-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .selected-repo-bar :global(svg) {
+    color: var(--status-renamed);
+  }
+
+  :global(.remote-icon) {
+    color: var(--text-muted) !important;
+  }
+
+  :global(.local-icon) {
+    color: var(--status-renamed) !important;
+  }
+
+  .default-badge {
+    padding: 2px 6px;
+    background-color: var(--ui-accent);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--bg-deepest);
+    text-transform: uppercase;
+  }
+
+  .entry.default-branch {
+    background-color: var(--bg-hover);
+  }
+
   /* Name step */
   .name-step {
     padding: 16px;
@@ -524,19 +704,34 @@
     gap: 16px;
   }
 
-  .selected-repo {
+  .selected-info {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    flex-direction: column;
+    gap: 6px;
     padding: 10px 12px;
     background-color: var(--bg-hover);
     border-radius: 6px;
+  }
+
+  .info-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: var(--size-sm);
+  }
+
+  .info-row :global(svg) {
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .info-label {
     color: var(--text-muted);
   }
 
-  .selected-repo :global(svg) {
-    color: var(--status-renamed);
+  .info-value {
+    color: var(--text-primary);
+    font-family: 'SF Mono', 'Menlo', monospace;
   }
 
   .input-group {
