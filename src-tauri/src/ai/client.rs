@@ -499,7 +499,15 @@ pub async fn run_acp_prompt_streaming(
     internal_session_id: &str,
     app_handle: tauri::AppHandle,
 ) -> Result<AcpPromptResult, String> {
-    run_acp_prompt_internal(agent, working_dir, prompt, acp_session_id, Some(app_handle), internal_session_id).await
+    run_acp_prompt_internal(
+        agent,
+        working_dir,
+        prompt,
+        acp_session_id,
+        Some(app_handle),
+        internal_session_id,
+    )
+    .await
 }
 
 /// Internal implementation that handles both streaming and non-streaming modes
@@ -587,7 +595,10 @@ async fn run_acp_session_inner(
     let stdout_compat = stdout.compat();
 
     // Create streaming client with our internal session ID for event correlation
-    let client = Arc::new(StreamingAcpClient::new(app_handle.clone(), internal_session_id.to_string()));
+    let client = Arc::new(StreamingAcpClient::new(
+        app_handle.clone(),
+        internal_session_id.to_string(),
+    ));
     let client_for_connection = Arc::clone(&client);
 
     // Create the ACP connection
