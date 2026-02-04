@@ -15,6 +15,7 @@
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
   import type { UnlistenFn } from '@tauri-apps/api/event';
+  import { confirm } from '@tauri-apps/plugin-dialog';
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal from './NewBranchModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
@@ -113,7 +114,8 @@
     const branch = branches.find((b) => b.id === branchId);
     if (!branch) return;
 
-    if (!confirm(`Delete branch "${branch.branchName}" and its worktree?`)) return;
+    const confirmed = await confirm(`Delete branch "${branch.branchName}" and its worktree?`);
+    if (!confirmed) return;
 
     try {
       await branchService.deleteBranch(branchId);
