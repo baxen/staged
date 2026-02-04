@@ -1,7 +1,7 @@
 <!--
   BranchCard.svelte - Card display for a tracked branch
 
-  Shows branch name and a unified timeline of commits and notes.
+  Shows branch name, base branch, and a unified timeline of commits and notes.
   Commits are displayed newest-first with the HEAD commit having a "Continue" option.
   Notes are interleaved by timestamp and styled differently.
 -->
@@ -18,6 +18,7 @@
     FileText,
     GitCommit,
     ChevronDown,
+    ChevronsUpDown,
   } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
   import * as branchService from './services/branch';
@@ -25,6 +26,7 @@
   import NewSessionModal from './NewSessionModal.svelte';
   import NewNoteModal from './NewNoteModal.svelte';
   import NoteViewerModal from './NoteViewerModal.svelte';
+  import BaseBranchPickerModal from './BaseBranchPickerModal.svelte';
 
   interface Props {
     branch: Branch;
@@ -33,9 +35,17 @@
     onNewSession?: () => void;
     onViewDiff?: () => void;
     onDelete?: () => void;
+    onBranchUpdated?: (branch: Branch) => void;
   }
 
-  let { branch, refreshKey = 0, onNewSession, onViewDiff, onDelete }: Props = $props();
+  let {
+    branch,
+    refreshKey = 0,
+    onNewSession,
+    onViewDiff,
+    onDelete,
+    onBranchUpdated,
+  }: Props = $props();
 
   // Timeline item types
   type TimelineItem =
@@ -116,6 +126,9 @@
 
   // New note modal state
   let showNewNoteModal = $state(false);
+
+  // Base branch picker modal state
+  let showBaseBranchPicker = $state(false);
 
   // Dropdown state
   let showNewDropdown = $state(false);
@@ -259,6 +272,21 @@
       showNewDropdown = false;
     }
   }
+
+  // Handle base branch change
+  async function handleBaseBranchChanged(newBaseBranch: string) {
+    showBaseBranchPicker = false;
+    // Notify parent so it can update its branch state
+    const updatedBranch = { ...branch, baseBranch: newBaseBranch };
+    onBranchUpdated?.(updatedBranch);
+    // Reload data since commits may have changed
+    await loadData();
+  }
+
+  // Format base branch for display (strip origin/ prefix if present)
+  function formatBaseBranch(baseBranch: string): string {
+    return baseBranch.replace(/^origin\//, '');
+  }
 </script>
 
 <svelte:window on:click={handleClickOutside} />
@@ -268,6 +296,15 @@
     <div class="branch-info">
       <GitBranch size={16} class="branch-icon" />
       <span class="branch-name">{branch.branchName}</span>
+      <span class="branch-separator">›</span>
+      <button
+        class="base-branch-name"
+        onclick={() => (showBaseBranchPicker = true)}
+        title="Change base branch"
+      >
+        {formatBaseBranch(branch.baseBranch)}
+        <ChevronsUpDown size={12} class="base-branch-chevron" />
+      </button>
     </div>
     <div class="header-actions">
       <button class="action-button" onclick={onViewDiff} title="View diff">
@@ -480,6 +517,15 @@
   />
 {/if}
 
+<!-- Base branch picker modal -->
+{#if showBaseBranchPicker}
+  <BaseBranchPickerModal
+    {branch}
+    onClose={() => (showBaseBranchPicker = false)}
+    onSelected={handleBaseBranchChanged}
+  />
+{/if}
+
 <style>
   .branch-card {
     display: flex;
@@ -512,6 +558,40 @@
     font-size: var(--size-md);
     font-weight: 500;
     color: var(--text-primary);
+  }
+
+  .branch-separator {
+    color: var(--text-faint);
+    font-size: var(--size-md);
+  }
+
+  .base-branch-name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: var(--size-md);
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: color 0.15s ease;
+  }
+
+  .base-branch-name:hover {
+    color: var(--text-primary);
+  }
+
+  :global(.base-branch-chevron) {
+    color: var(--text-faint);
+    flex-shrink: 0;
+    position: relative;
+    top: 1px;
+  }
+
+  .base-branch-name:hover :global(.base-branch-chevron) {
+    color: var(--text-muted);
   }
 
   .header-actions {

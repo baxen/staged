@@ -1365,6 +1365,17 @@ impl Store {
         Ok(())
     }
 
+    /// Update a branch's base branch
+    pub fn update_branch_base(&self, id: &str, base_branch: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branches SET base_branch = ?1, updated_at = ?2 WHERE id = ?3",
+            params![base_branch, now, id],
+        )?;
+        Ok(())
+    }
+
     // =========================================================================
     // Branch session operations
     // =========================================================================

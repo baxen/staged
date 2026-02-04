@@ -140,6 +140,14 @@ export async function deleteBranch(branchId: string): Promise<void> {
   return invoke<void>('delete_branch', { branchId });
 }
 
+/**
+ * Update a branch's base branch.
+ * Used to change which branch the diff is computed against.
+ */
+export async function updateBranchBase(branchId: string, baseBranch: string): Promise<void> {
+  return invoke<void>('update_branch_base', { branchId, baseBranch });
+}
+
 // =============================================================================
 // Commit Operations
 // =============================================================================

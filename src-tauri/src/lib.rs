@@ -1426,6 +1426,18 @@ fn list_branches_for_repo(
         .map_err(|e| e.to_string())
 }
 
+/// Update a branch's base branch.
+#[tauri::command(rename_all = "camelCase")]
+fn update_branch_base(
+    state: State<'_, Arc<Store>>,
+    branch_id: String,
+    base_branch: String,
+) -> Result<(), String> {
+    state
+        .update_branch_base(&branch_id, &base_branch)
+        .map_err(|e| e.to_string())
+}
+
 /// Delete a branch and its worktree.
 #[tauri::command(rename_all = "camelCase")]
 fn delete_branch(state: State<'_, Arc<Store>>, branch_id: String) -> Result<(), String> {
@@ -2377,6 +2389,7 @@ pub fn run() {
             list_git_branches,
             detect_default_branch,
             delete_branch,
+            update_branch_base,
             get_branch_commits,
             list_branch_sessions,
             get_session_for_commit,
