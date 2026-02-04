@@ -127,6 +127,9 @@
   let showNewDropdown = $state(false);
   let showMoreMenu = $state(false);
 
+  // Delete note confirmation state
+  let confirmingDeleteNoteId = $state<string | null>(null);
+
   // Load commits and running session on mount
   onMount(async () => {
     await loadData();
@@ -248,6 +251,16 @@
   function handleNewNote() {
     showNewDropdown = false;
     showNewNoteModal = true;
+  }
+
+  async function handleDeleteNote(noteId: string) {
+    try {
+      await branchService.deleteBranchNote(noteId);
+      notes = notes.filter((n) => n.id !== noteId);
+    } catch (e) {
+      console.error('Failed to delete note:', e);
+    }
+    confirmingDeleteNoteId = null;
   }
 
   function toggleDropdown() {
@@ -397,8 +410,15 @@
               </div>
             </button>
           {:else if item.type === 'commit'}
-            <!-- Commit row -->
-            <div class="timeline-row" class:is-head={item.isHead}>
+            <!-- svelte-ignore a11y_no_static_element_interactions, a11y_click_events_have_key_events -->
+            <div
+              class="timeline-row commit-row"
+              class:is-head={item.isHead}
+              class:has-session={!!item.session}
+              onclick={() => {
+                if (item.session) handleViewSession(item.session);
+              }}
+            >
               <div class="timeline-marker">
                 {#if item.isHead}
                   <div class="head-marker"></div>
@@ -421,28 +441,45 @@
                   </div>
                 </div>
               </div>
-              <div class="timeline-actions">
-                {#if item.session}
+              {#if item.isHead}
+                <div class="timeline-actions">
                   <button
                     class="action-btn"
-                    onclick={() => handleViewSession(item.session!)}
-                    title="View session"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleContinue();
+                    }}
                   >
-                    <Eye size={12} />
-                    View
-                  </button>
-                {/if}
-                {#if item.isHead}
-                  <button class="action-btn" onclick={handleContinue}>
                     <Play size={12} />
                     Continue
                   </button>
-                {/if}
-              </div>
+                </div>
+              {/if}
             </div>
           {:else if item.type === 'note'}
-            <!-- Note row -->
-            <button class="timeline-row note-row" onclick={() => handleViewNote(item.note)}>
+            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+            <div
+              class="timeline-row note-row"
+              role="button"
+              tabindex="0"
+              onclick={() => {
+                if (confirmingDeleteNoteId === item.note.id) {
+                  confirmingDeleteNoteId = null;
+                } else {
+                  handleViewNote(item.note);
+                }
+              }}
+              onkeydown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  if (confirmingDeleteNoteId === item.note.id) {
+                    confirmingDeleteNoteId = null;
+                  } else {
+                    handleViewNote(item.note);
+                  }
+                }
+              }}
+            >
               <div class="timeline-marker">
                 <div class="timeline-dot note-dot"></div>
                 {#if index < timeline.length - 1}
@@ -461,12 +498,41 @@
                 </div>
               </div>
               <div class="timeline-actions">
-                <span class="view-hint">
-                  <Eye size={12} />
-                  View
-                </span>
+                {#if confirmingDeleteNoteId === item.note.id}
+                  <div class="delete-confirm">
+                    <button
+                      class="delete-confirm-btn"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteNote(item.note.id);
+                      }}
+                    >
+                      Delete
+                    </button>
+                    <button
+                      class="delete-cancel-btn"
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        confirmingDeleteNoteId = null;
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                {:else}
+                  <button
+                    class="note-delete"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      confirmingDeleteNoteId = item.note.id;
+                    }}
+                    title="Delete note"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                {/if}
               </div>
-            </button>
+            </div>
           {/if}
         {/each}
       </div>
@@ -718,33 +784,25 @@
     display: flex;
     align-items: flex-start;
     gap: 10px;
-    padding: 6px 0;
+    padding: 6px 8px;
+    margin: 0 -8px;
     background: transparent;
     border: none;
-    text-align: left;
-    width: 100%;
-  }
-
-  .timeline-row.note-row {
-    cursor: pointer;
     border-radius: 6px;
-    margin: -4px -6px;
-    padding: 10px 6px;
+    text-align: left;
+    width: calc(100% + 16px);
+    position: relative;
     transition: background-color 0.15s ease;
   }
 
-  .timeline-row.note-row:hover {
-    background-color: var(--bg-hover);
-  }
-
+  .timeline-row.commit-row.has-session,
+  .timeline-row.note-row,
   .timeline-row.skeleton-row {
     cursor: pointer;
-    border-radius: 6px;
-    margin: -4px -6px;
-    padding: 10px 6px;
-    transition: background-color 0.15s ease;
   }
 
+  .timeline-row.commit-row.has-session:hover,
+  .timeline-row.note-row:hover,
   .timeline-row.skeleton-row:hover {
     background-color: var(--bg-hover);
   }
@@ -907,20 +965,77 @@
     background-color: var(--bg-hover);
   }
 
-  .view-hint {
+  .note-delete {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-faint);
+    cursor: pointer;
+    opacity: 0;
+    transition:
+      opacity 0.15s ease,
+      background-color 0.15s ease,
+      color 0.15s ease;
+  }
+
+  .note-row:hover .note-delete {
+    opacity: 1;
+  }
+
+  .note-delete:hover {
+    background-color: var(--bg-hover);
+    color: var(--ui-danger);
+  }
+
+  /* Delete note confirmation inline */
+  .delete-confirm {
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 4px 10px;
-    color: var(--text-faint);
-    font-size: var(--size-xs);
-    opacity: 0;
-    transition: opacity 0.15s ease;
   }
 
-  .note-row:hover .view-hint {
-    opacity: 1;
-    color: var(--text-accent);
+  .delete-confirm-btn {
+    padding: 2px 8px;
+    background: var(--ui-danger);
+    border: none;
+    border-radius: 3px;
+    color: white;
+    font-size: var(--size-xs);
+    font-family: inherit;
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .delete-confirm-btn:hover {
+    background: var(--ui-danger-hover, #c53030);
+  }
+
+  .delete-cancel-btn {
+    padding: 2px 8px;
+    background: none;
+    border: none;
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    font-family: inherit;
+    cursor: pointer;
+    transition:
+      background-color 0.1s,
+      color 0.1s;
+  }
+
+  .delete-cancel-btn:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .watch-button {
