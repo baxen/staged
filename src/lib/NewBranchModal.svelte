@@ -456,6 +456,10 @@
               type="text"
               placeholder="feature/my-feature"
               class="branch-input"
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
             />
           </div>
 
