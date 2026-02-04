@@ -239,14 +239,11 @@ impl agent_client_protocol::Client for StagedAcpClient {
             "[ACP Notification] session_notification: {:?}",
             notification
         );
-        match &notification.update {
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                if let AcpContentBlock::Text(text) = &chunk.content {
-                    let mut accumulated = self.collector.accumulated_content.lock().await;
-                    accumulated.push_str(&text.text);
-                }
+        if let SessionUpdate::AgentMessageChunk(chunk) = &notification.update {
+            if let AcpContentBlock::Text(text) = &chunk.content {
+                let mut accumulated = self.collector.accumulated_content.lock().await;
+                accumulated.push_str(&text.text);
             }
-            _ => {}
         }
 
         Ok(())
