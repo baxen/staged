@@ -16,6 +16,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { confirm } from '@tauri-apps/plugin-dialog';
   import { Plus, Sparkles, FolderKanban, Trash2, X } from 'lucide-svelte';
   import type { Project, Artifact } from './types';
   import * as projectService from './services/project';
@@ -123,7 +124,8 @@
     const project = projects.find((p) => p.id === projectId);
     if (!project) return;
 
-    if (!confirm(`Delete project "${project.name}" and all its artifacts?`)) return;
+    const confirmed = await confirm(`Delete project "${project.name}" and all its artifacts?`);
+    if (!confirmed) return;
 
     try {
       await projectService.deleteProject(projectId);
