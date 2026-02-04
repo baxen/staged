@@ -643,8 +643,10 @@ async fn send_agent_prompt_streaming(
 
     let path = get_repo_path(repo_path.as_deref()).to_path_buf();
 
+    // Legacy path: no internal session ID, use ACP session ID or "legacy" as fallback
+    let internal_id = session_id.as_deref().unwrap_or("legacy");
     let result =
-        ai::run_acp_prompt_streaming(&agent, &path, &prompt, session_id.as_deref(), app_handle)
+        ai::run_acp_prompt_streaming(&agent, &path, &prompt, session_id.as_deref(), internal_id, app_handle)
             .await?;
 
     Ok(AgentPromptResponse {
@@ -1138,7 +1140,7 @@ async fn run_artifact_generation(
     let _ = store.add_message(&session_id, store::MessageRole::User, &full_prompt);
 
     // Call the AI with streaming (emits session-update events)
-    match ai::run_acp_prompt_streaming(&agent, &working_dir, &full_prompt, None, app_handle.clone())
+    match ai::run_acp_prompt_streaming(&agent, &working_dir, &full_prompt, None, &session_id, app_handle.clone())
         .await
     {
         Ok(result) => {

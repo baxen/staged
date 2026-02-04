@@ -261,6 +261,7 @@ impl SessionManager {
                 &working_dir,
                 &prompt,
                 acp_session_id.as_deref(),
+                &session_id_owned,
                 app_handle.clone(),
             )
             .await;

@@ -253,8 +253,9 @@ enum ContentSegment {
 struct StreamingAcpClient {
     /// Tauri app handle for emitting events (None for non-streaming mode)
     app_handle: Option<tauri::AppHandle>,
-    /// Session ID for event correlation
-    session_id: Mutex<String>,
+    /// Internal session ID (our DB key) — used to replace the ACP session ID
+    /// in emitted events so the frontend always sees our internal IDs.
+    internal_session_id: String,
     /// Content segments in arrival order (text chunks get merged, tool calls break the sequence)
     segments: Mutex<Vec<ContentSegment>>,
     /// Tool call index by ID (for updates)
@@ -264,18 +265,14 @@ struct StreamingAcpClient {
 }
 
 impl StreamingAcpClient {
-    fn new(app_handle: Option<tauri::AppHandle>) -> Self {
+    fn new(app_handle: Option<tauri::AppHandle>, internal_session_id: String) -> Self {
         Self {
             app_handle,
-            session_id: Mutex::new(String::new()),
+            internal_session_id,
             segments: Mutex::new(Vec::new()),
             tool_call_indices: Mutex::new(HashMap::new()),
             suppress_emit: Mutex::new(false),
         }
-    }
-
-    async fn set_session_id(&self, id: &str) {
-        *self.session_id.lock().await = id.to_string();
     }
 
     /// Set whether to suppress emitting events to frontend
@@ -283,13 +280,17 @@ impl StreamingAcpClient {
         *self.suppress_emit.lock().await = suppress;
     }
 
-    /// Emit a session update event to the frontend (unless suppressed)
+    /// Emit a session update event to the frontend (unless suppressed).
+    /// Replaces the ACP session ID with our internal session ID so the
+    /// frontend can correlate updates with the correct session.
     async fn emit_update(&self, notification: &SessionNotification) {
         if *self.suppress_emit.lock().await {
             return;
         }
         if let Some(ref app_handle) = self.app_handle {
-            if let Err(e) = app_handle.emit("session-update", notification) {
+            let mut patched = notification.clone();
+            patched.session_id = SessionId::new(&*self.internal_session_id);
+            if let Err(e) = app_handle.emit("session-update", &patched) {
                 log::warn!("Failed to emit session-update event: {}", e);
             }
         }
@@ -465,7 +466,8 @@ pub async fn run_acp_prompt(
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None).await?;
+    // No streaming, no events emitted — internal_session_id is unused
+    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "").await?;
     Ok(result.response)
 }
 
@@ -480,21 +482,24 @@ pub async fn run_acp_prompt_with_session(
     prompt: &str,
     session_id: Option<&str>,
 ) -> Result<AcpPromptResult, String> {
-    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None).await
+    // No streaming, no events emitted — internal_session_id is unused
+    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "").await
 }
 
 /// Run a prompt through ACP with streaming events emitted to frontend
 ///
 /// Emits "session-update" events with SessionNotification payloads during execution.
-/// Emits "session-complete" event with finalized transcript when done.
+/// The `internal_session_id` is stamped onto all emitted events so the frontend
+/// can correlate them (the ACP protocol uses its own opaque session IDs internally).
 pub async fn run_acp_prompt_streaming(
     agent: &AcpAgent,
     working_dir: &Path,
     prompt: &str,
-    session_id: Option<&str>,
+    acp_session_id: Option<&str>,
+    internal_session_id: &str,
     app_handle: tauri::AppHandle,
 ) -> Result<AcpPromptResult, String> {
-    run_acp_prompt_internal(agent, working_dir, prompt, session_id, Some(app_handle)).await
+    run_acp_prompt_internal(agent, working_dir, prompt, acp_session_id, Some(app_handle), internal_session_id).await
 }
 
 /// Internal implementation that handles both streaming and non-streaming modes
@@ -502,15 +507,17 @@ async fn run_acp_prompt_internal(
     agent: &AcpAgent,
     working_dir: &Path,
     prompt: &str,
-    session_id: Option<&str>,
+    acp_session_id: Option<&str>,
     app_handle: Option<tauri::AppHandle>,
+    internal_session_id: &str,
 ) -> Result<AcpPromptResult, String> {
     let agent_path = agent.path().to_path_buf();
     let agent_name = agent.name().to_string();
     let agent_args: Vec<String> = agent.acp_args().iter().map(|s| s.to_string()).collect();
     let working_dir = working_dir.to_path_buf();
     let prompt = prompt.to_string();
-    let session_id = session_id.map(|s| s.to_string());
+    let acp_session_id = acp_session_id.map(|s| s.to_string());
+    let internal_session_id = internal_session_id.to_string();
 
     // Run the ACP session in a blocking task with its own runtime
     // This is needed because ACP uses !Send futures (LocalSet)
@@ -530,8 +537,9 @@ async fn run_acp_prompt_internal(
                 &agent_args,
                 &working_dir,
                 &prompt,
-                session_id.as_deref(),
+                acp_session_id.as_deref(),
                 app_handle,
+                &internal_session_id,
             )
             .await
         })
@@ -549,6 +557,7 @@ async fn run_acp_session_inner(
     prompt: &str,
     existing_session_id: Option<&str>,
     app_handle: Option<tauri::AppHandle>,
+    internal_session_id: &str,
 ) -> Result<AcpPromptResult, String> {
     // Spawn the agent process with ACP mode
     let mut cmd = Command::new(agent_path);
@@ -577,8 +586,8 @@ async fn run_acp_session_inner(
     let stdin_compat = stdin.compat_write();
     let stdout_compat = stdout.compat();
 
-    // Create streaming client
-    let client = Arc::new(StreamingAcpClient::new(app_handle.clone()));
+    // Create streaming client with our internal session ID for event correlation
+    let client = Arc::new(StreamingAcpClient::new(app_handle.clone(), internal_session_id.to_string()));
     let client_for_connection = Arc::clone(&client);
 
     // Create the ACP connection
@@ -655,9 +664,6 @@ async fn run_acp_session_inner(
             log::info!("Created new session: {}", session_response.session_id.0);
             (session_response.session_id, true)
         };
-
-    // Set session ID on client for event correlation
-    client.set_session_id(&session_id.0).await;
 
     // Clear any accumulated content from loading session history
     // (load_session may replay old messages as AgentMessageChunk notifications)

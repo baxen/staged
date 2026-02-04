@@ -2,10 +2,10 @@
   NoteViewerModal.svelte - View a branch note (live or historical)
 
   Shows the markdown content of a note. For generating notes,
-  subscribes to streaming events for real-time updates.
+  subscribes to streaming events for real-time updates via the shared store.
 -->
 <script lang="ts">
-  import { onMount, onDestroy, tick } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import {
     X,
     FileText,
@@ -19,15 +19,18 @@
   import type { BranchNote } from './services/branch';
   import {
     getSession,
-    listenToSessionUpdates,
-    listenToSessionStatus,
     parseAssistantContent,
-    type SessionNotification,
-    type SessionStatusEvent,
     type SessionFull,
     type ContentSegment,
   } from './services/ai';
-  import type { UnlistenFn } from '@tauri-apps/api/event';
+  import type { DisplaySegment } from './types/streaming';
+  import {
+    connectToSession,
+    disconnectFromSession,
+    type StreamingSessionState,
+    type ConnectOptions,
+  } from './stores/streamingSession.svelte';
+  import StreamingMessages from './StreamingMessages.svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
 
@@ -48,17 +51,9 @@
   let sessionLoading = $state(false);
   let sessionError = $state<string | null>(null);
 
-  // Streaming state for live generation
-  type DisplaySegment =
-    | { type: 'text'; text: string }
-    | { type: 'tool'; id: string; title: string; status: string };
-
-  let streamingSegments = $state<DisplaySegment[]>([]);
-  let toolCallMap = $state<Map<string, DisplaySegment & { type: 'tool' }>>(new Map());
-
-  // Event listeners
-  let unlistenUpdate: UnlistenFn | null = null;
-  let unlistenStatus: UnlistenFn | null = null;
+  // Streaming store connection
+  let streamState = $state<StreamingSessionState | null>(null);
+  let connectOptions: ConnectOptions | undefined;
 
   // Derived state
   let isGenerating = $derived(note.status === 'generating');
@@ -76,82 +71,22 @@
   let contentContainer: HTMLDivElement;
 
   onMount(async () => {
-    // Set up event listeners only for live generating notes
     if (isLive && isGenerating && note.aiSessionId) {
-      unlistenUpdate = await listenToSessionUpdates(handleSessionUpdate);
-      unlistenStatus = await listenToSessionStatus(handleSessionStatus);
+      connectOptions = {
+        onIdle: () => onClose(),
+        onError: () => {
+          // Error state is handled via note.status
+        },
+      };
+      streamState = connectToSession(note.aiSessionId, connectOptions);
     }
   });
 
   onDestroy(() => {
-    unlistenUpdate?.();
-    unlistenStatus?.();
+    if (note.aiSessionId) {
+      disconnectFromSession(note.aiSessionId, connectOptions);
+    }
   });
-
-  function handleSessionUpdate(notification: SessionNotification) {
-    // Only process updates when generating
-    if (!isGenerating) return;
-
-    const update = notification.update;
-
-    if (update.sessionUpdate === 'agent_message_chunk') {
-      if ('content' in update && update.content.type === 'text') {
-        const lastSegment = streamingSegments[streamingSegments.length - 1];
-        if (lastSegment && lastSegment.type === 'text') {
-          lastSegment.text += update.content.text;
-          streamingSegments = [...streamingSegments];
-        } else {
-          streamingSegments = [...streamingSegments, { type: 'text', text: update.content.text }];
-        }
-        scrollToBottom();
-      }
-    } else if (update.sessionUpdate === 'tool_call') {
-      if ('toolCallId' in update) {
-        const toolSegment: DisplaySegment & { type: 'tool' } = {
-          type: 'tool',
-          id: update.toolCallId,
-          title: update.title,
-          status: update.status,
-        };
-        toolCallMap.set(update.toolCallId, toolSegment);
-        streamingSegments = [...streamingSegments, toolSegment];
-        scrollToBottom();
-      }
-    } else if (update.sessionUpdate === 'tool_call_update') {
-      if ('toolCallId' in update) {
-        const existing = toolCallMap.get(update.toolCallId);
-        if (existing && update.fields) {
-          if (update.fields.title) existing.title = update.fields.title;
-          if (update.fields.status) existing.status = update.fields.status;
-          streamingSegments = [...streamingSegments];
-        }
-      }
-    }
-  }
-
-  function handleSessionStatus(event: SessionStatusEvent) {
-    // Only process status for our session
-    if (note.aiSessionId && event.sessionId !== note.aiSessionId) {
-      return;
-    }
-
-    if (event.status.status === 'idle') {
-      // Generation complete - close and let parent refresh
-      onClose();
-    } else if (event.status.status === 'error') {
-      // Show error state
-      streamingSegments = [];
-      toolCallMap = new Map();
-    }
-  }
-
-  function scrollToBottom() {
-    tick().then(() => {
-      if (contentContainer) {
-        contentContainer.scrollTop = contentContainer.scrollHeight;
-      }
-    });
-  }
 
   async function loadSession() {
     if (!note.aiSessionId || session) return;
@@ -264,43 +199,14 @@
             <span>Generating note...</span>
           </div>
 
-          {#if streamingSegments.length > 0}
-            <div class="streaming-content">
-              <div class="message">
-                <div class="message-icon">
-                  <Bot size={14} />
-                </div>
-                <div class="message-content">
-                  {#each streamingSegments as segment, i}
-                    {#if segment.type === 'text'}
-                      <div class="message-text">
-                        {segment.text}{#if i === streamingSegments.length - 1}<span class="cursor"
-                            >▋</span
-                          >{/if}
-                      </div>
-                    {:else}
-                      <div
-                        class="tool-call"
-                        class:running={segment.status === 'running'}
-                        class:completed={segment.status === 'completed'}
-                      >
-                        {#if segment.status === 'running'}
-                          <Loader2 size={12} class="spinning" />
-                        {:else}
-                          <Wrench size={12} />
-                        {/if}
-                        <span class="tool-title">{segment.title}</span>
-                      </div>
-                    {/if}
-                  {/each}
-                </div>
-              </div>
-            </div>
-          {:else}
-            <div class="waiting-content">
-              <p class="generating-hint">Waiting for AI response...</p>
-            </div>
-          {/if}
+          <div class="streaming-content">
+            <StreamingMessages
+              messages={[]}
+              streamingSegments={streamState?.streamingSegments ?? []}
+              isActive={true}
+              waitingText="Waiting for AI response..."
+            />
+          </div>
         </div>
       {:else if isError}
         <div class="error-content">
@@ -524,19 +430,9 @@
   .streaming-content {
     flex: 1;
     overflow: auto;
-  }
-
-  .waiting-content {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    flex: 1;
-  }
-
-  .generating-hint {
-    font-size: var(--size-sm);
-    color: var(--text-faint);
-    margin: 0;
+    flex-direction: column;
+    gap: 16px;
   }
 
   /* Error state */
@@ -648,21 +544,6 @@
     border-radius: 12px 12px 4px 12px;
   }
 
-  .cursor {
-    animation: blink 1s step-end infinite;
-    color: var(--text-muted);
-  }
-
-  @keyframes blink {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0;
-    }
-  }
-
   .tool-call {
     display: flex;
     align-items: center;
@@ -673,10 +554,6 @@
     background: var(--bg-primary);
     border-radius: 4px;
     border: 1px solid var(--border-subtle);
-  }
-
-  .tool-call.running {
-    border-color: var(--text-accent);
   }
 
   .tool-call.completed {
