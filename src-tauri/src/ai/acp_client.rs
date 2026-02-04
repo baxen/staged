@@ -235,7 +235,10 @@ impl agent_client_protocol::Client for StagedAcpClient {
     async fn session_notification(&self, notification: SessionNotification) -> AcpResult<()> {
         use agent_client_protocol::SessionUpdate;
 
-        log::debug!("[ACP Notification] session_notification: {:?}", notification);
+        log::debug!(
+            "[ACP Notification] session_notification: {:?}",
+            notification
+        );
         match &notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let AcpContentBlock::Text(text) = &chunk.content {
