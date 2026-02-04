@@ -37,28 +37,70 @@ newImage.lockFocus()
 iconImage.draw(in: NSRect(origin: .zero, size: size))
 
 // Configure badge
-let badgeHeight = size.height * 0.22
+let singleLineHeight = size.height * 0.22
 let padding = size.width * 0.03
-let cornerRadius = badgeHeight * 0.25
+let maxBadgeWidth = size.width * 0.9
 
 // Text attributes - calculate font size to fit
-let maxFontSize = badgeHeight * 0.65
+let maxFontSize = singleLineHeight * 0.65
 var fontSize = maxFontSize
-var textSize: NSSize
 var attributes: [NSAttributedString.Key: Any]
 
-// Find font size that fits
+// Helper to wrap text on `-` characters
+func wrapText(_ text: String, maxWidth: CGFloat, attributes: [NSAttributedString.Key: Any]) -> [String] {
+    let singleLineSize = (text as NSString).size(withAttributes: attributes)
+    if singleLineSize.width <= maxWidth {
+        return [text]
+    }
+    
+    // Split on `-` and try to form lines
+    let parts = text.components(separatedBy: "-")
+    if parts.count == 1 {
+        return [text]  // No `-` to wrap on
+    }
+    
+    var lines: [String] = []
+    var currentLine = ""
+    
+    for (index, part) in parts.enumerated() {
+        let separator = index == 0 ? "" : "-"
+        let testLine = currentLine.isEmpty ? part : currentLine + separator + part
+        let testSize = (testLine as NSString).size(withAttributes: attributes)
+        
+        if testSize.width <= maxWidth || currentLine.isEmpty {
+            currentLine = testLine
+        } else {
+            lines.append(currentLine)
+            currentLine = part
+        }
+    }
+    if !currentLine.isEmpty {
+        lines.append(currentLine)
+    }
+    
+    return lines
+}
+
+// Find font size that fits (allowing up to 2 lines)
+var lines: [String] = []
 repeat {
     attributes = [
         .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
         .foregroundColor: NSColor.white
     ]
-    textSize = (label as NSString).size(withAttributes: attributes)
+    lines = wrapText(label, maxWidth: maxBadgeWidth - padding * 4, attributes: attributes)
     fontSize -= 1
-} while textSize.width > size.width * 0.9 && fontSize > 8
+} while lines.count > 2 && fontSize > 8
+
+// Calculate text dimensions
+let lineHeight = (lines.first! as NSString).size(withAttributes: attributes).height
+let textHeight = lineHeight * CGFloat(lines.count)
+let maxLineWidth = lines.map { ($0 as NSString).size(withAttributes: attributes).width }.max() ?? 0
 
 // Badge dimensions based on text
-let badgeWidth = textSize.width + padding * 4
+let badgeHeight = textHeight + padding * 2
+let cornerRadius = badgeHeight * 0.2
+let badgeWidth = maxLineWidth + padding * 4
 let badgeX = size.width - badgeWidth - padding
 let badgeY = padding + size.height * 0.05  // Raised slightly higher
 
@@ -68,10 +110,13 @@ let badgePath = NSBezierPath(roundedRect: NSRect(x: badgeX, y: badgeY, width: ba
 NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.1, alpha: 0.85).setFill()
 badgePath.fill()
 
-// Draw text centered in badge
-let textX = badgeX + (badgeWidth - textSize.width) / 2
-let textY = badgeY + (badgeHeight - textSize.height) / 2
-(label as NSString).draw(at: NSPoint(x: textX, y: textY), withAttributes: attributes)
+// Draw text centered in badge (multiple lines, bottom to top)
+for (index, line) in lines.reversed().enumerated() {
+    let lineSize = (line as NSString).size(withAttributes: attributes)
+    let textX = badgeX + (badgeWidth - lineSize.width) / 2
+    let textY = badgeY + padding + lineHeight * CGFloat(index)
+    (line as NSString).draw(at: NSPoint(x: textX, y: textY), withAttributes: attributes)
+}
 
 newImage.unlockFocus()
 
