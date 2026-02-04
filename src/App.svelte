@@ -7,7 +7,6 @@
   import ChatPanel from './lib/ChatPanel.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
-  import ProjectHome from './lib/ProjectHome.svelte';
   import BranchHome from './lib/BranchHome.svelte';
   import FileSearchModal from './lib/FileSearchModal.svelte';
   import FolderPickerModal from './lib/FolderPickerModal.svelte';
@@ -29,7 +28,8 @@
   import { createDiffState } from './lib/stores/diffState.svelte';
   import { createCommentsState } from './lib/stores/comments.svelte';
   import { createDiffSelection } from './lib/stores/diffSelection.svelte';
-  import { createAgentState, agentGlobalState, type Artifact } from './lib/stores/agent.svelte';
+  import { createAgentState, agentGlobalState } from './lib/stores/agent.svelte';
+  import { liveSessionStore } from './lib/stores/liveSession.svelte';
   import { discoverAcpProviders } from './lib/services/ai';
   import { DiffSpec, gitRefName } from './lib/types';
   import type { DiffSpec as DiffSpecType } from './lib/types';
@@ -96,9 +96,9 @@
     loadAnalysisFromDb,
   } from './lib/stores/smartDiff.svelte';
 
-  // View mode: 'branches' = branch workflow, 'projects' = artifact-centric view, 'diff' = traditional diff viewer
-  type ViewMode = 'branches' | 'projects' | 'diff';
-  let viewMode = $state<ViewMode>('branches');
+  // View mode: 'branches' = branch workflow, 'diff' = traditional diff viewer
+  type ViewMode = 'branches' | 'diff';
+  let viewMode = $state<ViewMode>('diff');
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -553,11 +553,27 @@
 
   let isWorkingTree = $derived(diffSelection.spec.head.type === 'WorkingTree');
 
+  // Konami code: toggle between branch home and diff viewer
+  const konamiSequence = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+  let konamiIndex = 0;
+  function handleKonamiKey(e: KeyboardEvent) {
+    if (e.key === konamiSequence[konamiIndex]) {
+      konamiIndex++;
+      if (konamiIndex === konamiSequence.length) {
+        konamiIndex = 0;
+        viewMode = viewMode === 'branches' ? 'diff' : 'branches';
+      }
+    } else {
+      konamiIndex = e.key === konamiSequence[0] ? 1 : 0;
+    }
+  }
+
   // Lifecycle
   let unregisterPreferenceShortcuts: (() => void) | null = null;
   let unregisterFileSearchShortcut: (() => void) | null = null;
 
   onMount(() => {
+    document.addEventListener('keydown', handleKonamiKey);
     loadSavedSize();
     loadSavedSidebarPosition();
     loadSavedSidebarWidth();
@@ -696,6 +712,7 @@
   });
 
   onDestroy(() => {
+    document.removeEventListener('keydown', handleKonamiKey);
     unregisterPreferenceShortcuts?.();
     unregisterFileSearchShortcut?.();
     unsubscribeWatcher?.();
@@ -714,9 +731,6 @@
   {#if viewMode === 'branches'}
     <!-- Branch-based workflow view -->
     <BranchHome />
-  {:else if viewMode === 'projects'}
-    <!-- Artifact-centric project view -->
-    <ProjectHome />
   {:else}
     <!-- Traditional diff viewer -->
     {#if windowState.tabs.length > 0}
