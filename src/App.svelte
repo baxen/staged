@@ -2,9 +2,8 @@
   import { onMount, onDestroy } from 'svelte';
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { AlertCircle, MessageSquare } from 'lucide-svelte';
+  import { AlertCircle } from 'lucide-svelte';
   import Sidebar from './lib/Sidebar.svelte';
-  import ChatPanel from './lib/ChatPanel.svelte';
   import DiffViewer from './lib/DiffViewer.svelte';
   import EmptyState from './lib/EmptyState.svelte';
   import BranchHome from './lib/BranchHome.svelte';
@@ -111,9 +110,6 @@
   let unsubscribeMenuCloseTab: Unsubscribe | null = null;
   let unsubscribeMenuCloseWindow: Unsubscribe | null = null;
   let unsubscribeMenuInstallCli: Unsubscribe | null = null;
-
-  // Chat panel state
-  let showChatPanel = $state(false);
 
   // Sidebar resize state
   let isDraggingSidebar = $state(false);
@@ -799,25 +795,6 @@
     </div>
   {/if}
 
-  <!-- Chat Panel (slides in from right) -->
-  {#if showChatPanel}
-    <div class="chat-panel-container">
-      <ChatPanel
-        repoPath={repoState.currentPath ?? undefined}
-        onClose={() => (showChatPanel = false)}
-      />
-    </div>
-  {/if}
-
-  <!-- Chat Toggle Button -->
-  <button
-    class="chat-toggle-btn"
-    class:active={showChatPanel}
-    onclick={() => (showChatPanel = !showChatPanel)}
-    title={showChatPanel ? 'Close AI Chat' : 'Open AI Chat'}
-  >
-    <MessageSquare size={18} />
-  </button>
 </main>
 
 {#if showFileSearch}
@@ -973,55 +950,4 @@
     margin: 0;
   }
 
-  /* Chat Panel */
-  .chat-panel-container {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 400px;
-    max-width: 100vw;
-    z-index: 500;
-    box-shadow: var(--shadow-elevated);
-  }
-
-  .chat-toggle-btn {
-    position: fixed;
-    bottom: 20px;
-    right: 20px;
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-muted);
-    border-radius: 50%;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition:
-      color 0.15s,
-      background-color 0.15s,
-      border-color 0.15s,
-      box-shadow 0.15s;
-    z-index: 400;
-    box-shadow: var(--shadow-elevated);
-  }
-
-  .chat-toggle-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-hover);
-    border-color: var(--border-emphasis);
-  }
-
-  .chat-toggle-btn.active {
-    background: var(--ui-accent);
-    border-color: var(--ui-accent);
-    color: var(--bg-primary);
-  }
-
-  .chat-toggle-btn.active:hover {
-    background: var(--ui-accent-hover);
-    border-color: var(--ui-accent-hover);
-  }
 </style>

@@ -21,7 +21,7 @@ use git::{
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{now_timestamp, Session, SessionFull, Store};
+use store::{now_timestamp, SessionFull, Store};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
@@ -672,23 +672,6 @@ async fn create_session(
         .await
 }
 
-/// List all sessions (from database).
-#[tauri::command(rename_all = "camelCase")]
-fn list_sessions(state: State<'_, Arc<Store>>) -> Result<Vec<Session>, String> {
-    state.list_sessions().map_err(|e| e.to_string())
-}
-
-/// List sessions for a specific working directory.
-#[tauri::command(rename_all = "camelCase")]
-fn list_sessions_for_dir(
-    state: State<'_, Arc<Store>>,
-    working_dir: String,
-) -> Result<Vec<Session>, String> {
-    state
-        .list_sessions_for_dir(&working_dir)
-        .map_err(|e| e.to_string())
-}
-
 /// Get full session with all messages.
 #[tauri::command(rename_all = "camelCase")]
 fn get_session(
@@ -718,12 +701,6 @@ async fn send_prompt(
     prompt: String,
 ) -> Result<(), String> {
     state.send_prompt(&session_id, prompt).await
-}
-
-/// Delete a session (removes from database).
-#[tauri::command(rename_all = "camelCase")]
-fn delete_session(state: State<'_, Arc<Store>>, session_id: String) -> Result<(), String> {
-    state.delete_session(&session_id).map_err(|e| e.to_string())
 }
 
 /// Update session title.
@@ -2237,12 +2214,9 @@ pub fn run() {
             send_agent_prompt_streaming,
             // Session commands
             create_session,
-            list_sessions,
-            list_sessions_for_dir,
             get_session,
             get_session_status,
             send_prompt,
-            delete_session,
             update_session_title,
             // Review commands
             get_review,

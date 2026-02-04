@@ -162,20 +162,6 @@ export async function createSession(workingDir: string, agentId?: string): Promi
 }
 
 /**
- * List all sessions.
- */
-export async function listSessions(): Promise<Session[]> {
-  return invoke<Session[]>('list_sessions');
-}
-
-/**
- * List sessions for a specific working directory.
- */
-export async function listSessionsForDir(workingDir: string): Promise<Session[]> {
-  return invoke<Session[]>('list_sessions_for_dir', { workingDir });
-}
-
-/**
  * Get full session with all messages.
  */
 export async function getSession(sessionId: string): Promise<SessionFull | null> {
@@ -195,13 +181,6 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
  */
 export async function sendPrompt(sessionId: string, prompt: string): Promise<void> {
   return invoke<void>('send_prompt', { sessionId, prompt });
-}
-
-/**
- * Delete a session.
- */
-export async function deleteSession(sessionId: string): Promise<void> {
-  return invoke<void>('delete_session', { sessionId });
 }
 
 /**
@@ -367,41 +346,4 @@ export async function listenToSessionStatus(
   });
 }
 
-/**
- * Listen for session complete events (legacy).
- */
-export async function listenToSessionComplete(
-  callback: (event: SessionCompleteEvent) => void
-): Promise<UnlistenFn> {
-  return listen<SessionCompleteEvent>('session-complete', (event) => {
-    callback(event.payload);
-  });
-}
 
-/**
- * Listen for session error events (legacy).
- */
-export async function listenToSessionError(
-  callback: (event: SessionErrorEvent) => void
-): Promise<UnlistenFn> {
-  return listen<SessionErrorEvent>('session-error', (event) => {
-    callback(event.payload);
-  });
-}
-
-// =============================================================================
-// Backward Compatibility Aliases
-// =============================================================================
-
-// These aliases allow existing code to work without changes
-export type ChatSession = Session;
-export type ChatMessage = Message;
-export type ChatSessionFull = SessionFull;
-export const createChatSession = createSession;
-export const listChatSessions = listSessions;
-export const listChatSessionsForDir = listSessionsForDir;
-export const getChatSession = getSession;
-export const getChatSessionStatus = getSessionStatus;
-export const sendChatPrompt = sendPrompt;
-export const deleteChatSession = deleteSession;
-export const updateChatSessionTitle = updateSessionTitle;
