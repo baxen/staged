@@ -70,6 +70,24 @@ export interface BranchNote {
   updatedAt: number;
 }
 
+/** Status of a branch review */
+export type BranchReviewStatus = 'generating' | 'complete' | 'error';
+
+/** An AI-generated code review attached to a branch */
+export interface BranchReview {
+  id: string;
+  branchId: string;
+  /** The AI session ID (for viewing the generation conversation) */
+  aiSessionId: string | null;
+  /** Markdown content of the review */
+  content: string;
+  status: BranchReviewStatus;
+  /** Error message if status is 'error' */
+  errorMessage: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // =============================================================================
 // Branch Operations
 // =============================================================================
@@ -304,4 +322,82 @@ export async function deleteBranchNote(noteId: string): Promise<void> {
  */
 export async function recoverOrphanedNote(branchId: string): Promise<BranchNote | null> {
   return invoke<BranchNote | null>('recover_orphaned_note', { branchId });
+}
+
+// =============================================================================
+// Review Operations
+// =============================================================================
+
+/** Response from starting a branch review */
+export interface StartBranchReviewResponse {
+  branchReviewId: string;
+  aiSessionId: string;
+}
+
+/**
+ * Start generating a new code review on a branch.
+ * Creates an AI session, a branch_review record, and sends a review prompt.
+ */
+export async function startBranchReview(branchId: string): Promise<StartBranchReviewResponse> {
+  return invoke<StartBranchReviewResponse>('start_branch_review', { branchId });
+}
+
+/**
+ * List all reviews for a branch.
+ */
+export async function listBranchReviews(branchId: string): Promise<BranchReview[]> {
+  return invoke<BranchReview[]>('list_branch_reviews', { branchId });
+}
+
+/**
+ * Get a branch review by ID.
+ */
+export async function getBranchReview(reviewId: string): Promise<BranchReview | null> {
+  return invoke<BranchReview | null>('get_branch_review', { reviewId });
+}
+
+/**
+ * Get the currently generating review for a branch (if any).
+ */
+export async function getGeneratingReview(branchId: string): Promise<BranchReview | null> {
+  return invoke<BranchReview | null>('get_generating_review', { branchId });
+}
+
+/**
+ * Get a branch review by its AI session ID.
+ */
+export async function getBranchReviewByAiSession(
+  aiSessionId: string
+): Promise<BranchReview | null> {
+  return invoke<BranchReview | null>('get_branch_review_by_ai_session', { aiSessionId });
+}
+
+/**
+ * Mark a branch review as completed with content.
+ */
+export async function completeBranchReview(reviewId: string, content: string): Promise<void> {
+  return invoke<void>('complete_branch_review', { reviewId, content });
+}
+
+/**
+ * Mark a branch review as failed with an error message.
+ */
+export async function failBranchReview(reviewId: string, errorMessage: string): Promise<void> {
+  return invoke<void>('fail_branch_review', { reviewId, errorMessage });
+}
+
+/**
+ * Delete a branch review.
+ */
+export async function deleteBranchReview(reviewId: string): Promise<void> {
+  return invoke<void>('delete_branch_review', { reviewId });
+}
+
+/**
+ * Recover an orphaned review for a branch.
+ * If there's a "generating" review but the AI session is idle, extracts the final
+ * message content and marks the review as complete.
+ */
+export async function recoverOrphanedReview(branchId: string): Promise<BranchReview | null> {
+  return invoke<BranchReview | null>('recover_orphaned_review', { branchId });
 }

@@ -497,6 +497,90 @@ impl BranchNote {
 }
 
 // =============================================================================
+// Branch Review types
+// =============================================================================
+
+/// Status of a branch review.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BranchReviewStatus {
+    /// Review is currently being generated
+    Generating,
+    /// Review generation completed successfully
+    #[default]
+    Complete,
+    /// Review generation encountered an error
+    Error,
+}
+
+impl BranchReviewStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            BranchReviewStatus::Generating => "generating",
+            BranchReviewStatus::Complete => "complete",
+            BranchReviewStatus::Error => "error",
+        }
+    }
+
+    pub fn parse(s: &str) -> Self {
+        match s {
+            "generating" => BranchReviewStatus::Generating,
+            "error" => BranchReviewStatus::Error,
+            _ => BranchReviewStatus::Complete,
+        }
+    }
+}
+
+/// An AI-generated code review attached to a branch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BranchReview {
+    pub id: String,
+    pub branch_id: String,
+    /// The AI session ID (for viewing the generation conversation)
+    pub ai_session_id: Option<String>,
+    /// Markdown content of the review
+    pub content: String,
+    pub status: BranchReviewStatus,
+    /// Error message if status is Error
+    pub error_message: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl BranchReview {
+    /// Create a new review in generating state.
+    pub fn new_generating(branch_id: impl Into<String>, ai_session_id: impl Into<String>) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            branch_id: branch_id.into(),
+            ai_session_id: Some(ai_session_id.into()),
+            content: String::new(),
+            status: BranchReviewStatus::Generating,
+            error_message: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    /// Create a BranchReview from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let status_str: String = row.get(4)?;
+        Ok(Self {
+            id: row.get(0)?,
+            branch_id: row.get(1)?,
+            ai_session_id: row.get(2)?,
+            content: row.get(3)?,
+            status: BranchReviewStatus::parse(&status_str),
+            error_message: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
+        })
+    }
+}
+
+// =============================================================================
 // Error type
 // =============================================================================
 
@@ -668,10 +752,22 @@ impl Store {
                 updated_at INTEGER NOT NULL
             );
 
+            CREATE TABLE IF NOT EXISTS branch_reviews (
+                id TEXT PRIMARY KEY,
+                branch_id TEXT NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+                ai_session_id TEXT,
+                content TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL,
+                error_message TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
             CREATE INDEX IF NOT EXISTS idx_branch_sessions_branch ON branch_sessions(branch_id);
             CREATE INDEX IF NOT EXISTS idx_branch_sessions_commit ON branch_sessions(branch_id, commit_sha);
             CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_path);
             CREATE INDEX IF NOT EXISTS idx_branch_notes_branch ON branch_notes(branch_id);
+            CREATE INDEX IF NOT EXISTS idx_branch_reviews_branch ON branch_reviews(branch_id);
             "#,
         )?;
 
@@ -1611,6 +1707,122 @@ impl Store {
     pub fn delete_branch_note(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM branch_notes WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Branch review operations
+    // =========================================================================
+
+    /// Create a new branch review
+    pub fn create_branch_review(&self, review: &BranchReview) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO branch_reviews (id, branch_id, ai_session_id, content, status, error_message, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                &review.id,
+                &review.branch_id,
+                &review.ai_session_id,
+                &review.content,
+                review.status.as_str(),
+                &review.error_message,
+                review.created_at,
+                review.updated_at,
+            ],
+        )?;
+
+        // Also touch the branch
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branches SET updated_at = ?1 WHERE id = ?2",
+            params![now, &review.branch_id],
+        )?;
+
+        Ok(())
+    }
+
+    /// Get a branch review by ID
+    pub fn get_branch_review(&self, id: &str) -> Result<Option<BranchReview>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, content, status, error_message, created_at, updated_at
+             FROM branch_reviews WHERE id = ?1",
+            params![id],
+            BranchReview::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all reviews for a branch, ordered by creation time (newest first)
+    pub fn list_branch_reviews(&self, branch_id: &str) -> Result<Vec<BranchReview>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, branch_id, ai_session_id, content, status, error_message, created_at, updated_at
+             FROM branch_reviews WHERE branch_id = ?1 ORDER BY created_at DESC",
+        )?;
+        let reviews = stmt
+            .query_map(params![branch_id], BranchReview::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(reviews)
+    }
+
+    /// Get a branch review by its AI session ID
+    pub fn get_branch_review_by_ai_session(
+        &self,
+        ai_session_id: &str,
+    ) -> Result<Option<BranchReview>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, content, status, error_message, created_at, updated_at
+             FROM branch_reviews WHERE ai_session_id = ?1",
+            params![ai_session_id],
+            BranchReview::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Get the currently generating review for a branch (if any)
+    pub fn get_generating_review(&self, branch_id: &str) -> Result<Option<BranchReview>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, branch_id, ai_session_id, content, status, error_message, created_at, updated_at
+             FROM branch_reviews WHERE branch_id = ?1 AND status = 'generating'",
+            params![branch_id],
+            BranchReview::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Update a branch review's content and mark as complete
+    pub fn update_branch_review_completed(&self, id: &str, content: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branch_reviews SET status = 'complete', content = ?1, updated_at = ?2 WHERE id = ?3",
+            params![content, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Update a branch review to error state
+    pub fn update_branch_review_error(&self, id: &str, error_message: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE branch_reviews SET status = 'error', error_message = ?1, updated_at = ?2 WHERE id = ?3",
+            params![error_message, now, id],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a branch review
+    pub fn delete_branch_review(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM branch_reviews WHERE id = ?1", params![id])?;
         Ok(())
     }
 }

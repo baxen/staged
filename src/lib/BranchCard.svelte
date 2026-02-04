@@ -18,13 +18,24 @@
     FileText,
     GitCommit,
     ChevronDown,
+    Search,
+    MoreVertical,
+    GitCompareArrows,
+    Wrench,
   } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
+  import type {
+    Branch,
+    CommitInfo,
+    BranchSession,
+    BranchNote,
+    BranchReview,
+  } from './services/branch';
   import * as branchService from './services/branch';
   import SessionViewerModal from './SessionViewerModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
   import NewNoteModal from './NewNoteModal.svelte';
   import NoteViewerModal from './NoteViewerModal.svelte';
+  import ReviewViewerModal from './ReviewViewerModal.svelte';
 
   interface Props {
     branch: Branch;
@@ -41,22 +52,31 @@
   type TimelineItem =
     | { type: 'commit'; commit: CommitInfo; session: BranchSession | null; isHead: boolean }
     | { type: 'note'; note: BranchNote }
+    | { type: 'review'; review: BranchReview }
     | { type: 'running-session'; session: BranchSession }
-    | { type: 'generating-note'; note: BranchNote };
+    | { type: 'generating-note'; note: BranchNote }
+    | { type: 'generating-review'; review: BranchReview };
 
   // State
   let commits = $state<CommitInfo[]>([]);
   let notes = $state<BranchNote[]>([]);
+  let reviews = $state<BranchReview[]>([]);
   let runningSession = $state<BranchSession | null>(null);
   let generatingNote = $state<BranchNote | null>(null);
+  let generatingReview = $state<BranchReview | null>(null);
   let loading = $state(true);
 
   // Map of commit SHA to its associated session (for "View" button)
   let sessionsByCommit = $state<Map<string, BranchSession>>(new Map());
 
-  // Unified timeline (computed from commits and notes)
+  // Unified timeline (computed from commits, notes, and reviews)
   let timeline = $derived.by(() => {
     const items: TimelineItem[] = [];
+
+    // Add generating review at top if exists
+    if (generatingReview) {
+      items.push({ type: 'generating-review', review: generatingReview });
+    }
 
     // Add generating note at top if exists
     if (generatingNote) {
@@ -68,7 +88,7 @@
       items.push({ type: 'running-session', session: runningSession });
     }
 
-    // Combine commits and notes, sort by timestamp (newest first)
+    // Combine commits, notes, and reviews, sort by timestamp (newest first)
     const combined: Array<{ timestamp: number; item: TimelineItem }> = [];
 
     commits.forEach((commit, index) => {
@@ -93,6 +113,16 @@
         });
       });
 
+    reviews
+      .filter((r) => r.status !== 'generating')
+      .forEach((review) => {
+        combined.push({
+          // Review timestamps are in milliseconds, convert to seconds for comparison
+          timestamp: Math.floor(review.createdAt / 1000),
+          item: { type: 'review', review },
+        });
+      });
+
     // Sort by timestamp descending (newest first)
     combined.sort((a, b) => b.timestamp - a.timestamp);
 
@@ -111,14 +141,24 @@
   let viewingNote = $state<BranchNote | null>(null);
   let isNoteGenerating = $state(false);
 
+  // Review viewer modal state
+  let showReviewViewer = $state(false);
+  let viewingReview = $state<BranchReview | null>(null);
+  let isReviewGenerating = $state(false);
+
   // Continue session modal state
   let showContinueModal = $state(false);
 
   // New note modal state
   let showNewNoteModal = $state(false);
 
+  // Implement review modal state
+  let showImplementModal = $state(false);
+  let implementingReview = $state<BranchReview | null>(null);
+
   // Dropdown state
   let showNewDropdown = $state(false);
+  let showMoreMenu = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -135,16 +175,27 @@
   async function loadData() {
     loading = true;
     try {
-      const [commitsResult, sessionResult, notesResult, generatingNoteResult] = await Promise.all([
+      const [
+        commitsResult,
+        sessionResult,
+        notesResult,
+        generatingNoteResult,
+        reviewsResult,
+        generatingReviewResult,
+      ] = await Promise.all([
         branchService.getBranchCommits(branch.id),
         branchService.getRunningSession(branch.id),
         branchService.listBranchNotes(branch.id),
         branchService.getGeneratingNote(branch.id),
+        branchService.listBranchReviews(branch.id),
+        branchService.getGeneratingReview(branch.id),
       ]);
       commits = commitsResult;
       runningSession = sessionResult;
       notes = notesResult;
       generatingNote = generatingNoteResult;
+      reviews = reviewsResult;
+      generatingReview = generatingReviewResult;
 
       // Load sessions for each commit (for "View" buttons)
       const sessionsMap = new Map<string, BranchSession>();
@@ -238,6 +289,29 @@
     loadData();
   }
 
+  function handleViewReview(review: BranchReview, generating: boolean = false) {
+    viewingReview = review;
+    isReviewGenerating = generating;
+    showReviewViewer = true;
+  }
+
+  function closeReviewViewer() {
+    showReviewViewer = false;
+    viewingReview = null;
+    isReviewGenerating = false;
+  }
+
+  async function handleNewReview() {
+    showNewDropdown = false;
+    try {
+      const response = await branchService.startBranchReview(branch.id);
+      console.log('Review started:', response);
+      loadData();
+    } catch (e) {
+      console.error('Failed to start review:', e);
+    }
+  }
+
   function handleNewCommit() {
     showNewDropdown = false;
     onNewSession?.();
@@ -250,13 +324,44 @@
 
   function toggleDropdown() {
     showNewDropdown = !showNewDropdown;
+    showMoreMenu = false;
   }
 
-  // Close dropdown when clicking outside
+  function toggleMoreMenu() {
+    showMoreMenu = !showMoreMenu;
+    showNewDropdown = false;
+  }
+
+  function handleViewDiffClick() {
+    showMoreMenu = false;
+    onViewDiff?.();
+  }
+
+  function handleDeleteClick() {
+    showMoreMenu = false;
+    onDelete?.();
+  }
+
+  function handleImplementReview(review: BranchReview) {
+    implementingReview = review;
+    showImplementModal = true;
+  }
+
+  function handleImplementSessionStarted(branchSessionId: string, aiSessionId: string) {
+    console.log('Implement session started:', { branchSessionId, aiSessionId });
+    showImplementModal = false;
+    implementingReview = null;
+    loadData();
+  }
+
+  // Close dropdowns when clicking outside
   function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest('.new-dropdown-container')) {
       showNewDropdown = false;
+    }
+    if (!target.closest('.more-menu-container')) {
+      showMoreMenu = false;
     }
   }
 </script>
@@ -268,14 +373,52 @@
     <div class="branch-info">
       <GitBranch size={16} class="branch-icon" />
       <span class="branch-name">{branch.branchName}</span>
+      <div class="more-menu-container">
+        <button class="more-button" onclick={toggleMoreMenu} title="More actions">
+          <MoreVertical size={16} />
+        </button>
+        {#if showMoreMenu}
+          <div class="dropdown-menu">
+            <button class="dropdown-item" onclick={handleViewDiffClick}>
+              <GitCompareArrows size={14} />
+              View Diff
+            </button>
+            <button class="dropdown-item danger" onclick={handleDeleteClick}>
+              <Trash2 size={14} />
+              Delete Branch
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
     <div class="header-actions">
-      <button class="action-button" onclick={onViewDiff} title="View diff">
-        <Eye size={14} />
-      </button>
-      <button class="action-button delete-button" onclick={handleDelete} title="Delete branch">
-        <Trash2 size={14} />
-      </button>
+      <div class="new-dropdown-container">
+        <button
+          class="new-button"
+          onclick={toggleDropdown}
+          disabled={!!runningSession || !!generatingNote || !!generatingReview}
+        >
+          <Plus size={14} />
+          New
+          <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
+        </button>
+        {#if showNewDropdown}
+          <div class="dropdown-menu">
+            <button class="dropdown-item" onclick={handleNewCommit}>
+              <GitCommit size={14} />
+              New Commit
+            </button>
+            <button class="dropdown-item" onclick={handleNewNote}>
+              <FileText size={14} />
+              New Note
+            </button>
+            <button class="dropdown-item" onclick={handleNewReview}>
+              <Search size={14} />
+              New Review
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -289,8 +432,36 @@
       <p class="no-items">No commits or notes yet</p>
     {:else}
       <div class="timeline">
-        {#each timeline as item, index (item.type === 'commit' ? item.commit.sha : item.type === 'note' ? item.note.id : item.type === 'running-session' ? 'running' : 'generating')}
-          {#if item.type === 'generating-note'}
+        {#each timeline as item, index (item.type === 'commit' ? item.commit.sha : item.type === 'note' ? item.note.id : item.type === 'review' ? item.review.id : item.type === 'running-session' ? 'running' : item.type === 'generating-note' ? 'generating-note' : 'generating-review')}
+          {#if item.type === 'generating-review'}
+            <!-- Generating review skeleton -->
+            <button
+              class="timeline-row skeleton-row"
+              onclick={() => handleViewReview(item.review, true)}
+            >
+              <div class="timeline-marker">
+                <Loader2 size={12} class="spinner review-spinner" />
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
+              </div>
+              <div class="timeline-content">
+                <div class="timeline-icon review-icon generating">
+                  <Search size={12} />
+                </div>
+                <div class="timeline-info">
+                  <span class="timeline-title skeleton-title">Code Review</span>
+                  <div class="timeline-meta">
+                    <span class="skeleton-meta">generating...</span>
+                  </div>
+                </div>
+              </div>
+              <div class="watch-button">
+                <MessageSquare size={12} />
+                Watch
+              </div>
+            </button>
+          {:else if item.type === 'generating-note'}
             <!-- Generating note skeleton -->
             <button
               class="timeline-row skeleton-row"
@@ -414,36 +585,49 @@
                 </span>
               </div>
             </button>
+          {:else if item.type === 'review'}
+            <!-- Review row -->
+            <div class="timeline-row">
+              <div class="timeline-marker">
+                <div class="timeline-dot review-dot"></div>
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
+              </div>
+              <div class="timeline-content">
+                <div class="timeline-icon review-icon">
+                  <Search size={12} />
+                </div>
+                <div class="timeline-info">
+                  <span class="timeline-title">Code Review</span>
+                  <div class="timeline-meta">
+                    <span class="timeline-time">{formatRelativeTimeMs(item.review.createdAt)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="timeline-actions">
+                <button
+                  class="action-btn review-action"
+                  onclick={() => handleViewReview(item.review)}
+                  title="View review"
+                >
+                  <Eye size={12} />
+                  View
+                </button>
+                <button
+                  class="action-btn implement-action"
+                  onclick={() => handleImplementReview(item.review)}
+                  title="Implement review suggestions"
+                >
+                  <Wrench size={12} />
+                  Implement
+                </button>
+              </div>
+            </div>
           {/if}
         {/each}
       </div>
     {/if}
-  </div>
-
-  <div class="card-footer">
-    <div class="new-dropdown-container">
-      <button
-        class="new-button"
-        onclick={toggleDropdown}
-        disabled={!!runningSession || !!generatingNote}
-      >
-        <Plus size={14} />
-        New
-        <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
-      </button>
-      {#if showNewDropdown}
-        <div class="dropdown-menu">
-          <button class="dropdown-item" onclick={handleNewCommit}>
-            <GitCommit size={14} />
-            New Commit
-          </button>
-          <button class="dropdown-item" onclick={handleNewNote}>
-            <FileText size={14} />
-            New Note
-          </button>
-        </div>
-      {/if}
-    </div>
   </div>
 </div>
 
@@ -477,6 +661,28 @@
     {branch}
     onClose={() => (showNewNoteModal = false)}
     onNoteStarted={handleNoteStarted}
+  />
+{/if}
+
+<!-- Review viewer modal -->
+{#if showReviewViewer && viewingReview}
+  <ReviewViewerModal
+    review={viewingReview}
+    isLive={isReviewGenerating}
+    onClose={closeReviewViewer}
+  />
+{/if}
+
+<!-- Implement review modal -->
+{#if showImplementModal && implementingReview}
+  <NewSessionModal
+    {branch}
+    initialPrompt={`Please implement the suggestions from this code review:\n\n${implementingReview.content || 'Review content not available'}`}
+    onClose={() => {
+      showImplementModal = false;
+      implementingReview = null;
+    }}
+    onSessionStarted={handleImplementSessionStarted}
   />
 {/if}
 
@@ -518,37 +724,6 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    opacity: 0;
-    transition: opacity 0.15s ease;
-  }
-
-  .branch-card:hover .header-actions {
-    opacity: 1;
-  }
-
-  .action-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--text-faint);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .action-button:hover {
-    background-color: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  .action-button.delete-button:hover {
-    background-color: var(--ui-danger-bg);
-    color: var(--ui-danger);
   }
 
   /* Content */
@@ -645,6 +820,10 @@
     background-color: var(--text-accent);
   }
 
+  .review-dot {
+    background-color: var(--status-renamed);
+  }
+
   .timeline-line {
     flex: 1;
     width: 2px;
@@ -689,6 +868,16 @@
   .note-icon.generating {
     background-color: rgba(88, 166, 255, 0.1);
     color: var(--text-accent);
+  }
+
+  .review-icon {
+    background-color: rgba(210, 153, 34, 0.15);
+    color: var(--status-renamed);
+  }
+
+  .review-icon.generating {
+    background-color: rgba(210, 153, 34, 0.1);
+    color: var(--status-renamed);
   }
 
   .timeline-info {
@@ -787,6 +976,16 @@
     color: var(--text-accent);
   }
 
+  .action-btn.review-action:hover {
+    border-color: var(--status-renamed);
+    color: var(--status-renamed);
+  }
+
+  .action-btn.implement-action:hover {
+    border-color: var(--status-added);
+    color: var(--status-added);
+  }
+
   .watch-button {
     display: flex;
     align-items: center;
@@ -806,16 +1005,32 @@
     color: var(--ui-accent);
   }
 
-  /* Footer */
-  .card-footer {
-    display: flex;
-    justify-content: flex-end;
-    padding: 12px 16px;
-    border-top: 1px solid var(--border-subtle);
-  }
-
   .new-dropdown-container {
     position: relative;
+  }
+
+  .more-menu-container {
+    position: relative;
+  }
+
+  .more-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .more-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .new-button {
@@ -853,9 +1068,9 @@
 
   .dropdown-menu {
     position: absolute;
-    bottom: 100%;
+    top: 100%;
     right: 0;
-    margin-bottom: 4px;
+    margin-top: 4px;
     background-color: var(--bg-elevated);
     border: 1px solid var(--border-muted);
     border-radius: 8px;
@@ -888,6 +1103,18 @@
     color: var(--text-muted);
   }
 
+  .dropdown-item.danger {
+    color: var(--ui-danger);
+  }
+
+  .dropdown-item.danger :global(svg) {
+    color: var(--ui-danger);
+  }
+
+  .dropdown-item.danger:hover {
+    background-color: var(--ui-danger-bg);
+  }
+
   /* Spinner animations */
   :global(.spinner) {
     animation: spin 1s linear infinite;
@@ -899,6 +1126,10 @@
 
   :global(.note-spinner) {
     color: var(--text-accent);
+  }
+
+  :global(.review-spinner) {
+    color: var(--status-renamed);
   }
 
   @keyframes spin {

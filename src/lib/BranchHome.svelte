@@ -86,6 +86,15 @@
       refreshKey++;
       return;
     }
+
+    // Finally, check if this is a branch review
+    const branchReview = await branchService.getBranchReviewByAiSession(event.sessionId);
+    if (branchReview && branchReview.status === 'generating') {
+      console.log('AI session completed, recovering branch review:', branchReview.id);
+      await branchService.recoverOrphanedReview(branchReview.branchId);
+      refreshKey++;
+      return;
+    }
   }
 
   async function loadBranches() {

@@ -11,18 +11,29 @@
 
   interface Props {
     branch: Branch;
+    /** Optional initial prompt to pre-fill */
+    initialPrompt?: string;
     onClose: () => void;
     onSessionStarted?: (branchSessionId: string, aiSessionId: string) => void;
   }
 
-  let { branch, onClose, onSessionStarted }: Props = $props();
+  let { branch, initialPrompt = '', onClose, onSessionStarted }: Props = $props();
 
   // State
   let prompt = $state('');
   let starting = $state(false);
   let error = $state<string | null>(null);
+  let initialized = $state(false);
 
   let textareaEl: HTMLTextAreaElement | null = $state(null);
+
+  // Initialize prompt from prop on mount
+  $effect(() => {
+    if (!initialized) {
+      prompt = initialPrompt;
+      initialized = true;
+    }
+  });
 
   // Focus textarea on mount
   $effect(() => {
