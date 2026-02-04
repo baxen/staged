@@ -228,6 +228,66 @@ export interface NewEdit {
 }
 
 // =============================================================================
+// AI Analysis types
+// =============================================================================
+
+/** A span of lines for AI annotations (0-indexed, exclusive end) */
+export interface LineSpan {
+  start: number;
+  end: number;
+}
+
+/** Category of AI annotation */
+export type AnnotationCategory = 'explanation' | 'warning' | 'suggestion' | 'context';
+
+/** A single AI annotation on a diff */
+export interface SmartDiffAnnotation {
+  id: string;
+  /** Description of the old state (for before_span annotations) */
+  before_description?: string;
+  /** File path this annotation belongs to (for changeset-level analysis) */
+  file_path?: string;
+  /** Span in 'before' content (undefined if only applies to 'after') */
+  before_span?: LineSpan;
+  /** Span in 'after' content (undefined if only applies to 'before') */
+  after_span?: LineSpan;
+  /** The AI commentary */
+  content: string;
+  /** Category for styling */
+  category: AnnotationCategory;
+}
+
+/** Result of AI analysis on a single file's diff */
+export interface SmartDiffResult {
+  /** TL;DR summary of the file's changes */
+  overview: string;
+  /** Span-based annotations for this file */
+  annotations: SmartDiffAnnotation[];
+}
+
+/** Summary portion of changeset analysis (used for storage) */
+export interface ChangesetSummary {
+  /** High-level summary of what this changeset accomplishes */
+  summary: string;
+  /** Key changes organized by theme/area */
+  key_changes: string[];
+  /** Potential concerns or things to watch out for */
+  concerns: string[];
+}
+
+/** Complete analysis of an entire changeset */
+export interface ChangesetAnalysis {
+  /** High-level summary of what this changeset accomplishes */
+  summary: string;
+  /** Key changes organized by theme/area */
+  key_changes: string[];
+  /** Potential concerns or things to watch out for */
+  concerns: string[];
+  /** Annotations keyed by file path */
+  file_annotations: Record<string, SmartDiffAnnotation[]>;
+}
+
+// =============================================================================
 // Project types (artifact-centric model)
 // =============================================================================
 

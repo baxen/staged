@@ -13,5 +13,8 @@
 #![allow(unused_imports)]
 
 mod prompt;
-mod runner;
-mod types;
+pub mod runner;
+pub mod types;
+
+pub use runner::analyze_diff;
+pub use types::ChangesetAnalysis;

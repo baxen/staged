@@ -20,7 +20,7 @@
 //! Live sessions (agent connections) are ephemeral. History survives app restart.
 
 mod client;
-mod legacy; // Reference code only - not exposed or used
+pub mod legacy;
 pub mod session;
 
 // Re-export core ACP client functionality

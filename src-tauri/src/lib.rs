@@ -12,6 +12,7 @@ pub mod store;
 mod themes;
 mod watcher;
 
+use ai::legacy::ChangesetAnalysis;
 use ai::{SessionManager, SessionStatus};
 use git::{
     DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
