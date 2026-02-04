@@ -1204,16 +1204,21 @@ impl From<git::CommitInfo> for CommitInfo {
 }
 
 /// Create a new branch with a worktree.
+/// If base_branch is not provided, uses the detected default branch (e.g., origin/main).
 #[tauri::command(rename_all = "camelCase")]
 fn create_branch(
     state: State<'_, Arc<Store>>,
     repo_path: String,
     branch_name: String,
+    base_branch: Option<String>,
 ) -> Result<Branch, String> {
     let repo = Path::new(&repo_path);
 
-    // Detect the default branch to use as base
-    let base_branch = git::detect_default_branch(repo).map_err(|e| e.to_string())?;
+    // Use provided base branch or detect the default
+    let base_branch = match base_branch {
+        Some(b) if !b.is_empty() => b,
+        _ => git::detect_default_branch(repo).map_err(|e| e.to_string())?,
+    };
 
     // Create the worktree (this will fail atomically if branch already exists)
     let worktree_path = git::create_worktree(repo, &branch_name, &base_branch).map_err(|e| {
@@ -1241,6 +1246,20 @@ fn create_branch(
     }
 
     Ok(branch)
+}
+
+/// List git branches (local and remote) for base branch selection.
+#[tauri::command(rename_all = "camelCase")]
+fn list_git_branches(repo_path: String) -> Result<Vec<git::BranchRef>, String> {
+    let repo = Path::new(&repo_path);
+    git::list_branches(repo).map_err(|e| e.to_string())
+}
+
+/// Detect the default branch for a repository.
+#[tauri::command(rename_all = "camelCase")]
+fn detect_default_branch(repo_path: String) -> Result<String, String> {
+    let repo = Path::new(&repo_path);
+    git::detect_default_branch(repo).map_err(|e| e.to_string())
 }
 
 /// Get a branch by ID.
@@ -2206,6 +2225,8 @@ pub fn run() {
             get_branch,
             list_branches,
             list_branches_for_repo,
+            list_git_branches,
+            detect_default_branch,
             delete_branch,
             get_branch_commits,
             list_branch_sessions,
