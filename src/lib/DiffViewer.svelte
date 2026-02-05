@@ -484,24 +484,59 @@
   let beforeContentWidth = $state(0);
   let afterContentWidth = $state(0);
 
-  // Re-measure content width when lines change (after DOM update via tick)
+  // Function to measure and update content widths
+  function updateContentWidths() {
+    requestAnimationFrame(() => {
+      if (beforePane) {
+        beforeContentWidth = measureContentWidth(beforePane);
+        scrollController.setDimensions('before', {
+          viewportHeight: beforePane.clientHeight,
+          contentHeight: beforeLines.length * (measureLineHeight(beforePane) || 20),
+          lineHeight: measureLineHeight(beforePane) || 20,
+          viewportWidth: beforePane.clientWidth,
+          contentWidth: beforeContentWidth,
+        });
+      }
+      if (afterPane) {
+        afterContentWidth = measureContentWidth(afterPane);
+        scrollController.setDimensions('after', {
+          viewportHeight: afterPane.clientHeight,
+          contentHeight: afterLines.length * (measureLineHeight(afterPane) || 20),
+          lineHeight: measureLineHeight(afterPane) || 20,
+          viewportWidth: afterPane.clientWidth,
+          contentWidth: afterContentWidth,
+        });
+      }
+    });
+  }
+
+  // Re-measure content width when lines change
   $effect(() => {
     const _ = beforeLines.length; // reactive dependency
     if (beforePane) {
-      // Use requestAnimationFrame to ensure DOM has rendered
-      requestAnimationFrame(() => {
-        beforeContentWidth = measureContentWidth(beforePane);
-      });
+      updateContentWidths();
     }
   });
 
   $effect(() => {
     const _ = afterLines.length; // reactive dependency
     if (afterPane) {
-      requestAnimationFrame(() => {
-        afterContentWidth = measureContentWidth(afterPane);
-      });
+      updateContentWidths();
     }
+  });
+
+  // Re-measure on pane resize (e.g., divider drag)
+  $effect(() => {
+    if (!beforePane && !afterPane) return;
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateContentWidths();
+    });
+
+    if (beforePane) resizeObserver.observe(beforePane);
+    if (afterPane) resizeObserver.observe(afterPane);
+
+    return () => resizeObserver.disconnect();
   });
 
   // ==========================================================================
@@ -916,12 +951,14 @@
       scrollController.scrollByXBoth(deltaX);
     }
 
-    // Trigger UI updates
-    redrawConnectors();
-    updateToolbarPosition();
-    updateCommentEditorPosition();
-    updateLineSelectionToolbar();
-    updateLineCommentEditorPosition();
+    // Trigger UI updates (defer to allow DOM transform to apply)
+    requestAnimationFrame(() => {
+      redrawConnectors();
+      updateToolbarPosition();
+      updateCommentEditorPosition();
+      updateLineSelectionToolbar();
+      updateLineCommentEditorPosition();
+    });
   }
 
   function handleBeforeWheel(e: WheelEvent) {
@@ -958,6 +995,13 @@
   // Handle horizontal scrollbar (syncs both panes)
   function handleHorizontalScrollbarScroll(deltaX: number) {
     scrollController.scrollByXBoth(deltaX);
+    // Trigger UI updates (defer to allow DOM transform to apply)
+    requestAnimationFrame(() => {
+      updateToolbarPosition();
+      updateCommentEditorPosition();
+      updateLineSelectionToolbar();
+      updateLineCommentEditorPosition();
+    });
   }
 
   // Redraw connectors when scroll positions change
@@ -1295,7 +1339,7 @@
 
     if (lineSelection) {
       requestAnimationFrame(() => {
-        updateLineSelectionToolbar();
+        updateLineSelectionToolbar(true); // Recalculate left position on new selection
       });
     }
   }
@@ -1308,30 +1352,49 @@
     editingCommentId = null;
   }
 
-  function updateLineSelectionToolbar() {
+  // Store the initial left position for line selection toolbar (doesn't change with horizontal scroll)
+  let lineSelectionToolbarLeft: number | null = $state(null);
+
+  function updateLineSelectionToolbar(recalculateLeft = false) {
     if (!selectedLineRange || !diffViewerEl) {
       lineSelectionToolbarStyle = null;
+      lineSelectionToolbarLeft = null;
       return;
     }
 
     const pane = selectedLineRange.pane === 'before' ? beforePane : afterPane;
     if (!pane) {
       lineSelectionToolbarStyle = null;
+      lineSelectionToolbarLeft = null;
       return;
     }
 
-    const lineEl = pane.querySelectorAll('.line')[selectedLineRange.start] as HTMLElement | null;
+    // Get the actual selected line element
+    const lines = pane.querySelectorAll('.line');
+    const lineEl = lines[selectedLineRange.start] as HTMLElement | null;
     if (!lineEl) {
       lineSelectionToolbarStyle = null;
+      lineSelectionToolbarLeft = null;
       return;
     }
 
-    const lineRect = lineEl.getBoundingClientRect();
     const viewerRect = diffViewerEl.getBoundingClientRect();
+    const lineRect = lineEl.getBoundingClientRect();
+
+    // Calculate left position only on initial selection or when explicitly requested
+    if (recalculateLeft || lineSelectionToolbarLeft === null) {
+      const lineContent = lineEl.querySelector('.line-content') as HTMLElement | null;
+      if (lineContent) {
+        const lineContentRect = lineContent.getBoundingClientRect();
+        lineSelectionToolbarLeft = lineContentRect.left - viewerRect.left;
+      } else {
+        lineSelectionToolbarLeft = lineRect.left - viewerRect.left;
+      }
+    }
 
     lineSelectionToolbarStyle = {
       top: lineRect.top - viewerRect.top,
-      left: lineRect.left - viewerRect.left,
+      left: lineSelectionToolbarLeft,
     };
   }
 
