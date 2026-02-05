@@ -122,7 +122,7 @@
       title="Select AI provider"
     >
       <span class="selector-label">{currentLabel}</span>
-      <ChevronDown size={14} />
+      <ChevronDown size={12} />
     </button>
     {#if showDropdown}
       <div class="selector-dropdown">
@@ -152,27 +152,27 @@
   .selector-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 8px 12px;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-muted);
-    border-radius: 6px;
-    color: var(--text-primary);
-    font-size: var(--size-sm);
+    gap: 4px;
+    padding: 4px 6px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-faint);
+    font-size: var(--size-xs);
     font-family: inherit;
     cursor: pointer;
     transition:
-      border-color 0.15s ease,
-      background-color 0.15s ease;
+      background-color 0.1s,
+      color 0.1s;
   }
 
   .selector-btn:hover:not(:disabled) {
-    border-color: var(--border-emphasis);
     background-color: var(--bg-hover);
+    color: var(--text-muted);
   }
 
   .selector-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.4;
     cursor: not-allowed;
   }
 
@@ -182,16 +182,16 @@
 
   .selector-dropdown {
     position: absolute;
-    top: 100%;
+    bottom: 100%;
     left: 0;
-    right: 0;
-    margin-top: 4px;
-    background: var(--bg-chrome);
+    margin-bottom: 4px;
+    background: var(--bg-primary);
     border: 1px solid var(--border-muted);
     border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     overflow: hidden;
     z-index: 100;
+    min-width: 120px;
   }
 
   .selector-option {
@@ -199,7 +199,7 @@
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: 10px 12px;
+    padding: 8px 12px;
     background: none;
     border: none;
     color: var(--text-primary);
