@@ -461,13 +461,29 @@ pub struct AcpPromptResult {
 /// This spawns the agent, initializes ACP, sends the prompt, collects the
 /// response, and shuts down. Designed for Staged's single-request use case
 /// (e.g., diff analysis).
+///
+/// Note: This prepends `STAGED_SYSTEM_CONTEXT` to guide the agent for code review.
+/// Use `run_acp_prompt_raw` if you need to provide your own system instructions.
 pub async fn run_acp_prompt(
     agent: &AcpAgent,
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "").await?;
+    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true).await?;
+    Ok(result.response)
+}
+
+/// Run a one-shot prompt through ACP without prepending system context.
+///
+/// Use this when you need full control over the prompt, such as when providing
+/// your own system instructions (e.g., PR description generation with JSON output).
+pub async fn run_acp_prompt_raw(
+    agent: &AcpAgent,
+    working_dir: &Path,
+    prompt: &str,
+) -> Result<String, String> {
+    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false).await?;
     Ok(result.response)
 }
 
@@ -483,7 +499,7 @@ pub async fn run_acp_prompt_with_session(
     session_id: Option<&str>,
 ) -> Result<AcpPromptResult, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "").await
+    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "", true).await
 }
 
 /// Run a prompt through ACP with streaming events emitted to frontend
@@ -506,6 +522,7 @@ pub async fn run_acp_prompt_streaming(
         acp_session_id,
         Some(app_handle),
         internal_session_id,
+        true,
     )
     .await
 }
@@ -518,6 +535,7 @@ async fn run_acp_prompt_internal(
     acp_session_id: Option<&str>,
     app_handle: Option<tauri::AppHandle>,
     internal_session_id: &str,
+    prepend_system_context: bool,
 ) -> Result<AcpPromptResult, String> {
     let agent_path = agent.path().to_path_buf();
     let agent_name = agent.name().to_string();
@@ -548,6 +566,7 @@ async fn run_acp_prompt_internal(
                 acp_session_id.as_deref(),
                 app_handle,
                 &internal_session_id,
+                prepend_system_context,
             )
             .await
         })
@@ -567,6 +586,7 @@ async fn run_acp_session_inner(
     existing_session_id: Option<&str>,
     app_handle: Option<tauri::AppHandle>,
     internal_session_id: &str,
+    prepend_system_context: bool,
 ) -> Result<AcpPromptResult, String> {
     // Spawn the agent process with ACP mode
     let mut cmd = Command::new(agent_path);
@@ -681,8 +701,8 @@ async fn run_acp_session_inner(
     // (load_session may replay old messages as AgentMessageChunk notifications)
     client.clear().await;
 
-    // For new sessions, prepend system context to guide the agent's behavior
-    let full_prompt = if is_new_session {
+    // For new sessions, optionally prepend system context to guide the agent's behavior
+    let full_prompt = if is_new_session && prepend_system_context {
         format!("{}{}", STAGED_SYSTEM_CONTEXT, prompt)
     } else {
         prompt.to_string()

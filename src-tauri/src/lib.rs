@@ -594,20 +594,31 @@ struct GeneratedPrDescription {
 }
 
 /// System prompt for PR description generation.
-const PR_DESCRIPTION_SYSTEM_PROMPT: &str = r#"You are helping generate a pull request description. Based on the commits and diff provided, write a clear and concise PR description.
+const PR_DESCRIPTION_SYSTEM_PROMPT: &str = "You are an expert at writing pull request descriptions that help reviewers understand code changes.
 
-Output ONLY valid JSON with this exact structure (no markdown fences, no other text):
+Your task: Analyze the provided commits and diffs, then synthesize a PR description that explains the PURPOSE and IMPACT of these changes—not just what files changed.
+
+CRITICAL RULES:
+1. DO NOT just list the commits or repeat commit messages
+2. DO NOT describe what each file does individually  
+3. DO synthesize the changes into a coherent narrative
+4. DO explain WHY these changes matter and what problem they solve
+5. DO highlight any architectural decisions or tradeoffs
+
+Output ONLY valid JSON (no markdown fences, no other text):
 {
-  "title": "A clear, concise PR title (50-72 chars ideal)",
-  "body": "A markdown-formatted PR body with:\n- Summary of what this PR does\n- Key changes (bullet points)\n- Any notable implementation details"
+  \"title\": \"Imperative title describing the feature/fix\",
+  \"body\": \"## Summary\\n\\n[1-2 sentences explaining what this PR accomplishes]\\n\\n## Changes\\n\\n- [Key change grouped by theme, not by file]\"
 }
 
-Guidelines:
-- Title should be imperative mood (e.g., "Add feature" not "Added feature")
-- Body should help reviewers understand the changes
-- Be concise but informative
-- Use markdown formatting in the body
-"#;
+Example of BAD bullet points (don't do this):
+- Updates lib.rs to add new function
+- Modifies types.ts with new interface
+
+Example of GOOD bullet points:
+- Adds AI-powered PR description generation using the ACP protocol
+- Introduces streaming support for real-time feedback during generation
+";
 
 /// Generate a PR description using AI based on commits and diff.
 #[tauri::command(rename_all = "camelCase")]
@@ -725,8 +736,8 @@ Generate a PR title and description for these changes."#,
         diffs = diffs,
     );
 
-    // Call the AI
-    let response = ai::run_acp_prompt(&agent, &path, &prompt).await?;
+    // Call the AI (use raw to avoid prepending system context - we have our own)
+    let response = ai::run_acp_prompt_raw(&agent, &path, &prompt).await?;
 
     // Parse the response
     parse_pr_description_response(&response)
