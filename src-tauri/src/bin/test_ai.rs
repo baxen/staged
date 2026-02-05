@@ -65,7 +65,7 @@ async fn test_real_diff(range: &str, repo_path: &str) {
         "Repository: {}",
         repo.canonicalize().unwrap_or(repo.to_path_buf()).display()
     );
-    println!("Diff range: {}..{}\n", base, head);
+    println!("Diff range: {base}..{head}\n");
 
     // Build DiffSpec
     let spec = git::DiffSpec {
@@ -85,13 +85,13 @@ async fn test_real_diff(range: &str, repo_path: &str) {
 
             println!("Key Changes:");
             for change in &result.key_changes {
-                println!("  • {}", change);
+                println!("  • {change}");
             }
 
             if !result.concerns.is_empty() {
                 println!("\nConcerns:");
                 for concern in &result.concerns {
-                    println!("  ⚠ {}", concern);
+                    println!("  ⚠ {concern}");
                 }
             }
 
@@ -101,9 +101,9 @@ async fn test_real_diff(range: &str, repo_path: &str) {
 
             for (path, annotations) in &result.file_annotations {
                 if annotations.is_empty() {
-                    println!("{}: (no annotations)", path);
+                    println!("{path}: (no annotations)");
                 } else {
-                    println!("{}:", path);
+                    println!("{path}:");
                     for ann in annotations {
                         let span_info = match (&ann.before_span, &ann.after_span) {
                             (Some(b), Some(a)) => {
@@ -115,7 +115,7 @@ async fn test_real_diff(range: &str, repo_path: &str) {
                         };
                         println!("\n  [{:?}] ({}) {}", ann.category, span_info, ann.id);
                         if let Some(ref desc) = ann.before_description {
-                            println!("    Was: {}", desc);
+                            println!("    Was: {desc}");
                         }
                         println!("    {}", ann.content);
                     }
@@ -124,7 +124,7 @@ async fn test_real_diff(range: &str, repo_path: &str) {
             }
         }
         Err(e) => {
-            eprintln!("✗ Analysis failed: {}", e);
+            eprintln!("✗ Analysis failed: {e}");
             std::process::exit(1);
         }
     }

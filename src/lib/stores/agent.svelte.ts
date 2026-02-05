@@ -8,7 +8,7 @@
 
 import type { AcpProviderInfo } from '../services/ai';
 
-export type AcpProvider = 'goose' | 'claude';
+export type AcpProvider = 'goose' | 'claude' | 'codex';
 
 /**
  * A saved artifact from an agent conversation.

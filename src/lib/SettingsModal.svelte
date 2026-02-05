@@ -93,7 +93,12 @@
     {
       id: 'claude',
       label: 'Claude Code',
-      installUrl: 'https://github.com/zed-industries/claude-code-acp',
+      installUrl: 'https://github.com/zed-industries/claude-code-acp#installation',
+    },
+    {
+      id: 'codex',
+      label: 'Codex',
+      installUrl: 'https://github.com/zed-industries/codex-acp#installation',
     },
   ];
 

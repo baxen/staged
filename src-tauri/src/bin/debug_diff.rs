@@ -57,7 +57,7 @@ fn run_git_mode(args: &[String]) {
     let before = match before {
         Ok(s) => s,
         Err(e) => {
-            eprintln!("Error getting {} at {}: {}", file_path, ref1, e);
+            eprintln!("Error getting {file_path} at {ref1}: {e}");
             return;
         }
     };
@@ -67,7 +67,7 @@ fn run_git_mode(args: &[String]) {
         match get_git_content(r2, file_path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Error getting {} at {}: {}", file_path, r2, e);
+                eprintln!("Error getting {file_path} at {r2}: {e}");
                 return;
             }
         }
@@ -76,7 +76,7 @@ fn run_git_mode(args: &[String]) {
         match std::fs::read_to_string(file_path) {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Error reading {}: {}", file_path, e);
+                eprintln!("Error reading {file_path}: {e}");
                 return;
             }
         }
@@ -99,11 +99,11 @@ fn run_git_mode(args: &[String]) {
                 println!("(no differences)");
                 return;
             } else {
-                println!("{}", stdout);
+                println!("{stdout}");
             }
         }
         Err(e) => {
-            println!("(git diff failed: {})", e);
+            println!("(git diff failed: {e})");
             return;
         }
     }
@@ -153,7 +153,7 @@ fn run_git_mode(args: &[String]) {
 
 fn get_git_content(refspec: &str, path: &str) -> Result<String, String> {
     let output = Command::new("git")
-        .args(["show", &format!("{}:{}", refspec, path)])
+        .args(["show", &format!("{refspec}:{path}")])
         .output()
         .map_err(|e| e.to_string())?;
 
