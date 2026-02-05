@@ -1350,6 +1350,7 @@ impl From<git::CommitInfo> for CommitInfo {
 #[tauri::command(rename_all = "camelCase")]
 async fn create_branch(
     state: State<'_, Arc<Store>>,
+    project_id: String,
     repo_path: String,
     branch_name: String,
     base_branch: Option<String>,
@@ -1381,6 +1382,7 @@ async fn create_branch(
 
         // Create the branch record
         let branch = Branch::new(
+            &project_id,
             &repo_path,
             &branch_name,
             worktree_path.to_string_lossy().to_string(),
@@ -1433,6 +1435,17 @@ fn list_branches_for_repo(
 ) -> Result<Vec<Branch>, String> {
     state
         .list_branches_for_repo(&repo_path)
+        .map_err(|e| e.to_string())
+}
+
+/// List branches for a specific project.
+#[tauri::command(rename_all = "camelCase")]
+fn list_branches_for_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<Branch>, String> {
+    state
+        .list_branches_for_project(&project_id)
         .map_err(|e| e.to_string())
 }
 
@@ -1537,6 +1550,26 @@ struct StartBranchSessionResponse {
     ai_session_id: String,
 }
 
+/// Get the effective working directory for a branch, accounting for project subpath.
+/// Uses the branch's project_id to look up the project's subpath.
+fn get_branch_working_dir(store: &Store, branch: &Branch) -> Result<PathBuf, String> {
+    let mut working_dir = PathBuf::from(&branch.worktree_path);
+
+    // Get the project for this branch and use its subpath
+    if let Some(project) = store
+        .get_git_project(&branch.project_id)
+        .map_err(|e| e.to_string())?
+    {
+        if let Some(subpath) = project.subpath {
+            if !subpath.is_empty() {
+                working_dir.push(&subpath);
+            }
+        }
+    }
+
+    Ok(working_dir)
+}
+
 /// Start a new session on a branch.
 /// Creates an AI session, builds the full prompt with context, and sends it.
 ///
@@ -1573,11 +1606,11 @@ async fn start_branch_session(
     // Build the full prompt with context
     let full_prompt = build_session_prompt(&state, &branch, &user_prompt)?;
 
-    // Create an AI session in the worktree directory FIRST
+    // Create an AI session in the worktree directory (with subpath if configured) FIRST
     // This way we have the ai_session_id to store in the branch session
-    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    let working_dir = get_branch_working_dir(&state, &branch)?;
     let ai_session_id = session_manager
-        .create_session(worktree_path, None)
+        .create_session(working_dir, None)
         .await
         .map_err(|e| format!("Failed to create AI session: {}", e))?;
 
@@ -2113,10 +2146,10 @@ async fn start_branch_note(
     // Build the full prompt with context
     let full_prompt = build_note_prompt(&state, &branch, &title, &description)?;
 
-    // Create an AI session in the worktree directory
-    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    // Create an AI session in the worktree directory (with subpath if configured)
+    let working_dir = get_branch_working_dir(&state, &branch)?;
     let ai_session_id = session_manager
-        .create_session(worktree_path, None)
+        .create_session(working_dir, None)
         .await
         .map_err(|e| format!("Failed to create AI session: {}", e))?;
 
@@ -2298,6 +2331,128 @@ fn extract_text_from_assistant_content(content: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("")
+}
+
+// =============================================================================
+// Git Project Commands (branch grouping with settings)
+// =============================================================================
+
+use store::GitProject;
+
+/// Create a new git project.
+/// If a project already exists for the repo_path, returns an error.
+#[tauri::command(rename_all = "camelCase")]
+fn create_git_project(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+    subpath: Option<String>,
+) -> Result<GitProject, String> {
+    // Normalize subpath: empty string becomes None
+    let subpath = subpath.filter(|s| !s.is_empty());
+
+    // Check if project already exists for this repo+subpath
+    if state
+        .get_git_project_by_repo_and_subpath(&repo_path, subpath.as_deref())
+        .map_err(|e| e.to_string())?
+        .is_some()
+    {
+        let repo_name = std::path::Path::new(&repo_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&repo_path);
+
+        return Err(match &subpath {
+            Some(sp) => format!(
+                "A project already exists for {} with subpath '{}'",
+                repo_name, sp
+            ),
+            None => format!(
+                "A project already exists for {} with no subpath",
+                repo_name
+            ),
+        });
+    }
+
+    let mut project = GitProject::new(&repo_path);
+    if let Some(sp) = subpath {
+        project = project.with_subpath(sp);
+    }
+
+    state
+        .create_git_project(&project)
+        .map_err(|e| e.to_string())?;
+    Ok(project)
+}
+
+/// Get a git project by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_git_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Option<GitProject>, String> {
+    state
+        .get_git_project(&project_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get a git project by repo_path.
+#[tauri::command(rename_all = "camelCase")]
+fn get_git_project_by_repo(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+) -> Result<Option<GitProject>, String> {
+    state
+        .get_git_project_by_repo(&repo_path)
+        .map_err(|e| e.to_string())
+}
+
+/// List all git projects.
+#[tauri::command(rename_all = "camelCase")]
+fn list_git_projects(state: State<'_, Arc<Store>>) -> Result<Vec<GitProject>, String> {
+    state.list_git_projects().map_err(|e| e.to_string())
+}
+
+/// Update a git project's subpath.
+#[tauri::command(rename_all = "camelCase")]
+fn update_git_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+    subpath: Option<String>,
+) -> Result<(), String> {
+    state
+        .update_git_project(&project_id, subpath.as_deref())
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a git project.
+/// Note: This does NOT delete associated branches - they still work via repo_path.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_git_project(state: State<'_, Arc<Store>>, project_id: String) -> Result<(), String> {
+    state
+        .delete_git_project(&project_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get or create a git project for a repo_path.
+/// If no project exists, creates one for the given repo.
+#[tauri::command(rename_all = "camelCase")]
+fn get_or_create_git_project(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+) -> Result<GitProject, String> {
+    // Check if project already exists
+    if let Some(existing) = state
+        .get_git_project_by_repo(&repo_path)
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(existing);
+    }
+
+    let project = GitProject::new(&repo_path);
+    state
+        .create_git_project(&project)
+        .map_err(|e| e.to_string())?;
+    Ok(project)
 }
 
 // =============================================================================
@@ -2881,6 +3036,7 @@ pub fn run() {
             get_branch,
             list_branches,
             list_branches_for_repo,
+            list_branches_for_project,
             list_git_branches,
             detect_default_branch,
             delete_branch,
@@ -2909,6 +3065,14 @@ pub fn run() {
             fail_branch_note,
             delete_branch_note,
             recover_orphaned_note,
+            // Git project commands
+            create_git_project,
+            get_git_project,
+            get_git_project_by_repo,
+            list_git_projects,
+            update_git_project,
+            delete_git_project,
+            get_or_create_git_project,
             // Theme commands
             get_custom_themes,
             read_custom_theme,
