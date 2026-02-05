@@ -393,13 +393,6 @@
                 >
                   <Settings size={14} />
                 </button>
-                <button
-                  class="project-new-branch-button"
-                  onclick={() => handleNewBranch(project)}
-                  title="New branch in this project"
-                >
-                  <Plus size={14} />
-                </button>
               </div>
             </div>
             <div class="branches-list">
@@ -489,6 +482,11 @@
                   </div>
                 </div>
               {/each}
+              <!-- Per-project new branch button -->
+              <button class="new-branch-button" onclick={() => handleNewBranch(project)}>
+                <Plus size={16} />
+                New Branch
+              </button>
             </div>
           </div>
         {/each}
@@ -667,8 +665,7 @@
     gap: 4px;
   }
 
-  .project-action-button,
-  .project-new-branch-button {
+  .project-action-button {
     display: flex;
     align-items: center;
     justify-content: center;
@@ -683,20 +680,35 @@
     transition: all 0.15s ease;
   }
 
-  .project-action-button:hover,
-  .project-new-branch-button:hover {
+  .project-action-button:hover {
     background-color: var(--bg-hover);
     color: var(--text-primary);
-  }
-
-  .project-new-branch-button:hover {
-    color: var(--ui-accent);
   }
 
   .branches-list {
     display: flex;
     flex-direction: column;
     gap: 12px;
+  }
+
+  .new-branch-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background-color: transparent;
+    border: 1px dashed var(--border-muted);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-size: var(--size-md);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .new-branch-button:hover {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
   }
 
   /* Pending branch card */
