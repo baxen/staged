@@ -589,6 +589,217 @@ async fn update_pull_request(
     .map_err(|e| e.to_string())?
 }
 
+/// Generated PR description from AI.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GeneratedPrDescription {
+    title: String,
+    body: String,
+}
+
+/// System prompt for PR description generation.
+const PR_DESCRIPTION_SYSTEM_PROMPT: &str = "You are an expert at writing pull request descriptions that help reviewers understand code changes.
+
+Your task: Analyze the provided commits and diffs, then synthesize a PR description that explains the PURPOSE and IMPACT of these changes—not just what files changed.
+
+CRITICAL RULES:
+1. DO NOT just list the commits or repeat commit messages
+2. DO NOT describe what each file does individually  
+3. DO synthesize the changes into a coherent narrative
+4. DO explain WHY these changes matter and what problem they solve
+5. DO highlight any architectural decisions or tradeoffs
+
+Output ONLY valid JSON (no markdown fences, no other text):
+{
+  \"title\": \"Imperative title describing the feature/fix\",
+  \"body\": \"## Summary\\n\\n[1-2 sentences explaining what this PR accomplishes]\\n\\n## Changes\\n\\n- [Key change grouped by theme, not by file]\"
+}
+
+Example of BAD bullet points (don't do this):
+- Updates lib.rs to add new function
+- Modifies types.ts with new interface
+
+Example of GOOD bullet points:
+- Adds AI-powered PR description generation using the ACP protocol
+- Introduces streaming support for real-time feedback during generation
+";
+
+/// Generate a PR description using AI based on commits and diff.
+#[tauri::command(rename_all = "camelCase")]
+async fn generate_pr_description(
+    repo_path: String,
+    head_branch: String,
+    base_branch: String,
+) -> Result<GeneratedPrDescription, String> {
+    let path = PathBuf::from(&repo_path);
+
+    // Find AI agent
+    let agent = ai::find_acp_agent().ok_or_else(|| {
+        "No AI agent found. Install Goose: https://github.com/block/goose".to_string()
+    })?;
+
+    // Get commits between base and head
+    let commits = git::get_commits_since_base(&path, &base_branch).map_err(|e| e.to_string())?;
+
+    if commits.is_empty() {
+        return Err("No commits found between base and head branch".to_string());
+    }
+
+    // Build commit summary
+    let commit_summary: String = commits
+        .iter()
+        .map(|c| format!("- {} ({})", c.subject, c.short_sha))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // Get the diff using DiffSpec
+    let spec = DiffSpec {
+        base: GitRef::Rev(base_branch.clone()),
+        head: GitRef::Rev(head_branch.clone()),
+    };
+
+    // Get list of changed files
+    let files = git::list_diff_files(&path, &spec).map_err(|e| e.to_string())?;
+
+    // Build a summary of changes (file list with status)
+    let file_summary: String = files
+        .iter()
+        .take(50) // Limit to avoid huge prompts
+        .map(|f| {
+            let status = if f.is_added() {
+                "added"
+            } else if f.is_deleted() {
+                "deleted"
+            } else {
+                "modified"
+            };
+            format!("- {} ({})", f.path().display(), status)
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let files_note = if files.len() > 50 {
+        format!("\n... and {} more files", files.len() - 50)
+    } else {
+        String::new()
+    };
+
+    // Get unified diffs for changed files (limited to keep prompt size reasonable)
+    let mut diffs = String::new();
+    let mut total_diff_lines = 0;
+    const MAX_DIFF_LINES: usize = 500;
+
+    for file in files.iter().take(20) {
+        if total_diff_lines >= MAX_DIFF_LINES {
+            diffs.push_str("\n... (diff truncated for length)\n");
+            break;
+        }
+
+        let file_path = file.path();
+        if let Ok(diff) = git::get_unified_diff(&path, &spec, file_path) {
+            if !diff.is_empty() {
+                let diff_lines = diff.lines().count();
+                if total_diff_lines + diff_lines <= MAX_DIFF_LINES {
+                    diffs.push_str(&format!(
+                        "\n### {}\n```diff\n{}\n```\n",
+                        file_path.display(),
+                        diff
+                    ));
+                    total_diff_lines += diff_lines;
+                }
+            }
+        }
+    }
+
+    // Build the full prompt
+    let prompt = format!(
+        r#"{system}
+
+## Branch Info
+- Head: {head}
+- Base: {base}
+
+## Commits ({commit_count})
+{commits}
+
+## Changed Files ({file_count})
+{files}{files_note}
+
+## Diffs
+{diffs}
+
+Generate a PR title and description for these changes."#,
+        system = PR_DESCRIPTION_SYSTEM_PROMPT,
+        head = head_branch,
+        base = base_branch,
+        commit_count = commits.len(),
+        commits = commit_summary,
+        file_count = files.len(),
+        files = file_summary,
+        files_note = files_note,
+        diffs = diffs,
+    );
+
+    // Call the AI (use raw to avoid prepending system context - we have our own)
+    let response = ai::run_acp_prompt_raw(&agent, &path, &prompt).await?;
+
+    // Parse the response
+    parse_pr_description_response(&response)
+}
+
+/// Parse the AI response into a GeneratedPrDescription.
+fn parse_pr_description_response(response: &str) -> Result<GeneratedPrDescription, String> {
+    let response = response.trim();
+
+    // Try to extract JSON from the response
+    let json_str = extract_json_from_response(response);
+
+    #[derive(serde::Deserialize)]
+    struct PrDescriptionJson {
+        title: String,
+        body: String,
+    }
+
+    let parsed: PrDescriptionJson = serde_json::from_str(json_str).map_err(|e| {
+        log::error!("Failed to parse PR description response: {}", e);
+        log::error!("Response was:\n{}", response);
+        format!("Failed to parse AI response: {}", e)
+    })?;
+
+    Ok(GeneratedPrDescription {
+        title: parsed.title,
+        body: parsed.body,
+    })
+}
+
+/// Extract JSON from a response that might have markdown fences or other text.
+fn extract_json_from_response(response: &str) -> &str {
+    // Check for ```json ... ``` pattern
+    if let Some(start) = response.find("```json") {
+        let after_fence = &response[start + 7..];
+        if let Some(end) = after_fence.find("```") {
+            return after_fence[..end].trim();
+        }
+    }
+
+    // Check for ``` ... ``` pattern (no language)
+    if let Some(start) = response.find("```") {
+        let after_fence = &response[start + 3..];
+        if let Some(end) = after_fence.find("```") {
+            return after_fence[..end].trim();
+        }
+    }
+
+    // Try to find JSON object directly
+    if let Some(start) = response.find('{') {
+        if let Some(end) = response.rfind('}') {
+            return &response[start..=end];
+        }
+    }
+
+    response
+}
+
 // =============================================================================
 // AI Commands
 // =============================================================================
@@ -3063,6 +3274,7 @@ pub fn run() {
             push_branch,
             create_pull_request,
             update_pull_request,
+            generate_pr_description,
             // AI commands (analysis)
             check_ai_available,
             discover_acp_providers,

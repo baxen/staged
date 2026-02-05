@@ -6,6 +6,7 @@
     pushBranch,
     createPullRequest,
     updatePullRequest,
+    generatePrDescription,
     type PullRequestInfo,
     type CreatePrResult,
     type Branch,
@@ -30,6 +31,7 @@
   let isLoading = true;
   let isPushing = false;
   let isCreating = false;
+  let isGenerating = false;
   let error: string | null = null;
 
   // Existing PR (if any)
@@ -37,7 +39,13 @@
 
   onMount(async () => {
     await checkExistingPr();
-    populateDefaults();
+
+    if (!existingPr) {
+      // Populate with simple defaults immediately
+      populateDefaults();
+      // Start AI generation in background (don't await)
+      generateDescription();
+    }
   });
 
   async function checkExistingPr() {
@@ -56,6 +64,26 @@
       existingPr = null;
     } finally {
       isLoading = false;
+    }
+  }
+
+  async function generateDescription() {
+    isGenerating = true;
+
+    try {
+      // Use worktreePath for git operations - that's where the branch's commits live
+      const result = await generatePrDescription(
+        branch.worktreePath,
+        branch.branchName,
+        branch.baseBranch
+      );
+      title = result.title;
+      body = result.body;
+    } catch (e) {
+      // AI generation failed, keep the simple defaults
+      console.warn('AI PR description generation failed:', e);
+    } finally {
+      isGenerating = false;
     }
   }
 
@@ -202,6 +230,13 @@
               ></textarea>
             </div>
 
+            {#if isGenerating}
+              <div class="generating-banner">
+                <Loader2 size={14} class="spinner" />
+                <span>AI is generating a description...</span>
+              </div>
+            {/if}
+
             {#if !existingPr}
               <div class="form-group checkbox-group">
                 <label>
@@ -313,6 +348,18 @@
     background: var(--bg-hover);
     border-radius: 6px;
     margin-bottom: 16px;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+  }
+
+  .generating-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-hover);
+    border-radius: 6px;
+    margin-bottom: 12px;
     font-size: var(--size-sm);
     color: var(--text-muted);
   }
