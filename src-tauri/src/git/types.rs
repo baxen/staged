@@ -38,17 +38,21 @@ pub enum GitRef {
     /// Merge-base between the default branch and HEAD.
     /// Resolved dynamically at diff-time to handle branch switches.
     MergeBase,
+    /// Merge-base between a specific branch and a head ref.
+    /// Format: [base_branch, head_ref] - computes merge-base(base_branch, head_ref)
+    MergeBaseOf([String; 2]),
 }
 
 impl GitRef {
     /// String representation for git commands
     /// WorkingTree is represented as empty string (git uses working tree by default)
-    /// MergeBase should be resolved before calling this
+    /// MergeBase/MergeBaseOf should be resolved before calling this
     pub fn as_git_arg(&self) -> Option<&str> {
         match self {
             GitRef::WorkingTree => None,
             GitRef::Rev(s) => Some(s),
             GitRef::MergeBase => panic!("MergeBase must be resolved before use"),
+            GitRef::MergeBaseOf(_) => panic!("MergeBaseOf must be resolved before use"),
         }
     }
 
@@ -58,6 +62,7 @@ impl GitRef {
             GitRef::WorkingTree => "@",
             GitRef::Rev(s) => s,
             GitRef::MergeBase => "merge-base",
+            GitRef::MergeBaseOf(_) => "merge-base",
         }
     }
 }

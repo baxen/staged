@@ -47,6 +47,10 @@ fn make_diff_id(repo: &Path, spec: &DiffSpec) -> Result<DiffId, String> {
                 let default_branch = git::detect_default_branch(repo).map_err(|e| e.to_string())?;
                 git::merge_base(repo, &default_branch, "HEAD").map_err(|e| e.to_string())
             }
+            GitRef::MergeBaseOf([base_branch, head_ref]) => {
+                // Resolve merge-base between specific refs
+                git::merge_base(repo, base_branch, head_ref).map_err(|e| e.to_string())
+            }
         }
     };
 

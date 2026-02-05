@@ -261,7 +261,7 @@
     onViewDiff?.(
       branch.projectId,
       branch.worktreePath,
-      DiffSpec.fromRevs(branch.baseBranch, branch.branchName),
+      DiffSpec.mergeBaseDiff(branch.baseBranch, branch.branchName),
       `${branch.baseBranch}..${branch.branchName}`
     );
   }
