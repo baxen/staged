@@ -3,7 +3,9 @@
 
   Two-step flow:
   1. Pick a repository (with search)
-  2. Enter branch title (auto-generates sanitized branch name)
+  2. Choose mode: new branch OR from existing PR
+  3a. For new branch: Enter branch title (auto-generates sanitized branch name)
+  3b. For PR: Select from open PRs
 
   The branch is created with an isolated worktree, defaulting to the
   repository's default branch (e.g., origin/main) as the base.
@@ -15,6 +17,7 @@
     X,
     Folder,
     GitBranch,
+    GitPullRequest,
     ChevronRight,
     Search,
     Loader2,
@@ -25,7 +28,8 @@
   import type { Branch } from './services/branch';
   import * as branchService from './services/branch';
   import { listDirectory, getHomeDir, searchDirectories, type DirEntry } from './services/files';
-  import { listRefs } from './services/git';
+  import { listRefs, listPullRequests } from './services/git';
+  import type { PullRequest } from './types';
 
   /** Info about a branch being created (for showing a placeholder) */
   export interface PendingBranch {
@@ -50,10 +54,18 @@
     $props();
 
   // State
-  type Step = 'repo' | 'name';
+  type Step = 'repo' | 'mode' | 'name' | 'pr';
   let step = $state<Step>('repo');
   let selectedRepo = $state<string | null>(null);
   let branchTitle = $state('');
+
+  // PR selection state
+  let pullRequests = $state<PullRequest[]>([]);
+  let loadingPRs = $state(false);
+  let prSearchQuery = $state('');
+  let prSelectedIndex = $state(0);
+  let prSearchEl: HTMLInputElement | null = $state(null);
+  let creatingFromPR = $state(false);
 
   /**
    * Sanitize a branch title into a valid git branch name.
@@ -120,13 +132,25 @@
     return availableBranches.filter((b) => b.toLowerCase().includes(q));
   });
 
+  // Filtered PRs for search
+  let filteredPRs = $derived.by(() => {
+    if (!prSearchQuery) return pullRequests;
+    const q = prSearchQuery.toLowerCase();
+    return pullRequests.filter(
+      (pr) =>
+        pr.title.toLowerCase().includes(q) ||
+        pr.head_ref.toLowerCase().includes(q) ||
+        pr.number.toString().includes(q)
+    );
+  });
+
   // Initialize
   onMount(async () => {
     const dir = await getHomeDir();
     homeDir = dir;
     currentDir = dir;
 
-    // If initialRepoPath is provided, skip to name step
+    // If initialRepoPath is provided, skip to mode step
     if (initialRepoPath) {
       await selectRepo(initialRepoPath);
     }
@@ -138,6 +162,8 @@
       inputEl.focus();
     } else if (step === 'name' && branchInputEl && !showBasePicker) {
       branchInputEl.focus();
+    } else if (step === 'pr' && prSearchEl) {
+      prSearchEl.focus();
     }
   });
 
@@ -222,7 +248,67 @@
       availableBranches = [];
     }
 
-    step = 'name';
+    step = 'mode';
+  }
+
+  async function selectMode(mode: 'new' | 'pr') {
+    if (mode === 'new') {
+      step = 'name';
+    } else {
+      step = 'pr';
+      loadingPRs = true;
+      prSearchQuery = '';
+      prSelectedIndex = 0;
+      try {
+        pullRequests = await listPullRequests(selectedRepo!);
+      } catch (e) {
+        console.error('Failed to load PRs:', e);
+        pullRequests = [];
+      } finally {
+        loadingPRs = false;
+      }
+    }
+  }
+
+  async function handleSelectPR(pr: PullRequest) {
+    if (!selectedRepo || creatingFromPR) return;
+    creatingFromPR = true;
+
+    try {
+      const effectiveProjectId =
+        projectId || (await branchService.getOrCreateGitProject(selectedRepo)).id;
+
+      const baseBranch = `origin/${pr.base_ref}`;
+      const pending: PendingBranch = {
+        projectId: effectiveProjectId,
+        repoPath: selectedRepo,
+        branchName: pr.head_ref,
+        baseBranch,
+      };
+
+      onCreating(pending);
+
+      const branch = await branchService.createBranchFromPr(
+        effectiveProjectId,
+        selectedRepo,
+        pr.number,
+        pr.head_ref,
+        pr.base_ref
+      );
+      onCreated(branch);
+    } catch (e) {
+      const errorMsg = e instanceof Error ? e.message : String(e);
+      const effectiveProjectId = projectId || '';
+      const pending: PendingBranch = {
+        projectId: effectiveProjectId,
+        repoPath: selectedRepo,
+        branchName: pr.head_ref,
+        baseBranch: `origin/${pr.base_ref}`,
+      };
+      onCreateFailed(pending, errorMsg);
+    } finally {
+      creatingFromPR = false;
+    }
   }
 
   function handleEntryClick(entry: DirEntry) {
@@ -240,12 +326,16 @@
       showBasePicker = false;
       baseSearchQuery = '';
       baseSelectedIndex = 0;
-    } else if (step === 'name') {
+    } else if (step === 'name' || step === 'pr') {
+      step = 'mode';
+      branchTitle = '';
+      prSearchQuery = '';
+      prSelectedIndex = 0;
+    } else if (step === 'mode') {
       step = 'repo';
       selectedRepo = null;
       detectedDefaultBranch = null;
       selectedBaseBranch = null;
-      branchTitle = '';
     }
   }
 
@@ -387,7 +477,7 @@
     onclick={(e) => e.stopPropagation()}
   >
     <div class="modal-header">
-      {#if step === 'name'}
+      {#if step === 'mode' || step === 'name' || step === 'pr'}
         <button class="back-button" onclick={goBack}>
           <ArrowLeft size={16} />
         </button>
@@ -395,6 +485,10 @@
       <h2>
         {#if step === 'repo'}
           Select Repository
+        {:else if step === 'mode'}
+          New Branch
+        {:else if step === 'pr'}
+          Select Pull Request
         {:else}
           New Branch
         {/if}
@@ -456,6 +550,82 @@
               <span class="entry-name">{entry.name}</span>
               {#if !entry.isRepo}
                 <ChevronRight size={14} class="entry-chevron" />
+              {/if}
+            </button>
+          {/each}
+        {/if}
+      </div>
+    {:else if step === 'mode'}
+      <!-- Mode selection -->
+      <div class="mode-step">
+        <div class="repo-info">
+          <GitBranch size={14} />
+          <span>{repoName(selectedRepo ?? '')}</span>
+        </div>
+        <div class="mode-options">
+          <button class="mode-option" onclick={() => selectMode('new')}>
+            <GitBranch size={20} class="mode-icon" />
+            <div class="mode-content">
+              <span class="mode-title">New Branch</span>
+              <span class="mode-desc"
+                >Create a fresh branch from {formatBranchName(effectiveBaseBranch)}</span
+              >
+            </div>
+            <ChevronRight size={16} class="mode-chevron" />
+          </button>
+          <button class="mode-option" onclick={() => selectMode('pr')}>
+            <GitPullRequest size={20} class="mode-icon pr-icon" />
+            <div class="mode-content">
+              <span class="mode-title">From Pull Request</span>
+              <span class="mode-desc">Check out an existing PR to review or continue work</span>
+            </div>
+            <ChevronRight size={16} class="mode-chevron" />
+          </button>
+        </div>
+      </div>
+    {:else if step === 'pr'}
+      <!-- PR selection -->
+      <div class="search-container">
+        <Search size={16} class="search-icon" />
+        <input
+          bind:this={prSearchEl}
+          bind:value={prSearchQuery}
+          type="text"
+          placeholder="Search pull requests..."
+          class="search-input"
+        />
+        {#if loadingPRs}
+          <Loader2 size={16} class="spinner" />
+        {/if}
+      </div>
+
+      <div class="pr-list">
+        {#if loadingPRs}
+          <div class="loading">
+            <Loader2 size={16} class="spinner" />
+            <span>Loading pull requests...</span>
+          </div>
+        {:else if filteredPRs.length === 0}
+          <div class="empty">
+            {prSearchQuery ? 'No matching pull requests' : 'No open pull requests'}
+          </div>
+        {:else}
+          {#each filteredPRs as pr, index (pr.number)}
+            <button
+              class="pr-item"
+              class:selected={index === prSelectedIndex}
+              onclick={() => handleSelectPR(pr)}
+              disabled={creatingFromPR}
+            >
+              <GitPullRequest size={16} class="pr-item-icon" />
+              <div class="pr-item-content">
+                <span class="pr-item-title">{pr.title}</span>
+                <span class="pr-item-meta">
+                  #{pr.number} · {pr.head_ref} → {pr.base_ref}
+                </span>
+              </div>
+              {#if creatingFromPR}
+                <Loader2 size={14} class="spinner" />
               {/if}
             </button>
           {/each}
@@ -981,5 +1151,149 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* Mode selection step */
+  .mode-step {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .repo-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background-color: var(--bg-hover);
+    border-radius: 6px;
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+  }
+
+  .repo-info :global(svg) {
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .mode-options {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .mode-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 14px 16px;
+    background: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    text-align: left;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .mode-option:hover {
+    background-color: var(--bg-hover);
+    border-color: var(--border-emphasis);
+  }
+
+  :global(.mode-icon) {
+    color: var(--text-muted);
+    flex-shrink: 0;
+  }
+
+  :global(.pr-icon) {
+    color: var(--status-added);
+  }
+
+  .mode-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .mode-title {
+    font-size: var(--size-sm);
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .mode-desc {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+  }
+
+  :global(.mode-chevron) {
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .mode-option:hover :global(.mode-chevron) {
+    color: var(--text-muted);
+  }
+
+  /* PR list */
+  .pr-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+  }
+
+  .pr-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 0.1s;
+  }
+
+  .pr-item:hover:not(:disabled),
+  .pr-item.selected {
+    background-color: var(--bg-hover);
+  }
+
+  .pr-item:disabled {
+    cursor: wait;
+    opacity: 0.7;
+  }
+
+  :global(.pr-item-icon) {
+    color: var(--status-added);
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .pr-item-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .pr-item-title {
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .pr-item-meta {
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    font-family: 'SF Mono', 'Menlo', monospace;
   }
 </style>
