@@ -572,12 +572,9 @@
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title skeleton-title">{item.note.title}</span>
-                  <div class="timeline-meta">
-                    <span class="skeleton-meta">generating...</span>
-                  </div>
-                </div>
+                <span class="timeline-title skeleton-title">{item.note.title}</span>
+                <span class="note-spacer"></span>
+                <span class="skeleton-meta">generating...</span>
               </div>
               <div class="watch-button">
                 <MessageSquare size={12} />
@@ -597,12 +594,9 @@
                   {/if}
                 </div>
                 <div class="timeline-content">
-                  <div class="timeline-info">
-                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                    <div class="timeline-meta">
-                      <span class="skeleton-meta">generating...</span>
-                    </div>
-                  </div>
+                  <span class="timeline-title skeleton-title">{item.session.prompt}</span>
+                  <span class="note-spacer"></span>
+                  <span class="skeleton-meta">generating...</span>
                 </div>
                 <div class="watch-button">
                   <MessageSquare size={12} />
@@ -624,9 +618,7 @@
                   {/if}
                 </div>
                 <div class="timeline-content">
-                  <div class="timeline-info">
-                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                  </div>
+                  <span class="timeline-title skeleton-title">{item.session.prompt}</span>
                 </div>
                 <div class="stuck-actions">
                   <button
@@ -663,13 +655,9 @@
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title">{item.commit.subject}</span>
-                  <div class="timeline-meta">
-                    <span class="commit-sha">{item.commit.shortSha}</span>
-                    <span class="timeline-time">{formatRelativeTime(item.commit.timestamp)}</span>
-                  </div>
-                </div>
+                <span class="timeline-title">{item.commit.subject}</span>
+                <span class="commit-sha">{item.commit.shortSha}</span>
+                <span class="timeline-time">{formatRelativeTime(item.commit.timestamp)}</span>
               </div>
               <div class="timeline-actions">
                 {#if confirmingDeleteCommitSha === item.commit.sha}
@@ -743,12 +731,9 @@
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title">{item.note.title}</span>
-                  <div class="timeline-meta">
-                    <span class="timeline-time">{formatRelativeTimeMs(item.note.createdAt)}</span>
-                  </div>
-                </div>
+                <span class="timeline-title">{item.note.title}</span>
+                <span class="note-spacer"></span>
+                <span class="timeline-time">{formatRelativeTimeMs(item.note.createdAt)}</span>
               </div>
               <div class="timeline-actions">
                 {#if confirmingDeleteNoteId === item.note.id}
@@ -1231,9 +1216,10 @@
 
   .timeline-content {
     flex: 1;
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    align-items: center;
+    gap: 12px;
     min-width: 0;
   }
 
@@ -1256,18 +1242,13 @@
     color: var(--text-accent);
   }
 
-  .timeline-info {
-    flex: 1;
-    min-width: 0;
-  }
-
   .timeline-title {
-    display: block;
     font-size: var(--size-sm);
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
   }
 
   .skeleton-title {
@@ -1275,28 +1256,30 @@
     font-style: italic;
   }
 
-  .timeline-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 2px;
+  .note-spacer {
+    /* Empty spacer for notes to align with commit hash column */
   }
 
   .commit-sha {
     font-size: var(--size-xs);
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
     color: var(--text-faint);
+    white-space: nowrap;
   }
 
   .timeline-time {
     font-size: var(--size-xs);
     color: var(--text-faint);
+    white-space: nowrap;
+    text-align: right;
   }
 
   .skeleton-meta {
     font-size: var(--size-xs);
     color: var(--text-faint);
     animation: pulse 2s ease-in-out infinite;
+    white-space: nowrap;
+    text-align: right;
   }
 
   .timeline-actions {
