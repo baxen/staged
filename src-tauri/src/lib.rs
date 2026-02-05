@@ -2890,21 +2890,37 @@ struct OpenerApp {
 }
 
 /// Known apps we can detect and open directories in.
-/// Each entry: (id, display_name, macOS_bundle_id, open_command_args)
+/// Each entry: (id, display_name, macOS_bundle_id)
+/// Apps are filtered at runtime to only show those installed on the user's machine.
 #[cfg(target_os = "macos")]
 const KNOWN_OPENERS: &[(&str, &str, &str)] = &[
+    // Terminals
     ("terminal", "Terminal", "com.apple.Terminal"),
     ("warp", "Warp", "dev.warp.Warp-Stable"),
     ("iterm", "iTerm", "com.googlecode.iterm2"),
     ("ghostty", "Ghostty", "com.mitchellh.ghostty"),
+    ("alacritty", "Alacritty", "org.alacritty"),
+    ("kitty", "Kitty", "net.kovidgoyal.kitty"),
+    // Editors/IDEs
     ("vscode", "VS Code", "com.microsoft.VSCode"),
     ("cursor", "Cursor", "com.todesktop.230313mzl4w4u92"),
     ("windsurf", "Windsurf", "com.codeium.windsurf"),
+    ("zed", "Zed", "dev.zed.Zed"),
+    ("sublime-text", "Sublime Text", "com.sublimetext.4"),
+    ("nova", "Nova", "com.panic.Nova"),
+    ("intellij", "IntelliJ IDEA", "com.jetbrains.intellij"),
+    ("webstorm", "WebStorm", "com.jetbrains.webstorm"),
+    ("rustrover", "RustRover", "com.jetbrains.rustrover"),
+    // Git clients
     (
         "github-desktop",
         "GitHub Desktop",
         "com.github.GitHubClient",
     ),
+    ("tower", "Tower", "com.fournova.Tower3"),
+    ("fork", "Fork", "com.DanPristupov.Fork"),
+    ("sublime-merge", "Sublime Merge", "com.sublimemerge"),
+    // File manager
     ("finder", "Finder", "com.apple.finder"),
 ];
 
