@@ -19,12 +19,16 @@ export type { DiffState, CommentsState, DiffSelection, AgentState, ReferenceFile
  * State for a single tab
  */
 export interface TabState {
-  /** Unique identifier (repo path) */
+  /** Unique identifier (project ID) */
   id: string;
+  /** Project ID this tab belongs to */
+  projectId: string;
   /** Full path to repository */
   repoPath: string;
   /** Display name of repository */
   repoName: string;
+  /** Optional subpath within the repo (for monorepos) */
+  subpath: string | null;
 
   // Isolated state instances per tab
   diffState: DiffState;
@@ -77,19 +81,21 @@ export function getActiveTab(): TabState | null {
 
 /**
  * Add a new tab to the window.
- * If the repo is already open, switches to that tab instead.
+ * If the project is already open, switches to that tab instead.
  */
 export function addTab(
+  projectId: string,
   repoPath: string,
   repoName: string,
+  subpath: string | null,
   createDiffState: () => DiffState,
   createCommentsState: () => CommentsState,
   createDiffSelection: () => DiffSelection,
   createAgentState: () => AgentState,
   createReferenceFilesState: () => ReferenceFilesState
 ): void {
-  // Check if tab already exists
-  const existingIndex = windowState.tabs.findIndex((t) => t.id === repoPath);
+  // Check if tab already exists for this project
+  const existingIndex = windowState.tabs.findIndex((t) => t.projectId === projectId);
   if (existingIndex !== -1) {
     // Switch to existing tab
     windowState.activeTabIndex = existingIndex;
@@ -99,9 +105,11 @@ export function addTab(
   // Create new tab with isolated state instances
   // Plain objects are created - the parent windowState.tabs array is already reactive
   const tab: TabState = {
-    id: repoPath,
+    id: projectId,
+    projectId,
     repoPath,
     repoName,
+    subpath,
     diffState: createDiffState(),
     commentsState: createCommentsState(),
     diffSelection: createDiffSelection(),
@@ -128,7 +136,8 @@ export function closeTab(tabId: string): void {
   const closedTab = windowState.tabs[index];
   windowState.tabs.splice(index, 1);
 
-  // Stop watching if no other tab uses this repo
+  // Stop watching the repo if no other tab uses this repo
+  // (multiple projects might share the same repo, so check all tabs)
   if (closedTab) {
     const stillUsed = windowState.tabs.some((t) => t.repoPath === closedTab.repoPath);
     if (!stillUsed) {
@@ -165,6 +174,8 @@ export function getActiveRepoPath(): string | null {
 /**
  * Mark all tabs for a repo as needing refresh.
  * Called when files change for a non-active tab.
+ * Note: This marks ALL projects using the repo, since a file change
+ * anywhere in the repo could affect any project (even with different subpaths).
  */
 export function markRepoNeedsRefresh(repoPath: string): void {
   for (const tab of windowState.tabs) {
@@ -197,8 +208,10 @@ function saveTabsToStorage(): void {
   const data = {
     tabs: windowState.tabs.map((t) => ({
       id: t.id,
+      projectId: t.projectId,
       repoPath: t.repoPath,
       repoName: t.repoName,
+      subpath: t.subpath,
     })),
     activeTabIndex: windowState.activeTabIndex,
   };
@@ -225,9 +238,11 @@ export function loadTabsFromStorage(
       // Create tabs with isolated state instances
       // Plain objects are created - the parent windowState.tabs array is already reactive
       windowState.tabs = data.tabs.map((t: any) => ({
-        id: t.id,
+        id: t.id || t.projectId, // Fallback for old format
+        projectId: t.projectId || t.id, // Fallback for old format
         repoPath: t.repoPath,
         repoName: t.repoName,
+        subpath: t.subpath || null,
         diffState: createDiffState(),
         commentsState: createCommentsState(),
         diffSelection: createDiffSelection(),

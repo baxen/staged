@@ -29,7 +29,7 @@
   import { DiffSpec } from './types';
 
   interface Props {
-    onViewDiff?: (repoPath: string, spec: DiffSpec, label: string) => void;
+    onViewDiff?: (projectId: string, repoPath: string, spec: DiffSpec, label: string) => void;
     onAddProjectRequest?: (trigger: () => void) => void;
   }
 
@@ -76,32 +76,24 @@
       { project: GitProject; branches: Branch[]; pending: PendingBranch[] }
     >();
 
-    // Seed every project and index by repo (multiple projects can share a repo)
-    const projectsByRepo = new Map<string, GitProject[]>();
+    // Seed all projects
     for (const project of projects) {
-      const list = projectsByRepo.get(project.repoPath) || [];
-      list.push(project);
-      projectsByRepo.set(project.repoPath, list);
       grouped.set(project.id, { project, branches: [], pending: [] });
     }
 
-    // Add real branches to every project that shares the same repo
+    // Add branches to their specific project
     for (const branch of branches) {
-      const repoProjects = projectsByRepo.get(branch.repoPath);
-      if (repoProjects) {
-        for (const project of repoProjects) {
-          grouped.get(project.id)!.branches.push(branch);
-        }
+      const projectGroup = grouped.get(branch.projectId);
+      if (projectGroup) {
+        projectGroup.branches.push(branch);
       }
     }
 
-    // Add pending branches to every project that shares the same repo
+    // Add pending branches to their specific project
     for (const pending of pendingBranches) {
-      const repoProjects = projectsByRepo.get(pending.repoPath);
-      if (repoProjects) {
-        for (const project of repoProjects) {
-          grouped.get(project.id)!.pending.push(pending);
-        }
+      const projectGroup = grouped.get(pending.projectId);
+      if (projectGroup) {
+        projectGroup.pending.push(pending);
       }
     }
 
@@ -113,7 +105,7 @@
 
   // Generate a unique key for a pending branch
   function pendingKey(pending: PendingBranch): string {
-    return `${pending.repoPath}:${pending.branchName}`;
+    return `${pending.projectId}:${pending.branchName}`;
   }
 
   function projectDisplayName(project: GitProject): string {
@@ -170,23 +162,6 @@
       ]);
       branches = branchList;
       projects = projectList;
-
-      // Ensure projects exist for all branches (lazy creation)
-      const projectRepos = new Set(projectList.map((p) => p.repoPath));
-      const missingRepos = new Set<string>();
-      for (const branch of branchList) {
-        if (!projectRepos.has(branch.repoPath)) {
-          missingRepos.add(branch.repoPath);
-        }
-      }
-
-      // Create missing projects
-      if (missingRepos.size > 0) {
-        const newProjects = await Promise.all(
-          [...missingRepos].map((repoPath) => branchService.getOrCreateGitProject(repoPath))
-        );
-        projects = [...projects, ...newProjects];
-      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -200,14 +175,17 @@
   }
 
   async function handleBranchCreating(pending: PendingBranch) {
-    // Ensure project exists for this repo
-    let project = projects.find((p) => p.repoPath === pending.repoPath);
+    // Ensure project exists in our local list
+    let project = projects.find((p) => p.id === pending.projectId);
     if (!project) {
       try {
-        project = await branchService.getOrCreateGitProject(pending.repoPath);
-        projects = [...projects, project];
+        // Fetch the project that was created
+        const fetchedProject = await branchService.getGitProject(pending.projectId);
+        if (fetchedProject) {
+          projects = [...projects, fetchedProject];
+        }
       } catch (e) {
-        console.error('Failed to create project for repo:', pending.repoPath, e);
+        console.error('Failed to fetch project:', pending.projectId, e);
       }
     }
 
@@ -227,7 +205,7 @@
   function handleBranchCreated(branch: Branch) {
     // Remove from pending and add to real branches
     pendingBranches = pendingBranches.filter(
-      (p) => !(p.repoPath === branch.repoPath && p.branchName === branch.branchName)
+      (p) => !(p.projectId === branch.projectId && p.branchName === branch.branchName)
     );
     branches = [...branches, branch];
   }
@@ -286,6 +264,7 @@
 
   function handleViewDiff(branch: Branch) {
     onViewDiff?.(
+      branch.projectId,
       branch.worktreePath,
       DiffSpec.fromRevs(branch.baseBranch, branch.branchName),
       `${branch.baseBranch}..${branch.branchName}`
@@ -294,6 +273,7 @@
 
   function handleViewCommitDiff(branch: Branch, commitSha: string) {
     onViewDiff?.(
+      branch.projectId,
       branch.worktreePath,
       DiffSpec.fromRevs(`${commitSha}~1`, commitSha),
       commitSha.slice(0, 7)
@@ -490,6 +470,7 @@
 {#if showNewBranchModal}
   <NewBranchModal
     initialRepoPath={newBranchForProject?.repoPath}
+    projectId={newBranchForProject?.id}
     onCreating={handleBranchCreating}
     onCreated={handleBranchCreated}
     onCreateFailed={handleBranchCreateFailed}

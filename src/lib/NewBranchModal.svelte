@@ -29,6 +29,7 @@
 
   /** Info about a branch being created (for showing a placeholder) */
   export interface PendingBranch {
+    projectId: string;
     repoPath: string;
     branchName: string;
     baseBranch: string;
@@ -37,13 +38,15 @@
   interface Props {
     /** If provided, skip repo selection and go straight to name input */
     initialRepoPath?: string;
+    /** The project this branch will belong to */
+    projectId?: string;
     onCreating: (pending: PendingBranch) => void;
     onCreated: (branch: Branch) => void;
     onCreateFailed: (pending: PendingBranch, error: string) => void;
     onClose: () => void;
   }
 
-  let { initialRepoPath, onCreating, onCreated, onCreateFailed, onClose }: Props = $props();
+  let { initialRepoPath, projectId, onCreating, onCreated, onCreateFailed, onClose }: Props = $props();
 
   // State
   type Step = 'repo' | 'name';
@@ -248,18 +251,23 @@
   async function handleCreate() {
     if (!selectedRepo || !branchName.trim()) return;
 
-    const pending: PendingBranch = {
-      repoPath: selectedRepo,
-      branchName: branchName.trim(),
-      baseBranch: effectiveBaseBranch,
-    };
-
-    // Notify parent immediately so it can show a placeholder
-    onCreating(pending);
-
     try {
+      // If no project ID was provided, get or create one for this repo
+      const effectiveProjectId = projectId || (await branchService.getOrCreateGitProject(selectedRepo)).id;
+
+      const pending: PendingBranch = {
+        projectId: effectiveProjectId,
+        repoPath: selectedRepo,
+        branchName: branchName.trim(),
+        baseBranch: effectiveBaseBranch,
+      };
+
+      // Notify parent immediately so it can show a placeholder
+      onCreating(pending);
+
       // Pass selected base branch or undefined to use detected default
       const branch = await branchService.createBranch(
+        effectiveProjectId,
         selectedRepo,
         branchName.trim(),
         selectedBaseBranch ?? undefined
@@ -267,6 +275,14 @@
       onCreated(branch);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
+      // Need to create pending for error case too
+      const effectiveProjectId = projectId || '';
+      const pending: PendingBranch = {
+        projectId: effectiveProjectId,
+        repoPath: selectedRepo,
+        branchName: branchName.trim(),
+        baseBranch: effectiveBaseBranch,
+      };
       onCreateFailed(pending, errorMsg);
     }
   }

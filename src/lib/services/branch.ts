@@ -18,6 +18,8 @@ export interface GitProject {
 /** A tracked branch with an associated worktree */
 export interface Branch {
   id: string;
+  /** The project this branch belongs to */
+  projectId: string;
   /** Path to the original repository */
   repoPath: string;
   /** Name of the branch (e.g., "feature/auth-flow") */
@@ -100,11 +102,12 @@ export interface BranchNote {
  * If baseBranch is not provided, uses the detected default branch.
  */
 export async function createBranch(
+  projectId: string,
   repoPath: string,
   branchName: string,
   baseBranch?: string
 ): Promise<Branch> {
-  return invoke<Branch>('create_branch', { repoPath, branchName, baseBranch });
+  return invoke<Branch>('create_branch', { projectId, repoPath, branchName, baseBranch });
 }
 
 /**
@@ -126,6 +129,13 @@ export async function listBranches(): Promise<Branch[]> {
  */
 export async function listBranchesForRepo(repoPath: string): Promise<Branch[]> {
   return invoke<Branch[]>('list_branches_for_repo', { repoPath });
+}
+
+/**
+ * List branches for a specific project.
+ */
+export async function listBranchesForProject(projectId: string): Promise<Branch[]> {
+  return invoke<Branch[]>('list_branches_for_project', { projectId });
 }
 
 /**

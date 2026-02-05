@@ -327,6 +327,8 @@ impl Artifact {
 #[serde(rename_all = "camelCase")]
 pub struct Branch {
     pub id: String,
+    /// The project this branch belongs to
+    pub project_id: String,
     /// Path to the original repository
     pub repo_path: String,
     /// Name of the branch (e.g., "feature/auth-flow")
@@ -341,6 +343,7 @@ pub struct Branch {
 
 impl Branch {
     pub fn new(
+        project_id: impl Into<String>,
         repo_path: impl Into<String>,
         branch_name: impl Into<String>,
         worktree_path: impl Into<String>,
@@ -349,6 +352,7 @@ impl Branch {
         let now = now_timestamp();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
+            project_id: project_id.into(),
             repo_path: repo_path.into(),
             branch_name: branch_name.into(),
             worktree_path: worktree_path.into(),
@@ -362,12 +366,13 @@ impl Branch {
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
-            repo_path: row.get(1)?,
-            branch_name: row.get(2)?,
-            worktree_path: row.get(3)?,
-            base_branch: row.get(4)?,
-            created_at: row.get(5)?,
-            updated_at: row.get(6)?,
+            project_id: row.get(1)?,
+            repo_path: row.get(2)?,
+            branch_name: row.get(3)?,
+            worktree_path: row.get(4)?,
+            base_branch: row.get(5)?,
+            created_at: row.get(6)?,
+            updated_at: row.get(7)?,
         })
     }
 }
@@ -803,6 +808,60 @@ impl Store {
                 "ALTER TABLE branch_sessions ADD COLUMN ai_session_id TEXT",
                 [],
             )?;
+        }
+
+        // Check if project_id column exists on branches, add if not
+        let has_project_id: bool = conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM pragma_table_info('branches') WHERE name = 'project_id'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or(false);
+
+        if !has_project_id {
+            // Add project_id column
+            conn.execute(
+                "ALTER TABLE branches ADD COLUMN project_id TEXT",
+                [],
+            )?;
+
+            // For each existing branch, get or create a project for its repo_path
+            let mut stmt = conn.prepare("SELECT id, repo_path FROM branches WHERE project_id IS NULL")?;
+            let branch_repos: Vec<(String, String)> = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+
+            for (branch_id, repo_path) in branch_repos {
+                // Check if a project exists for this repo_path
+                let project_id: Option<String> = conn
+                    .query_row(
+                        "SELECT id FROM git_projects WHERE repo_path = ?1 AND subpath IS NULL LIMIT 1",
+                        params![&repo_path],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+
+                let project_id = if let Some(pid) = project_id {
+                    pid
+                } else {
+                    // Create a new project for this repo
+                    let new_project_id = uuid::Uuid::new_v4().to_string();
+                    let now = now_timestamp();
+                    conn.execute(
+                        "INSERT INTO git_projects (id, name, repo_path, subpath, created_at, updated_at)
+                         VALUES (?1, '', ?2, NULL, ?3, ?4)",
+                        params![&new_project_id, &repo_path, now, now],
+                    )?;
+                    new_project_id
+                };
+
+                // Update the branch with the project_id
+                conn.execute(
+                    "UPDATE branches SET project_id = ?1 WHERE id = ?2",
+                    params![&project_id, &branch_id],
+                )?;
+            }
         }
 
         Ok(())
@@ -1369,10 +1428,11 @@ impl Store {
     pub fn create_branch(&self, branch: &Branch) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT INTO branches (id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO branches (id, project_id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 &branch.id,
+                &branch.project_id,
                 &branch.repo_path,
                 &branch.branch_name,
                 &branch.worktree_path,
@@ -1388,7 +1448,7 @@ impl Store {
     pub fn get_branch(&self, id: &str) -> Result<Option<Branch>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+            "SELECT id, project_id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
              FROM branches WHERE id = ?1",
             params![id],
             Branch::from_row,
@@ -1401,7 +1461,7 @@ impl Store {
     pub fn list_branches(&self) -> Result<Vec<Branch>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+            "SELECT id, project_id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
              FROM branches ORDER BY updated_at DESC",
         )?;
         let branches = stmt
@@ -1414,11 +1474,24 @@ impl Store {
     pub fn list_branches_for_repo(&self, repo_path: &str) -> Result<Vec<Branch>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+            "SELECT id, project_id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
              FROM branches WHERE repo_path = ?1 ORDER BY updated_at DESC",
         )?;
         let branches = stmt
             .query_map(params![repo_path], Branch::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(branches)
+    }
+
+    /// List branches for a specific project
+    pub fn list_branches_for_project(&self, project_id: &str) -> Result<Vec<Branch>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, repo_path, branch_name, worktree_path, base_branch, created_at, updated_at
+             FROM branches WHERE project_id = ?1 ORDER BY updated_at DESC",
+        )?;
+        let branches = stmt
+            .query_map(params![project_id], Branch::from_row)?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(branches)
     }

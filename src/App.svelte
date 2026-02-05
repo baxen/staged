@@ -14,6 +14,7 @@
   import TabBar from './lib/TabBar.svelte';
   import { listRefs } from './lib/services/git';
   import { getWindowLabel, installCli } from './lib/services/window';
+  import * as branchService from './lib/services/branch';
   import {
     windowState,
     addTab,
@@ -230,14 +231,21 @@
   }
 
   // Open diff viewer from BranchHome — sets up the worktree tab and custom spec
-  async function handleViewDiffFromBranches(repoPath: string, spec: DiffSpecType, label: string) {
+  async function handleViewDiffFromBranches(projectId: string, repoPath: string, spec: DiffSpecType, label: string) {
     syncGlobalToTab();
 
     openRepo(repoPath);
+
+    // Fetch the project to get its subpath
+    const project = await branchService.getGitProject(projectId);
     const repoName = extractRepoName(repoPath);
+    const subpath = project?.subpath || null;
+
     addTab(
+      projectId,
       repoPath,
       repoName,
+      subpath,
       createDiffState,
       createCommentsState,
       createDiffSelection,
@@ -511,10 +519,15 @@
     // Save current tab state before creating new one
     syncGlobalToTab();
 
+    // Get or create a project for this repo
+    const project = await branchService.getOrCreateGitProject(repoPath);
     const repoName = extractRepoName(repoPath);
+
     addTab(
+      project.id,
       repoPath,
       repoName,
+      project.subpath,
       createDiffState,
       createCommentsState,
       createDiffSelection,
@@ -706,18 +719,23 @@
       const repoPath = await initRepoState();
 
       if (repoPath) {
-        // Check if we already have a tab for this repo
-        const existingTabIndex = windowState.tabs.findIndex((t) => t.repoPath === repoPath);
+        // Get or create a project for this repo
+        const project = await branchService.getOrCreateGitProject(repoPath);
+
+        // Check if we already have a tab for this project
+        const existingTabIndex = windowState.tabs.findIndex((t) => t.projectId === project.id);
 
         if (existingTabIndex >= 0) {
-          // Switch to existing tab for this repo
+          // Switch to existing tab for this project
           switchTab(existingTabIndex);
         } else {
           // Create new tab for the CLI path
           const repoName = extractRepoName(repoPath);
           addTab(
+            project.id,
             repoPath,
             repoName,
+            project.subpath,
             createDiffState,
             createCommentsState,
             createDiffSelection,

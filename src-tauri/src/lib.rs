@@ -1350,6 +1350,7 @@ impl From<git::CommitInfo> for CommitInfo {
 #[tauri::command(rename_all = "camelCase")]
 async fn create_branch(
     state: State<'_, Arc<Store>>,
+    project_id: String,
     repo_path: String,
     branch_name: String,
     base_branch: Option<String>,
@@ -1381,6 +1382,7 @@ async fn create_branch(
 
         // Create the branch record
         let branch = Branch::new(
+            &project_id,
             &repo_path,
             &branch_name,
             worktree_path.to_string_lossy().to_string(),
@@ -1433,6 +1435,17 @@ fn list_branches_for_repo(
 ) -> Result<Vec<Branch>, String> {
     state
         .list_branches_for_repo(&repo_path)
+        .map_err(|e| e.to_string())
+}
+
+/// List branches for a specific project.
+#[tauri::command(rename_all = "camelCase")]
+fn list_branches_for_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<Branch>, String> {
+    state
+        .list_branches_for_project(&project_id)
         .map_err(|e| e.to_string())
 }
 
@@ -1537,6 +1550,26 @@ struct StartBranchSessionResponse {
     ai_session_id: String,
 }
 
+/// Get the effective working directory for a branch, accounting for project subpath.
+/// Uses the branch's project_id to look up the project's subpath.
+fn get_branch_working_dir(store: &Store, branch: &Branch) -> Result<PathBuf, String> {
+    let mut working_dir = PathBuf::from(&branch.worktree_path);
+
+    // Get the project for this branch and use its subpath
+    if let Some(project) = store
+        .get_git_project(&branch.project_id)
+        .map_err(|e| e.to_string())?
+    {
+        if let Some(subpath) = project.subpath {
+            if !subpath.is_empty() {
+                working_dir.push(&subpath);
+            }
+        }
+    }
+
+    Ok(working_dir)
+}
+
 /// Start a new session on a branch.
 /// Creates an AI session, builds the full prompt with context, and sends it.
 ///
@@ -1573,11 +1606,11 @@ async fn start_branch_session(
     // Build the full prompt with context
     let full_prompt = build_session_prompt(&state, &branch, &user_prompt)?;
 
-    // Create an AI session in the worktree directory FIRST
+    // Create an AI session in the worktree directory (with subpath if configured) FIRST
     // This way we have the ai_session_id to store in the branch session
-    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    let working_dir = get_branch_working_dir(&state, &branch)?;
     let ai_session_id = session_manager
-        .create_session(worktree_path, None)
+        .create_session(working_dir, None)
         .await
         .map_err(|e| format!("Failed to create AI session: {}", e))?;
 
@@ -2039,10 +2072,10 @@ async fn start_branch_note(
     // Build the full prompt with context
     let full_prompt = build_note_prompt(&state, &branch, &title, &description)?;
 
-    // Create an AI session in the worktree directory
-    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    // Create an AI session in the worktree directory (with subpath if configured)
+    let working_dir = get_branch_working_dir(&state, &branch)?;
     let ai_session_id = session_manager
-        .create_session(worktree_path, None)
+        .create_session(working_dir, None)
         .await
         .map_err(|e| format!("Failed to create AI session: {}", e))?;
 
@@ -2929,6 +2962,7 @@ pub fn run() {
             get_branch,
             list_branches,
             list_branches_for_repo,
+            list_branches_for_project,
             list_git_branches,
             detect_default_branch,
             delete_branch,
