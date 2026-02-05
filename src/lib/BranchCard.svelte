@@ -1195,7 +1195,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 8px;
+    padding: 4px 8px;
     margin: 0 -8px;
     background: transparent;
     border: none;
@@ -1223,8 +1223,10 @@
     justify-content: center;
     width: 20px;
     flex-shrink: 0;
-    position: relative;
-    height: 100%;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 8px;
   }
 
   .timeline-content {
@@ -1232,12 +1234,12 @@
     display: flex;
     align-items: center;
     min-width: 0;
+    margin-left: 30px;
   }
 
   .timeline-line {
     flex: 1;
     width: 2px;
-    min-height: 8px;
     background-color: var(--border-subtle);
   }
 
