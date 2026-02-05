@@ -1,6 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { GitPullRequest, Loader2, Sparkles } from 'lucide-svelte';
+  import { GitPullRequest, Loader2 } from 'lucide-svelte';
   import {
     getPrForBranch,
     pushBranch,
@@ -208,13 +208,6 @@
               </div>
             {/if}
 
-            {#if isGenerating}
-              <div class="generating-banner">
-                <Sparkles size={14} class="generating-icon" />
-                <span>AI is generating a description...</span>
-              </div>
-            {/if}
-
             <div class="form-group">
               <label for="pr-title">Title</label>
               <input
@@ -236,6 +229,13 @@
                 disabled={isPushing || isCreating}
               ></textarea>
             </div>
+
+            {#if isGenerating}
+              <div class="generating-banner">
+                <Loader2 size={14} class="spinner" />
+                <span>AI is generating a description...</span>
+              </div>
+            {/if}
 
             {#if !existingPr}
               <div class="form-group checkbox-group">
@@ -320,16 +320,6 @@
     color: var(--ui-accent);
   }
 
-  @keyframes pulse {
-    0%,
-    100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
-  }
-
   .text-content {
     flex: 1;
     min-width: 0;
@@ -369,14 +359,9 @@
     padding: 10px 12px;
     background: var(--bg-hover);
     border-radius: 6px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
     font-size: var(--size-sm);
     color: var(--text-muted);
-  }
-
-  :global(.generating-icon) {
-    color: var(--ui-accent);
-    animation: pulse 2s ease-in-out infinite;
   }
 
   .link-btn {
