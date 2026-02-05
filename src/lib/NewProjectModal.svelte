@@ -42,6 +42,12 @@
   let inputEl: HTMLInputElement | null = $state(null);
   let nameInputEl: HTMLInputElement | null = $state(null);
 
+  // Subpath suggestions
+  let subpathInputFocused = $state(false);
+  let subpathSuggestions = $state<DirEntry[]>([]);
+  let subpathSelectedIndex = $state(0);
+  let subpathSearchTimeout: ReturnType<typeof setTimeout> | null = null;
+
   let isSearching = $derived(query.length >= 2);
   let isValid = $derived(projectName.trim().length > 0);
 
@@ -112,6 +118,87 @@
     if (isSearching) return searchResults;
     return entries;
   });
+
+  // Split the current subpath value into a directory to list and a partial segment to filter by.
+  // e.g. "packages/fro" → list repo/packages/, filter by "fro"
+  function getSubpathContext(): { dir: string; query: string } {
+    if (!selectedRepo) return { dir: '', query: '' };
+    const trimmed = subpath.replace(/^\/+/, '');
+    if (!trimmed || trimmed.endsWith('/')) {
+      const parentRel = trimmed.replace(/\/+$/, '');
+      return {
+        dir: parentRel ? selectedRepo + '/' + parentRel : selectedRepo,
+        query: '',
+      };
+    }
+    const lastSlash = trimmed.lastIndexOf('/');
+    if (lastSlash === -1) {
+      return { dir: selectedRepo, query: trimmed };
+    }
+    return {
+      dir: selectedRepo + '/' + trimmed.slice(0, lastSlash),
+      query: trimmed.slice(lastSlash + 1),
+    };
+  }
+
+  // Reload the directory listing whenever subpath or focus changes
+  $effect(() => {
+    if (!selectedRepo || step !== 'config' || !subpathInputFocused) {
+      subpathSuggestions = [];
+      return;
+    }
+
+    if (subpathSearchTimeout) clearTimeout(subpathSearchTimeout);
+
+    const { dir } = getSubpathContext();
+    subpathSearchTimeout = setTimeout(async () => {
+      try {
+        const allEntries = await listDirectory(dir);
+        subpathSuggestions = allEntries.filter((e) => e.isDir);
+        subpathSelectedIndex = 0;
+      } catch {
+        subpathSuggestions = [];
+      }
+    }, 100);
+  });
+
+  // Filter the loaded listing by the partial trailing segment
+  let filteredSubpathSuggestions = $derived.by(() => {
+    const { query: q } = getSubpathContext();
+    if (!q) return subpathSuggestions;
+    const lower = q.toLowerCase();
+    return subpathSuggestions.filter((e) => e.name.toLowerCase().includes(lower));
+  });
+
+  function selectSubpathSuggestion(entry: DirEntry) {
+    // Fill the full relative path and append "/" so the next level loads immediately
+    subpath = entry.path.replace(selectedRepo! + '/', '') + '/';
+    subpathSelectedIndex = 0;
+  }
+
+  // Arrow/Enter navigation within the suggestion dropdown — lives on the input itself
+  // so it fires regardless of how outer containers handle propagation.
+  function handleSubpathKeydown(e: KeyboardEvent) {
+    if (filteredSubpathSuggestions.length === 0) return;
+    // Let Meta/Ctrl+Enter fall through to the modal's "create" handler
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      subpathSelectedIndex = Math.min(subpathSelectedIndex + 1, filteredSubpathSuggestions.length - 1);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      subpathSelectedIndex = Math.max(subpathSelectedIndex - 1, 0);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      selectSubpathSuggestion(filteredSubpathSuggestions[subpathSelectedIndex]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      subpathInputFocused = false;
+    }
+  }
 
   function selectRepo(path: string) {
     selectedRepo = path;
@@ -328,7 +415,30 @@
             placeholder="e.g., packages/frontend"
             disabled={saving}
             autocomplete="off"
+            autocorrect="off"
+            autocapitalize="off"
+            spellcheck="false"
+            onfocus={() => (subpathInputFocused = true)}
+            onblur={() => (subpathInputFocused = false)}
+            onkeydown={handleSubpathKeydown}
           />
+          {#if subpathInputFocused && filteredSubpathSuggestions.length > 0}
+            <div class="subpath-suggestions">
+              {#each filteredSubpathSuggestions as entry, index (entry.path)}
+                <button
+                  class="subpath-suggestion"
+                  class:selected={index === subpathSelectedIndex}
+                  onmousedown={(e) => {
+                    e.preventDefault();
+                    selectSubpathSuggestion(entry);
+                  }}
+                >
+                  <Folder size={14} class="suggestion-icon" />
+                  <span class="suggestion-name">{entry.name}</span>
+                </button>
+              {/each}
+            </div>
+          {/if}
           <span class="help-text">
             For monorepos: subdirectory to use as working directory for AI sessions
           </span>
@@ -601,6 +711,50 @@
 
   .form-group input::placeholder {
     color: var(--text-faint);
+  }
+
+  /* Subpath suggestions dropdown */
+  .subpath-suggestions {
+    max-height: 160px;
+    overflow-y: auto;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    padding: 4px;
+    background-color: var(--bg-primary);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .subpath-suggestion {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    text-align: left;
+    cursor: pointer;
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+    transition: background-color 0.1s;
+  }
+
+  .subpath-suggestion:hover,
+  .subpath-suggestion.selected {
+    background-color: var(--bg-hover);
+  }
+
+  :global(.suggestion-icon) {
+    color: var(--text-faint);
+    flex-shrink: 0;
+  }
+
+  .suggestion-name {
+    font-family: 'SF Mono', 'Menlo', monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .help-text {
