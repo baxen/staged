@@ -184,10 +184,12 @@ pub async fn analyze_diff(
 
     // Codex has strict input size limits (10MB). Fail early if exceeded.
     if provider == Some("codex") && prompt.len() > CODEX_MAX_BYTES {
+        let size_mb = (prompt.len() as f64) / (1024.0 * 1024.0);
+        let limit_mb = CODEX_MAX_BYTES / (1024 * 1024);
         return Err(format!(
-            "Changeset too large for Codex ({} bytes, limit {}). Try fewer files or a smaller diff range.",
-            prompt.len(),
-            CODEX_MAX_BYTES
+            "Changeset too large for Codex ({:.2}MB, {}MB input limit). Try fewer files or a smaller diff range.",
+            size_mb,
+            limit_mb
         ));
     }
 
