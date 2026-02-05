@@ -43,6 +43,7 @@
 
   // Subpath suggestions
   let subpathInputFocused = $state(false);
+  let showSubpathDropdown = $state(false);
   let subpathSuggestions = $state<DirEntry[]>([]);
   let subpathSelectedIndex = $state(0);
   let subpathSearchTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -138,9 +139,9 @@
     };
   }
 
-  // Reload the directory listing whenever subpath or focus changes
+  // Reload the directory listing whenever subpath changes while dropdown is visible
   $effect(() => {
-    if (!selectedRepo || step !== 'config' || !subpathInputFocused) {
+    if (!selectedRepo || step !== 'config' || !showSubpathDropdown) {
       subpathSuggestions = [];
       return;
     }
@@ -171,6 +172,8 @@
     // Fill the full relative path and append "/" so the next level loads immediately
     subpath = entry.path.replace(selectedRepo! + '/', '') + '/';
     subpathSelectedIndex = 0;
+    // Hide the dropdown after selection
+    showSubpathDropdown = false;
   }
 
   // Arrow/Enter navigation within the suggestion dropdown — lives on the input itself
@@ -193,8 +196,25 @@
     } else if (e.key === 'Escape') {
       e.preventDefault();
       e.stopPropagation();
+      showSubpathDropdown = false;
       subpathInputFocused = false;
     }
+  }
+
+  function handleSubpathInput() {
+    // Show dropdown when user starts typing
+    showSubpathDropdown = true;
+  }
+
+  function handleSubpathFocus() {
+    subpathInputFocused = true;
+    // Don't show dropdown on focus - wait for user to type
+    showSubpathDropdown = false;
+  }
+
+  function handleSubpathBlur() {
+    subpathInputFocused = false;
+    showSubpathDropdown = false;
   }
 
   function selectRepo(path: string) {
@@ -414,11 +434,12 @@
             autocorrect="off"
             autocapitalize="off"
             spellcheck="false"
-            onfocus={() => (subpathInputFocused = true)}
-            onblur={() => (subpathInputFocused = false)}
+            onfocus={handleSubpathFocus}
+            onblur={handleSubpathBlur}
+            oninput={handleSubpathInput}
             onkeydown={handleSubpathKeydown}
           />
-          {#if subpathInputFocused && filteredSubpathSuggestions.length > 0}
+          {#if showSubpathDropdown && filteredSubpathSuggestions.length > 0}
             <div class="subpath-suggestions">
               {#each filteredSubpathSuggestions as entry, index (entry.path)}
                 <button
