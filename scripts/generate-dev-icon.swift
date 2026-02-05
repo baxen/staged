@@ -92,25 +92,16 @@ repeat {
     fontSize -= 1
 } while lines.count > 2 && fontSize > 8
 
-// Calculate text dimensions using visual bounds for accurate sizing
+// Calculate text dimensions using typographic metrics
 let lineHeight = (lines.first! as NSString).size(withAttributes: attributes).height
 let textHeight = lineHeight * CGFloat(lines.count)
+let maxLineWidth = lines.map { ($0 as NSString).size(withAttributes: attributes).width }.max() ?? 0
 
-// Get visual bounds for each line to determine badge width
-let lineVisualBounds = lines.map { line in
-    (line as NSString).boundingRect(
-        with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
-        options: [.usesDeviceMetrics],
-        attributes: attributes
-    )
-}
-let maxVisualWidth = lineVisualBounds.map { $0.width }.max() ?? 0
-
-// Badge dimensions based on visual text width
+// Badge dimensions based on text
 let badgeHeight = textHeight + padding * 2
 let cornerRadius = badgeHeight * 0.2
-let badgeWidth = maxVisualWidth + padding * 4
-let badgeX = size.width - badgeWidth - padding
+let badgeWidth = maxLineWidth + padding * 4
+let badgeX = (size.width - badgeWidth) / 2
 let badgeY = padding + size.height * 0.05  // Raised slightly higher
 
 // Draw badge background (dark semi-transparent, no border)
@@ -121,9 +112,8 @@ badgePath.fill()
 
 // Draw text centered in badge (multiple lines, bottom to top)
 for (index, line) in lines.reversed().enumerated() {
-    let visualBounds = lineVisualBounds[lines.count - 1 - index]
-    // Center the visual bounds within the badge
-    let textX = badgeX + (badgeWidth - visualBounds.width) / 2 - visualBounds.origin.x
+    let lineSize = (line as NSString).size(withAttributes: attributes)
+    let textX = badgeX + (badgeWidth - lineSize.width) / 2
     let textY = badgeY + padding + lineHeight * CGFloat(index)
     (line as NSString).draw(at: NSPoint(x: textX, y: textY), withAttributes: attributes)
 }
