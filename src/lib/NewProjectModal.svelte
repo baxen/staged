@@ -209,7 +209,8 @@
 
   function handleSubpathFocus() {
     subpathInputFocused = true;
-    // Don't auto-show dropdown on focus - wait for user to type
+    // Show dropdown immediately on focus to display available directories
+    showSubpathDropdown = true;
   }
 
   function handleSubpathBlur() {
