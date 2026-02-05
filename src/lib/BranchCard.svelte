@@ -1209,9 +1209,9 @@
   .timeline-line {
     flex: 1;
     width: 2px;
-    min-height: 16px;
+    min-height: 12px;
     background-color: var(--border-subtle);
-    margin-top: 4px;
+    margin-top: 2px;
   }
 
   .timeline-content {
@@ -1265,6 +1265,8 @@
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
     color: var(--text-faint);
     white-space: nowrap;
+    display: flex;
+    align-items: center;
   }
 
   .timeline-time {
@@ -1272,6 +1274,9 @@
     color: var(--text-faint);
     white-space: nowrap;
     text-align: right;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
   }
 
   .skeleton-meta {
