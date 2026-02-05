@@ -22,9 +22,10 @@
 
   interface Props {
     onViewDiff?: (repoPath: string, spec: DiffSpec, label: string) => void;
+    onNewBranchRequest?: (trigger: () => void) => void;
   }
 
-  let { onViewDiff }: Props = $props();
+  let { onViewDiff, onNewBranchRequest }: Props = $props();
 
   // State
   let branches = $state<Branch[]>([]);
@@ -38,6 +39,13 @@
   // Modal state
   let showNewBranchModal = $state(false);
   let branchToDelete = $state<Branch | null>(null);
+
+  // Expose the new branch trigger to parent
+  $effect(() => {
+    onNewBranchRequest?.(() => {
+      showNewBranchModal = true;
+    });
+  });
 
   // Group branches by repo path
   let branchesByRepo = $derived.by(() => {
@@ -233,7 +241,7 @@
           </div>
         {/each}
 
-        <!-- New branch button at the bottom -->
+        <!-- New branch button at bottom -->
         <div class="new-branch-section">
           <button class="new-branch-button" onclick={handleNewBranch}>
             <Plus size={16} />
@@ -274,7 +282,7 @@
   .content {
     flex: 1;
     overflow: auto;
-    padding: 24px;
+    padding: 12px 24px 24px;
   }
 
   .loading-state,
@@ -382,7 +390,7 @@
     gap: 12px;
   }
 
-  /* New branch section */
+  /* New branch button at bottom */
   .new-branch-section {
     display: flex;
     justify-content: center;
