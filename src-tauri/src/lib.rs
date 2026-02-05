@@ -1751,25 +1751,26 @@ fn build_branch_context(store: &Store, branch: &Branch) -> Result<String, String
         });
     }
 
-    // Add notes (with truncation for long content)
-    for note in &completed_notes {
+    // Add notes with file path references
+    for (note, file_path) in completed_notes.iter().zip(note_files.iter()) {
         let ts = note.created_at / 1000; // Convert ms to seconds
-        let mut line = format!("- **Note**: \"{}\"", note.title);
 
-        // Include content inline (truncated if long)
+        // Include content inline (truncated if long) with file path for full access
         let max_len = 2000;
-        if note.content.len() <= max_len {
-            line.push_str(&format!(
-                "\n  <note-content>\n{}\n  </note-content>",
-                note.content
-            ));
+        let line = if note.content.len() <= max_len {
+            format!(
+                "- **Note**: \"{}\"\n  <note-content>\n{}\n  </note-content>",
+                note.title, note.content
+            )
         } else {
-            line.push_str(&format!(
-                "\n  <note-content truncated=\"true\">\n{}\n  ... (truncated — {} chars total)\n  </note-content>",
+            format!(
+                "- **Note**: \"{}\"\n  <note-content truncated=\"true\">\n{}\n  ... (truncated — {} chars total)\n  </note-content>\n  - Full content: `{}`",
+                note.title,
                 &note.content[..max_len],
-                note.content.len()
-            ));
-        }
+                note.content.len(),
+                file_path.path
+            )
+        };
 
         entries.push(TimelineEntry {
             timestamp: ts,
@@ -1794,9 +1795,10 @@ fn build_branch_context(store: &Store, branch: &Branch) -> Result<String, String
 }
 
 /// A note file path result (internal use).
-#[allow(dead_code)]
 struct NoteFilePath {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     title: String,
     path: String,
 }
