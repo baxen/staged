@@ -22,6 +22,7 @@
     MoreVertical,
     ExternalLink,
     AlertCircle,
+    GitPullRequest,
   } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession, BranchNote, OpenerApp } from './services/branch';
   import * as branchService from './services/branch';
@@ -30,6 +31,8 @@
   import NewNoteModal from './NewNoteModal.svelte';
   import NoteViewerModal from './NoteViewerModal.svelte';
   import BaseBranchPickerModal from './BaseBranchPickerModal.svelte';
+  import CreatePrModal from './CreatePrModal.svelte';
+  import { openUrl } from './services/window';
 
   interface Props {
     branch: Branch;
@@ -132,6 +135,9 @@
 
   // Base branch picker modal state
   let showBaseBranchPicker = $state(false);
+
+  // Create PR modal state
+  let showCreatePrModal = $state(false);
 
   // Dropdown state
   let showNewDropdown = $state(false);
@@ -760,6 +766,17 @@
   </div>
 
   <div class="card-footer">
+    <button
+      class="pr-button"
+      onclick={() => (showCreatePrModal = true)}
+      disabled={commits.length === 0}
+      title={commits.length === 0
+        ? 'No commits to create PR from'
+        : 'Create or update pull request'}
+    >
+      <GitPullRequest size={14} />
+      PR
+    </button>
     <div class="new-dropdown-container">
       <button
         class="new-button"
@@ -825,6 +842,19 @@
     {branch}
     onClose={() => (showBaseBranchPicker = false)}
     onSelected={handleBaseBranchChanged}
+  />
+{/if}
+
+<!-- Create PR modal -->
+{#if showCreatePrModal}
+  <CreatePrModal
+    {branch}
+    {commits}
+    on:close={() => (showCreatePrModal = false)}
+    on:created={(e) => {
+      showCreatePrModal = false;
+      openUrl(e.detail.url);
+    }}
   />
 {/if}
 
@@ -1311,8 +1341,34 @@
   .card-footer {
     display: flex;
     justify-content: flex-end;
+    gap: 8px;
     padding: 12px 16px;
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .pr-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .pr-button:hover:not(:disabled) {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
+  }
+
+  .pr-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   .new-dropdown-container {
