@@ -1195,7 +1195,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 4px 8px;
+    padding: 6px 8px;
     margin: 0 -8px;
     background: transparent;
     border: none;
@@ -1240,6 +1240,7 @@
   .timeline-line {
     flex: 1;
     width: 2px;
+    min-height: 6px;
     background-color: var(--border-subtle);
   }
 
