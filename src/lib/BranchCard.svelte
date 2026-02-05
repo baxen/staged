@@ -440,6 +440,15 @@
     }
   }
 
+  async function handleCopyPath() {
+    showOpenInDropdown = false;
+    try {
+      await branchService.copyPathToClipboard(branch.worktreePath);
+    } catch (e) {
+      console.error('Failed to copy path:', e);
+    }
+  }
+
   function toggleOpenInDropdown(e: MouseEvent) {
     e.stopPropagation();
     showOpenInDropdown = !showOpenInDropdown;
@@ -528,9 +537,7 @@
       {#if openerApps.length > 0}
         <div class="open-in-container">
           <button class="open-button" onclick={toggleOpenInDropdown} title="Open in...">
-            <ExternalLink size={13} />
-            Open
-            <ChevronDown size={12} />
+            <ExternalLink size={13} /> Open <ChevronDown size={12} />
           </button>
           {#if showOpenInDropdown}
             <div class="open-in-dropdown">
@@ -539,6 +546,7 @@
                   {app.name}
                 </button>
               {/each}
+              <button class="open-in-item" onclick={handleCopyPath}> Copy Path </button>
             </div>
           {/if}
         </div>
