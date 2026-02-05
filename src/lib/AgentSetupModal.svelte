@@ -28,13 +28,13 @@
       id: 'claude',
       label: 'Claude Code',
       description: 'AI coding assistant by Anthropic',
-      installUrl: 'https://github.com/zed-industries/claude-code-acp',
+      installUrl: 'https://github.com/zed-industries/claude-code-acp#installation',
     },
     {
       id: 'codex',
       label: 'Codex',
       description: 'AI coding agent by OpenAI',
-      installUrl: 'https://github.com/zed-industries/codex-acp',
+      installUrl: 'https://github.com/zed-industries/codex-acp#installation',
     },
   ];
 

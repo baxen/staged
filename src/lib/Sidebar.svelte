@@ -1470,7 +1470,7 @@
         <p class="error-message">{analysisErrorMessage}</p>
         {#if showCodexSizeHint}
           <p class="error-hint">
-            Codex has a 10MB input limit. Try analyzing fewer files or a smaller diff range.
+            Codex has a 9MB input limit. Try analyzing fewer files or a smaller diff range.
           </p>
         {/if}
       </div>

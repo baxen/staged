@@ -142,7 +142,9 @@ fn verify_command(path: &Path) -> bool {
         }
     }
 
-    // If --version fails, try --help (works for codex-acp)
+    // If --version fails, try --help.
+    // codex-acp doesn't implement --version but does respond to --help,
+    // so this avoids false negatives when checking availability.
     if let Ok(output) = std::process::Command::new(path).arg("--help").output() {
         if output.status.success() {
             return true;

@@ -119,6 +119,8 @@ pub fn build_prompt_with_strategy_for_provider(
     );
     let prompt = build_tier2_prompt(files);
 
+    // Note: For Codex, byte-size validation for Tier 2 happens in runner.rs so
+    // we can surface a clear error to the UI. There's no smaller tier here.
     (prompt, PromptStrategy::DiffOnly)
 }
 
@@ -346,6 +348,19 @@ pub fn build_unified_changeset_prompt(files: &[(&str, &str, &str)]) -> String {
 mod tests {
     use super::*;
 
+    fn oversized_file_input() -> FileAnalysisInput {
+        let oversized_content = "a".repeat(CODEX_MAX_BYTES + 1024);
+
+        FileAnalysisInput {
+            path: "src/huge.rs".to_string(),
+            diff: "@@ -1,1 +1,1 @@\n-old\n+new".to_string(),
+            after_content: Some(oversized_content),
+            is_new_file: false,
+            is_deleted: false,
+            after_line_count: 1,
+        }
+    }
+
     #[test]
     fn test_build_prompt_small_changeset() {
         let files = vec![FileAnalysisInput {
@@ -452,5 +467,27 @@ mod tests {
         assert_eq!(strategy, PromptStrategy::FullContext);
         assert!(prompt.contains("### Diff:"));
         assert!(!prompt.contains("### Full Content (after):"));
+    }
+
+    #[test]
+    fn test_codex_large_prompt_falls_back_to_tier2() {
+        let files = vec![oversized_file_input()];
+
+        let (prompt, strategy) = build_prompt_with_strategy_for_provider(&files, Some("codex"));
+
+        assert_eq!(strategy, PromptStrategy::DiffOnly);
+        assert!(prompt.contains("unified diffs only"));
+        assert!(!prompt.contains("### Full Content (after):"));
+    }
+
+    #[test]
+    fn test_non_codex_large_prompt_keeps_tier1() {
+        let files = vec![oversized_file_input()];
+
+        let (prompt, strategy) = build_prompt_with_strategy_for_provider(&files, Some("claude"));
+
+        assert_eq!(strategy, PromptStrategy::FullContext);
+        assert!(prompt.len() > CODEX_MAX_BYTES);
+        assert!(prompt.contains("### Full Content (after):"));
     }
 }
