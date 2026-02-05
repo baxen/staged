@@ -38,7 +38,7 @@
       // Use the existing note infrastructure with a special title
       const response = await branchService.startBranchNote(
         branch.id,
-        '📝 Code Review',
+        'Code Review',
         reviewPrompt,
         selectedProvider
       );

@@ -752,7 +752,7 @@
             >
               <div class="timeline-marker">
                 <div class="timeline-icon note-icon">
-                  {#if item.note.title.startsWith('📝 Code Review')}
+                  {#if item.note.title.startsWith('Code Review')}
                     <FileSearch size={12} />
                   {:else}
                     <FileText size={12} />
