@@ -25,12 +25,18 @@ export interface PaneDimensions {
   contentHeight: number;
   /** Height of a single line */
   lineHeight: number;
+  /** Width of the visible viewport */
+  viewportWidth?: number;
+  /** Total width of content (max line width) */
+  contentWidth?: number;
 }
 
 /** State returned by the controller */
 export interface ScrollState {
   beforeScrollY: number;
   afterScrollY: number;
+  beforeScrollX: number;
+  afterScrollX: number;
 }
 
 /**
@@ -99,13 +105,25 @@ export function createScrollController() {
   // Current scroll positions
   let beforeScrollY = $state(0);
   let afterScrollY = $state(0);
+  let beforeScrollX = $state(0);
+  let afterScrollX = $state(0);
 
   /**
-   * Clamp a scroll position to valid bounds.
+   * Clamp a vertical scroll position to valid bounds.
    */
   function clampScroll(scrollY: number, dims: PaneDimensions): number {
     const maxScroll = Math.max(0, dims.contentHeight - dims.viewportHeight);
     return Math.max(0, Math.min(maxScroll, scrollY));
+  }
+
+  /**
+   * Clamp a horizontal scroll position to valid bounds.
+   */
+  function clampScrollX(scrollX: number, dims: PaneDimensions): number {
+    const viewportWidth = dims.viewportWidth ?? 0;
+    const contentWidth = dims.contentWidth ?? 0;
+    const maxScroll = Math.max(0, contentWidth - viewportWidth);
+    return Math.max(0, Math.min(maxScroll, scrollX));
   }
 
   /**
@@ -171,6 +189,12 @@ export function createScrollController() {
     get afterScrollY() {
       return afterScrollY;
     },
+    get beforeScrollX() {
+      return beforeScrollX;
+    },
+    get afterScrollX() {
+      return afterScrollX;
+    },
 
     /**
      * Update alignments when diff content changes.
@@ -188,6 +212,8 @@ export function createScrollController() {
         currentFilePath = filePath ?? null;
         beforeScrollY = 0;
         afterScrollY = 0;
+        beforeScrollX = 0;
+        afterScrollX = 0;
       } else {
         // Content refresh - clamp scroll to new bounds but preserve position
         beforeScrollY = clampScroll(beforeScrollY, beforeDims);
@@ -224,6 +250,26 @@ export function createScrollController() {
     },
 
     /**
+     * Scroll horizontally by a delta amount.
+     * Horizontal scroll is independent for each pane (no alignment sync needed).
+     */
+    scrollByX(side: 'before' | 'after', deltaX: number) {
+      if (side === 'before') {
+        beforeScrollX = clampScrollX(beforeScrollX + deltaX, beforeDims);
+      } else {
+        afterScrollX = clampScrollX(afterScrollX + deltaX, afterDims);
+      }
+    },
+
+    /**
+     * Scroll both panes horizontally by the same amount.
+     */
+    scrollByXBoth(deltaX: number) {
+      beforeScrollX = clampScrollX(beforeScrollX + deltaX, beforeDims);
+      afterScrollX = clampScrollX(afterScrollX + deltaX, afterDims);
+    },
+
+    /**
      * Set scroll position directly. Updates both panes in sync.
      */
     scrollTo(side: 'before' | 'after', scrollY: number) {
@@ -251,11 +297,13 @@ export function createScrollController() {
     },
 
     /**
-     * Reset scroll positions to top.
+     * Reset scroll positions to top/left.
      */
     reset() {
       beforeScrollY = 0;
       afterScrollY = 0;
+      beforeScrollX = 0;
+      afterScrollX = 0;
     },
 
     /**
