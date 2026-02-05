@@ -86,6 +86,7 @@ pub fn create_worktree(
 /// - Normal case: directory exists and git knows about it
 /// - Directory deleted: just prune stale git references
 /// - Git references deleted: just remove the orphaned directory
+/// - Directory not empty: git can't remove due to untracked files (node_modules, etc.)
 pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> Result<(), GitError> {
     if worktree_path.exists() {
         // Worktree directory exists on disk - try to remove it normally
@@ -97,12 +98,17 @@ pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> Result<(), GitError
         let result = cli::run(repo, &["worktree", "remove", worktree_str, "--force"]);
 
         if let Err(e) = result {
+            let error_msg = e.to_string();
+
             // If git doesn't recognize it as a worktree (admin files already deleted),
-            // just remove the directory manually
-            if e.to_string().contains("is not a working tree") {
+            // or if directory is not empty (untracked files like node_modules),
+            // remove the directory manually
+            if error_msg.contains("is not a working tree")
+                || error_msg.contains("Directory not empty")
+            {
                 std::fs::remove_dir_all(worktree_path).map_err(|io_err| {
                     GitError::CommandFailed(format!(
-                        "Failed to remove orphaned worktree directory: {}",
+                        "Failed to remove worktree directory: {}",
                         io_err
                     ))
                 })?;
