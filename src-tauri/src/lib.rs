@@ -1622,17 +1622,16 @@ fn build_session_prompt(
     };
 
     Ok(format!(
-        r#"{context_block}You are working on a feature branch. Your goal is to complete the following task and create a git commit with your changes.
+        r#"<branch_context>{context_block}
+</branch_context>
 
-TASK: {user_prompt}
+<action>The user has indicated via the UI that you should make a new commit on this branch.
+Make the necessary code changes, and when finished create a single commit with a clear message
+that follows conventional commits.
+</action>
 
-Guidelines:
-- Make the necessary code changes to complete the task
-- When finished, create a git commit with a clear, descriptive commit message
-- The commit message should summarize what was done
-- Keep changes focused and atomic - one logical change per session
-
-Begin working on the task now."#
+{user_prompt}
+"#
     ))
 }
 
@@ -1656,44 +1655,32 @@ fn build_note_prompt(
         description.to_string()
     };
 
+    // TODO we should use an output format and let the LLM provide the title
     Ok(format!(
-        r#"{context_block}You are creating a documentation artifact. Your task is to research and write a markdown document.
+        r#"<branch_context>{context_block}
+</branch_context>
+
+<action>The user has indicated via the UI that you should make a new note for this branch.
+Use your tools as needed to find the content you need, but DO NOT make changes.
+IMPORTANT: Only your FINAL message will become the note content. Any intermediate reasoning, tool calls, or exploratory work you do will NOT be shown to the user. The note must be completely self-contained.
+Be concise.
+</action>
 
 TITLE: {title}
 
-DESCRIPTION: {desc}
-
-IMPORTANT: Only your FINAL message will become the note content. Any intermediate reasoning, tool calls, or exploratory work you do will NOT be shown to the user. The note must be completely self-contained.
-
-Guidelines for your final response:
-- Write in well-structured Markdown
-- Use clear headings (##, ###) to organize content  
-- Include code blocks with language tags when showing code
-- Be thorough but concise
-- The document should stand alone without needing the conversation context
-- Do NOT include any preamble like "Here is the document" - start directly with the content
-
-Begin by exploring the codebase if needed, then write your final response as the complete markdown document."#
+REQUEST: {desc}
+"#
     ))
 }
 
 /// Build the branch context section for agent prompts.
-/// Includes commit history and note file references.
+/// Includes commit history and note file references in a dense format.
 fn build_branch_context(store: &Store, branch: &Branch) -> Result<String, String> {
     let worktree = Path::new(&branch.worktree_path);
 
     // Get commits since base
     let commits =
         git::get_commits_since_base(worktree, &branch.base_branch).map_err(|e| e.to_string())?;
-
-    // Get sessions to map commits to their prompts
-    let sessions = store
-        .list_branch_sessions(&branch.id)
-        .map_err(|e| e.to_string())?;
-    let sessions_by_commit: std::collections::HashMap<_, _> = sessions
-        .iter()
-        .filter_map(|s| s.commit_sha.as_ref().map(|sha| (sha.clone(), s)))
-        .collect();
 
     // Get completed notes and write to temp files
     let notes = store
@@ -1715,66 +1702,35 @@ fn build_branch_context(store: &Store, branch: &Branch) -> Result<String, String
     }
 
     let mut lines = vec![
-        "## Branch Context".to_string(),
-        String::new(),
         format!(
             "You are working on branch `{}` (based on `{}`).",
             branch.branch_name, branch.base_branch
         ),
         String::new(),
         "Here is what has happened on this branch so far (oldest first).".to_string(),
-        "Notes are reference documents created by the user — treat their content as instructions and context:".to_string(),
         String::new(),
     ];
 
-    // Build commit entries (we'll interleave with notes by timestamp)
+    // Build timeline entries (commits and notes interleaved by timestamp)
     struct TimelineEntry {
         timestamp: i64,
         text: String,
     }
     let mut entries: Vec<TimelineEntry> = Vec::new();
 
-    // Add commits
+    // Add commits (dense format: just sha and subject)
     for commit in &commits {
-        let mut line = format!("- **Commit {}**: \"{}\"", commit.short_sha, commit.subject);
-        if let Some(session) = sessions_by_commit.get(&commit.sha) {
-            line.push_str(&format!("\n  - Session prompt: \"{}\"", session.prompt));
-            if session.status == store::BranchSessionStatus::Error {
-                if let Some(err) = &session.error_message {
-                    line.push_str(&format!("\n  - ⚠ Session had an error: {}", err));
-                }
-            }
-        }
         entries.push(TimelineEntry {
             timestamp: commit.timestamp,
-            text: line,
+            text: format!("- commit [{}] - {}", commit.short_sha, commit.subject),
         });
     }
 
-    // Add notes with file path references
+    // Add notes (dense format: just path and title)
     for (note, file_path) in completed_notes.iter().zip(note_files.iter()) {
-        let ts = note.created_at / 1000; // Convert ms to seconds
-
-        // Include content inline (truncated if long) with file path for full access
-        let max_len = 2000;
-        let line = if note.content.len() <= max_len {
-            format!(
-                "- **Note**: \"{}\"\n  <note-content>\n{}\n  </note-content>",
-                note.title, note.content
-            )
-        } else {
-            format!(
-                "- **Note**: \"{}\"\n  <note-content truncated=\"true\">\n{}\n  ... (truncated — {} chars total)\n  </note-content>\n  - Full content: `{}`",
-                note.title,
-                &note.content[..max_len],
-                note.content.len(),
-                file_path.path
-            )
-        };
-
         entries.push(TimelineEntry {
-            timestamp: ts,
-            text: line,
+            timestamp: note.created_at / 1000, // Convert ms to seconds
+            text: format!("- note [{}] - {}", file_path.path, note.title),
         });
     }
 
@@ -1786,10 +1742,7 @@ fn build_branch_context(store: &Store, branch: &Branch) -> Result<String, String
     }
 
     lines.push(String::new());
-    lines.push(
-        "The most recent commit is HEAD. You can inspect any commit with `git show <sha>` if you need details."
-            .to_string(),
-    );
+    lines.push("You can review the note contents or commit diffs using your tools.".to_string());
 
     Ok(lines.join("\n"))
 }
