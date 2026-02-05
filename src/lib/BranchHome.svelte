@@ -38,6 +38,11 @@
   // Failed branch creations (to show error state)
   let failedBranches = $state<Map<string, string>>(new Map());
 
+  // Branches currently being deleted (show spinner)
+  let deletingBranchIds = $state<Set<string>>(new Set());
+  // Failed branch deletions (to show error state)
+  let deleteErrors = $state<Map<string, string>>(new Map());
+
   // Event listener cleanup
   let unlistenStatus: UnlistenFn | null = null;
 
@@ -187,14 +192,31 @@
   async function confirmDeleteBranch() {
     if (!branchToDelete) return;
 
+    const id = branchToDelete.id;
+    // Close dialog and show spinner immediately
+    branchToDelete = null;
+    deletingBranchIds = new Set(deletingBranchIds).add(id);
+
     try {
-      await branchService.deleteBranch(branchToDelete.id);
-      branches = branches.filter((b) => b.id !== branchToDelete!.id);
+      await branchService.deleteBranch(id);
+      // Success: remove branch and spinner
+      branches = branches.filter((b) => b.id !== id);
+      const newDeleting = new Set(deletingBranchIds);
+      newDeleting.delete(id);
+      deletingBranchIds = newDeleting;
     } catch (e) {
-      console.error('Failed to delete branch:', e);
-    } finally {
-      branchToDelete = null;
+      // Failure: remove spinner, show error card
+      const newDeleting = new Set(deletingBranchIds);
+      newDeleting.delete(id);
+      deletingBranchIds = newDeleting;
+      deleteErrors = new Map(deleteErrors).set(id, e instanceof Error ? e.message : String(e));
     }
+  }
+
+  function dismissDeleteError(branchId: string) {
+    const newErrors = new Map(deleteErrors);
+    newErrors.delete(branchId);
+    deleteErrors = newErrors;
   }
 
   function handleViewDiff(branch: Branch) {
@@ -282,13 +304,50 @@
             </div>
             <div class="branches-list">
               {#each repoBranches as branch (branch.id)}
-                <BranchCard
-                  {branch}
-                  {refreshKey}
-                  onViewDiff={() => handleViewDiff(branch)}
-                  onViewCommitDiff={(sha) => handleViewCommitDiff(branch, sha)}
-                  onDelete={() => handleDeleteBranch(branch.id)}
-                />
+                {@const isDeleting = deletingBranchIds.has(branch.id)}
+                {@const deleteFailed = deleteErrors.get(branch.id)}
+                {#if isDeleting || deleteFailed}
+                  <div class="pending-branch-card" class:failed={!!deleteFailed}>
+                    <div class="pending-header">
+                      <div class="pending-info">
+                        <GitBranch size={16} class="pending-branch-icon" />
+                        <span class="pending-branch-name">{branch.branchName}</span>
+                        <span class="pending-separator">›</span>
+                        <span class="pending-base-branch">{branch.baseBranch.replace(/^origin\//, '')}</span>
+                      </div>
+                      {#if deleteFailed}
+                        <button
+                          class="dismiss-button"
+                          onclick={() => dismissDeleteError(branch.id)}
+                          title="Dismiss"
+                        >
+                          <X size={14} />
+                        </button>
+                      {/if}
+                    </div>
+                    <div class="pending-content">
+                      {#if deleteFailed}
+                        <div class="pending-error">
+                          <span class="error-label">Failed to delete branch:</span>
+                          <span class="error-message">{deleteFailed}</span>
+                        </div>
+                      {:else}
+                        <div class="pending-status">
+                          <Loader2 size={14} class="spinner" />
+                          <span>Removing worktree...</span>
+                        </div>
+                      {/if}
+                    </div>
+                  </div>
+                {:else}
+                  <BranchCard
+                    {branch}
+                    {refreshKey}
+                    onViewDiff={() => handleViewDiff(branch)}
+                    onViewCommitDiff={(sha) => handleViewCommitDiff(branch, sha)}
+                    onDelete={() => handleDeleteBranch(branch.id)}
+                  />
+                {/if}
               {/each}
               <!-- Pending branches (being created) -->
               {#each repoPending as pending (pendingKey(pending))}
