@@ -38,7 +38,6 @@
   import NewSessionModal from './NewSessionModal.svelte';
   import NewNoteModal from './NewNoteModal.svelte';
   import NewReviewModal from './NewReviewModal.svelte';
-  import NoteViewerModal from './NoteViewerModal.svelte';
   import BaseBranchPickerModal from './BaseBranchPickerModal.svelte';
   import CreatePrModal from './CreatePrModal.svelte';
   import { openUrl } from './services/window';
@@ -126,15 +125,11 @@
     return items;
   });
 
-  // Session viewer modal state
+  // Session viewer modal state (used for both commits and notes)
   let showSessionViewer = $state(false);
-  let viewingSession = $state<BranchSession | null>(null);
+  let viewingSessionId = $state<string | null>(null);
+  let viewingSessionTitle = $state<string>('');
   let isViewingLive = $state(false);
-
-  // Note viewer modal state
-  let showNoteViewer = $state(false);
-  let viewingNote = $state<BranchNote | null>(null);
-  let isNoteGenerating = $state(false);
 
   // Continue session modal state
   let showContinueModal = $state(false);
@@ -282,34 +277,36 @@
 
   function handleWatchSession() {
     if (runningSession?.aiSessionId) {
-      viewingSession = runningSession;
+      viewingSessionId = runningSession.aiSessionId;
+      viewingSessionTitle = runningSession.prompt;
       isViewingLive = true;
       showSessionViewer = true;
     }
   }
 
   function handleViewSession(session: BranchSession) {
-    viewingSession = session;
-    isViewingLive = false;
-    showSessionViewer = true;
+    if (session.aiSessionId) {
+      viewingSessionId = session.aiSessionId;
+      viewingSessionTitle = session.prompt;
+      isViewingLive = false;
+      showSessionViewer = true;
+    }
+  }
+
+  function handleViewNote(note: BranchNote, generating: boolean = false) {
+    if (note.aiSessionId) {
+      viewingSessionId = note.aiSessionId;
+      viewingSessionTitle = note.title;
+      isViewingLive = generating;
+      showSessionViewer = true;
+    }
   }
 
   function closeSessionViewer() {
     showSessionViewer = false;
-    viewingSession = null;
+    viewingSessionId = null;
+    viewingSessionTitle = '';
     isViewingLive = false;
-  }
-
-  function handleViewNote(note: BranchNote, generating: boolean = false) {
-    viewingNote = note;
-    isNoteGenerating = generating;
-    showNoteViewer = true;
-  }
-
-  function closeNoteViewer() {
-    showNoteViewer = false;
-    viewingNote = null;
-    isNoteGenerating = false;
   }
 
   function handleSessionStarted(branchSessionId: string, aiSessionId: string) {
@@ -885,29 +882,13 @@
   </div>
 </div>
 
-<!-- Session viewer modal -->
-{#if showSessionViewer && viewingSession?.aiSessionId}
+<!-- Session viewer modal (used for both commits and notes) -->
+{#if showSessionViewer && viewingSessionId}
   <SessionViewerModal
-    sessionId={viewingSession.aiSessionId}
-    title={viewingSession.prompt}
+    sessionId={viewingSessionId}
+    title={viewingSessionTitle}
     isLive={isViewingLive}
     onClose={closeSessionViewer}
-  />
-{/if}
-
-<!-- Note viewer modal -->
-{#if showNoteViewer && viewingNote}
-  <NoteViewerModal
-    note={viewingNote}
-    isLive={isNoteGenerating}
-    onClose={closeNoteViewer}
-    onViewSession={(sessionId, title) => {
-      closeNoteViewer();
-      // Create a temporary session object to reuse the session viewer
-      viewingSession = { aiSessionId: sessionId, prompt: title } as BranchSession;
-      isViewingLive = false;
-      showSessionViewer = true;
-    }}
   />
 {/if}
 
