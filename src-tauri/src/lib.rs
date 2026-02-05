@@ -1914,6 +1914,86 @@ fn delete_branch_note(state: State<'_, Arc<Store>>, note_id: String) -> Result<(
         .map_err(|e| e.to_string())
 }
 
+/// A note to be written to a temp file for agent context.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteForContext {
+    id: String,
+    title: String,
+    content: String,
+}
+
+/// A note file path result.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct NoteFilePath {
+    id: String,
+    title: String,
+    path: String,
+}
+
+/// Write branch notes to temp files for agent context.
+///
+/// Notes are written to a temp directory outside the workspace to avoid
+/// accidentally committing them. Returns the paths to the created files.
+/// The temp directory is created under the system temp dir with a unique
+/// name based on the branch ID.
+#[tauri::command(rename_all = "camelCase")]
+fn write_notes_to_temp(
+    branch_id: String,
+    notes: Vec<NoteForContext>,
+) -> Result<Vec<NoteFilePath>, String> {
+    if notes.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Create a temp directory for this branch's notes
+    // Using a stable path based on branch_id so we can clean up old files
+    let temp_dir = std::env::temp_dir().join("staged-notes").join(&branch_id);
+
+    // Clean up any existing files from previous sessions
+    if temp_dir.exists() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    let mut results = Vec::new();
+
+    for note in notes {
+        // Create a safe filename from the title
+        let safe_title: String = note
+            .title
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(50)
+            .collect();
+        let filename = format!("{}-{}.md", safe_title, &note.id[..8.min(note.id.len())]);
+        let file_path = temp_dir.join(&filename);
+
+        // Write the note content with a header
+        let content = format!("# {}\n\n{}\n", note.title, note.content);
+
+        std::fs::write(&file_path, &content)
+            .map_err(|e| format!("Failed to write note file: {}", e))?;
+
+        results.push(NoteFilePath {
+            id: note.id,
+            title: note.title,
+            path: file_path.to_string_lossy().to_string(),
+        });
+    }
+
+    Ok(results)
+}
+
 /// Recover an orphaned note for a branch.
 /// If there's a "generating" note but the AI session is idle, extracts the final
 /// message content and marks the note as complete.
@@ -2600,6 +2680,7 @@ pub fn run() {
             fail_branch_note,
             delete_branch_note,
             recover_orphaned_note,
+            write_notes_to_temp,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

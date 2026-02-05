@@ -5,7 +5,13 @@
 -->
 <script lang="ts">
   import { X, FileText, Loader2 } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
+  import type {
+    Branch,
+    CommitInfo,
+    BranchSession,
+    BranchNote,
+    NoteFilePath,
+  } from './services/branch';
   import * as branchService from './services/branch';
   import { buildTimelineContext } from './services/timelineContext';
 
@@ -33,13 +39,14 @@
   let error = $state<string | null>(null);
 
   // Build the prompt for the AI - note-focused work
-  function buildPrompt(): string {
+  function buildPrompt(noteFiles: NoteFilePath[]): string {
     const context = buildTimelineContext({
+      branchId: branch.id,
       branchName: branch.branchName,
       baseBranch: branch.baseBranch,
       commits,
       sessionsByCommit,
-      notes,
+      noteFiles,
     });
 
     const contextBlock = context ? `${context}\n\n` : '';
@@ -75,7 +82,18 @@ Begin by exploring the codebase if needed, then write your final response as the
     error = null;
 
     try {
-      const prompt = buildPrompt();
+      // Write existing notes to temp files (outside workspace to avoid committing them)
+      const completedNotes = notes.filter((n) => n.status === 'complete' && n.content);
+      const noteFiles = await branchService.writeNotesToTemp(
+        branch.id,
+        completedNotes.map((n) => ({
+          id: n.id,
+          title: n.title,
+          content: n.content,
+        }))
+      );
+
+      const prompt = buildPrompt(noteFiles);
       const response = await branchService.startBranchNote(branch.id, title.trim(), prompt);
       onNoteStarted(response.branchNoteId, response.aiSessionId);
     } catch (e) {

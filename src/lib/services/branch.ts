@@ -392,3 +392,33 @@ export async function getAvailableOpeners(): Promise<OpenerApp[]> {
 export async function openInApp(path: string, appId: string): Promise<void> {
   return invoke<void>('open_in_app', { path, appId });
 }
+
+// =============================================================================
+// Note Context (for agent prompts)
+// =============================================================================
+
+/** A note to be written to a temp file */
+export interface NoteForContext {
+  id: string;
+  title: string;
+  content: string;
+}
+
+/** Result of writing a note to a temp file */
+export interface NoteFilePath {
+  id: string;
+  title: string;
+  path: string;
+}
+
+/**
+ * Write branch notes to temp files for agent context.
+ * Notes are written outside the workspace to avoid accidentally committing them.
+ * Returns the paths to the created files.
+ */
+export async function writeNotesToTemp(
+  branchId: string,
+  notes: NoteForContext[]
+): Promise<NoteFilePath[]> {
+  return invoke<NoteFilePath[]>('write_notes_to_temp', { branchId, notes });
+}

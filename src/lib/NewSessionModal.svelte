@@ -6,8 +6,14 @@
 -->
 <script lang="ts">
   import { X, GitBranch, Loader2, Send } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
-  import { startBranchSession } from './services/branch';
+  import type {
+    Branch,
+    CommitInfo,
+    BranchSession,
+    BranchNote,
+    NoteFilePath,
+  } from './services/branch';
+  import { startBranchSession, writeNotesToTemp } from './services/branch';
   import { buildTimelineContext } from './services/timelineContext';
 
   interface Props {
@@ -49,13 +55,14 @@
   }
 
   // Build the full prompt with instructions for commit-focused work
-  function buildCommitPrompt(userPrompt: string): string {
+  function buildCommitPrompt(userPrompt: string, noteFiles: NoteFilePath[]): string {
     const context = buildTimelineContext({
+      branchId: branch.id,
       branchName: branch.branchName,
       baseBranch: branch.baseBranch,
       commits,
       sessionsByCommit,
-      notes,
+      noteFiles,
     });
 
     const contextBlock = context ? `${context}\n\n` : '';
@@ -81,7 +88,19 @@ Begin working on the task now.`;
 
     try {
       const userPrompt = prompt.trim();
-      const fullPrompt = buildCommitPrompt(userPrompt);
+
+      // Write notes to temp files (outside workspace to avoid committing them)
+      const completedNotes = notes.filter((n) => n.status === 'complete' && n.content);
+      const noteFiles = await writeNotesToTemp(
+        branch.id,
+        completedNotes.map((n) => ({
+          id: n.id,
+          title: n.title,
+          content: n.content,
+        }))
+      );
+
+      const fullPrompt = buildCommitPrompt(userPrompt, noteFiles);
       const result = await startBranchSession(branch.id, userPrompt, fullPrompt);
 
       // Notify parent that session started
