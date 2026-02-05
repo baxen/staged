@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Plus, Sparkles, Folder, GitBranch, Loader2, X } from 'lucide-svelte';
+  import { Plus, Sparkles, Folder, GitBranch, Loader2, X, Trash2 } from 'lucide-svelte';
   import type { Branch, GitProject } from './services/branch';
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
@@ -61,8 +61,10 @@
     });
   });
 
+  // Project to delete (for confirmation dialog)
+  let projectToDelete = $state<GitProject | null>(null);
+
   // Group branches by project (including pending ones)
-  // Empty projects are filtered out at render time
   let branchesByProject = $derived.by(() => {
     const grouped = new Map<
       string,
@@ -280,6 +282,20 @@
     showNewProjectModal = false;
   }
 
+  async function confirmDeleteProject() {
+    if (!projectToDelete) return;
+
+    const id = projectToDelete.id;
+    projectToDelete = null;
+
+    try {
+      await branchService.deleteGitProject(id);
+      projects = projects.filter((p) => p.id !== id);
+    } catch (e) {
+      console.error('Failed to delete project:', e);
+    }
+  }
+
   // Keyboard shortcuts
   function handleKeydown(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
@@ -345,12 +361,22 @@
       <!-- Branches grouped by project -->
       <div class="projects-list">
         {#each [...branchesByProject.entries()] as [projectId, { project, branches: projectBranches, pending: projectPending }] (projectId)}
+          {@const isEmpty = projectBranches.length === 0 && projectPending.length === 0}
           <div class="project-section">
             <div class="project-header">
               <div class="project-info">
                 <Folder size={14} class="project-icon" />
                 <span class="project-name">{projectDisplayName(project)}</span>
               </div>
+              {#if isEmpty}
+                <button
+                  class="delete-project-button"
+                  onclick={() => (projectToDelete = project)}
+                  title="Remove project"
+                >
+                  <Trash2 size={14} />
+                </button>
+              {/if}
             </div>
             <div class="branches-list">
               {#each projectBranches as branch (branch.id)}
@@ -475,7 +501,7 @@
   />
 {/if}
 
-<!-- Delete confirmation dialog -->
+<!-- Delete branch confirmation dialog -->
 {#if branchToDelete}
   <ConfirmDialog
     title="Delete Branch"
@@ -484,6 +510,18 @@
     danger={true}
     onConfirm={confirmDeleteBranch}
     onCancel={() => (branchToDelete = null)}
+  />
+{/if}
+
+<!-- Delete project confirmation dialog -->
+{#if projectToDelete}
+  <ConfirmDialog
+    title="Remove Project"
+    message={`Remove "${projectDisplayName(projectToDelete)}" from Staged?`}
+    confirmLabel="Remove"
+    danger={true}
+    onConfirm={confirmDeleteProject}
+    onCancel={() => (projectToDelete = null)}
   />
 {/if}
 
@@ -580,6 +618,7 @@
   .project-header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     padding: 0 4px;
   }
 
@@ -598,6 +637,26 @@
     font-size: var(--size-md);
     font-weight: 500;
     color: var(--text-primary);
+  }
+
+  .delete-project-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .delete-project-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--ui-danger);
   }
 
   .branches-list {
