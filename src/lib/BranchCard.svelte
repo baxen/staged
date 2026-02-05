@@ -594,7 +594,7 @@
                 <div class="timeline-content">
                   <span class="timeline-title skeleton-title">{item.session.prompt}</span>
                   <span class="note-spacer"></span>
-                  <span class="skeleton-meta">generating...</span>
+                  <span class="skeleton-meta">Generating...</span>
                 </div>
                 <div class="watch-button">
                   <MessageSquare size={12} />
@@ -1174,7 +1174,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 8px 8px;
+    padding: 10px 8px;
     margin: 0 -8px;
     background: transparent;
     border: none;
@@ -1271,16 +1271,6 @@
     gap: 12px;
     position: relative;
     flex-shrink: 0;
-  }
-
-  .commit-sha {
-    font-size: var(--size-xs);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    color: var(--text-faint);
-    white-space: nowrap;
-    display: flex;
-    align-items: center;
-    margin-right: 6px;
   }
 
   .timeline-time {
