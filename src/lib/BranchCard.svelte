@@ -564,6 +564,9 @@
               onclick={() => handleViewNote(item.note, true)}
             >
               <div class="timeline-marker">
+                {#if index > 0}
+                  <div class="timeline-line"></div>
+                {/if}
                 <div class="timeline-icon note-icon">
                   <Loader2 size={12} class="spinner" />
                 </div>
@@ -586,6 +589,9 @@
             {#if isRunningSessionAlive}
               <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
                 <div class="timeline-marker">
+                  {#if index > 0}
+                    <div class="timeline-line"></div>
+                  {/if}
                   <div class="timeline-icon commit-icon">
                     <Loader2 size={12} class="spinner" />
                   </div>
@@ -607,6 +613,9 @@
               <!-- Stuck session - show recovery options -->
               <div class="timeline-row skeleton-row stuck-session-row">
                 <div class="timeline-marker">
+                  {#if index > 0}
+                    <div class="timeline-line"></div>
+                  {/if}
                   <div
                     class="timeline-icon stuck-icon"
                     title="Session was interrupted before completing"
@@ -647,6 +656,9 @@
           {:else if item.type === 'commit'}
             <div class="timeline-row commit-row" class:is-head={item.isHead}>
               <div class="timeline-marker">
+                {#if index > 0}
+                  <div class="timeline-line"></div>
+                {/if}
                 <div class="timeline-icon commit-icon">
                   <GitCommit size={12} />
                 </div>
@@ -721,6 +733,9 @@
             <!-- Note row - similar to commit row with separate action buttons -->
             <div class="timeline-row note-row">
               <div class="timeline-marker">
+                {#if index > 0}
+                  <div class="timeline-line"></div>
+                {/if}
                 <div class="timeline-icon note-icon">
                   {#if item.note.title.startsWith('Code Review')}
                     <FileSearch size={12} />
@@ -1205,8 +1220,11 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     width: 20px;
     flex-shrink: 0;
+    position: relative;
+    height: 100%;
   }
 
   .timeline-content {
@@ -1219,9 +1237,7 @@
   .timeline-line {
     flex: 1;
     width: 2px;
-    min-height: 12px;
     background-color: var(--border-subtle);
-    margin-top: 2px;
   }
 
   .timeline-icon {
