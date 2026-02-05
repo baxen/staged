@@ -546,9 +546,7 @@
                   {app.name}
                 </button>
               {/each}
-              <button class="open-in-item" onclick={handleCopyPath}>
-                Copy Path
-              </button>
+              <button class="open-in-item" onclick={handleCopyPath}> Copy Path </button>
             </div>
           {/if}
         </div>
@@ -1098,12 +1096,6 @@
 
   .open-in-item:hover {
     background-color: var(--bg-hover);
-  }
-
-  .open-in-divider {
-    height: 1px;
-    background-color: var(--border-subtle);
-    margin: 4px 0;
   }
 
   /* More menu */
