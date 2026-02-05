@@ -528,6 +528,28 @@ export async function updatePullRequest(
   return invoke<void>('update_pull_request', { repoPath, prNumber, title, body });
 }
 
+/** AI-generated PR description */
+export interface GeneratedPrDescription {
+  title: string;
+  body: string;
+}
+
+/**
+ * Generate a PR description using AI based on commits and diff.
+ * Requires an AI agent (Goose) to be available.
+ */
+export async function generatePrDescription(
+  repoPath: string,
+  headBranch: string,
+  baseBranch: string
+): Promise<GeneratedPrDescription> {
+  return invoke<GeneratedPrDescription>('generate_pr_description', {
+    repoPath,
+    headBranch,
+    baseBranch,
+  });
+}
+
 // =============================================================================
 // Git Project Operations
 // =============================================================================

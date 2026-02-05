@@ -1,11 +1,12 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
-  import { GitPullRequest, Loader2 } from 'lucide-svelte';
+  import { GitPullRequest, Loader2, Sparkles } from 'lucide-svelte';
   import {
     getPrForBranch,
     pushBranch,
     createPullRequest,
     updatePullRequest,
+    generatePrDescription,
     type PullRequestInfo,
     type CreatePrResult,
     type Branch,
@@ -30,6 +31,7 @@
   let isLoading = true;
   let isPushing = false;
   let isCreating = false;
+  let isGenerating = false;
   let error: string | null = null;
 
   // Existing PR (if any)
@@ -37,7 +39,11 @@
 
   onMount(async () => {
     await checkExistingPr();
-    populateDefaults();
+
+    if (!existingPr) {
+      // Try AI generation first, fall back to defaults
+      await generateDescription();
+    }
   });
 
   async function checkExistingPr() {
@@ -56,6 +62,27 @@
       existingPr = null;
     } finally {
       isLoading = false;
+    }
+  }
+
+  async function generateDescription() {
+    isGenerating = true;
+    error = null;
+
+    try {
+      const result = await generatePrDescription(
+        branch.repoPath,
+        branch.branchName,
+        branch.baseBranch
+      );
+      title = result.title;
+      body = result.body;
+    } catch (e) {
+      // AI generation failed, fall back to defaults
+      console.warn('AI PR description generation failed:', e);
+      populateDefaults();
+    } finally {
+      isGenerating = false;
     }
   }
 
@@ -152,6 +179,16 @@
         </div>
         <div class="text-content">
           <h2>Checking for existing PR...</h2>
+        </div>
+      </div>
+    {:else if isGenerating}
+      <div class="modal-content">
+        <div class="icon-wrapper generating">
+          <Sparkles size={24} />
+        </div>
+        <div class="text-content">
+          <h2>Generating PR description...</h2>
+          <p class="generating-hint">AI is analyzing your commits and changes</p>
         </div>
       </div>
     {:else}
@@ -283,6 +320,26 @@
     background: var(--bg-hover);
     border-radius: 10px;
     color: var(--ui-accent);
+  }
+
+  .icon-wrapper.generating {
+    animation: pulse 2s ease-in-out infinite;
+  }
+
+  .generating-hint {
+    margin: 0;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+  }
+
+  @keyframes pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
   }
 
   .text-content {
