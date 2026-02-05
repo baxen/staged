@@ -15,9 +15,9 @@
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
   import type { UnlistenFn } from '@tauri-apps/api/event';
-  import { confirm } from '@tauri-apps/plugin-dialog';
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal from './NewBranchModal.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
 
   interface Props {
@@ -37,6 +37,7 @@
 
   // Modal state
   let showNewBranchModal = $state(false);
+  let branchToDelete = $state<Branch | null>(null);
 
   // Group branches by repo path
   let branchesByRepo = $derived.by(() => {
@@ -118,14 +119,20 @@
     const branch = branches.find((b) => b.id === branchId);
     if (!branch) return;
 
-    const confirmed = await confirm(`Delete branch "${branch.branchName}" and its worktree?`);
-    if (!confirmed) return;
+    // Show confirmation dialog
+    branchToDelete = branch;
+  }
+
+  async function confirmDeleteBranch() {
+    if (!branchToDelete) return;
 
     try {
-      await branchService.deleteBranch(branchId);
-      branches = branches.filter((b) => b.id !== branchId);
+      await branchService.deleteBranch(branchToDelete.id);
+      branches = branches.filter((b) => b.id !== branchToDelete!.id);
     } catch (e) {
       console.error('Failed to delete branch:', e);
+    } finally {
+      branchToDelete = null;
     }
   }
 
@@ -241,6 +248,18 @@
 <!-- New branch modal -->
 {#if showNewBranchModal}
   <NewBranchModal onCreated={handleBranchCreated} onClose={() => (showNewBranchModal = false)} />
+{/if}
+
+<!-- Delete confirmation dialog -->
+{#if branchToDelete}
+  <ConfirmDialog
+    title="Delete Branch"
+    message={`Delete branch "${branchToDelete.branchName}" and its worktree? This cannot be undone.`}
+    confirmLabel="Delete"
+    danger={true}
+    onConfirm={confirmDeleteBranch}
+    onCancel={() => (branchToDelete = null)}
+  />
 {/if}
 
 <style>
