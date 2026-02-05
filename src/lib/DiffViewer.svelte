@@ -600,6 +600,12 @@
   function redrawConnectorsImpl() {
     if (!connectorRenderer || !afterPane || !diff) return;
 
+    // Don't draw connectors in markdown preview mode
+    if (isMarkdownFile && markdownPreview) {
+      connectorRenderer.clear();
+      return;
+    }
+
     // For single-pane modes, we still draw comment highlights
     const sourcePane = beforePane ?? afterPane;
     const firstLine = sourcePane.querySelector('.line') as HTMLElement | null;
@@ -626,6 +632,14 @@
   $effect(() => {
     const _ = sizeBase;
     if (diff && connectorCanvas && afterPane) {
+      scheduleConnectorRedraw();
+    }
+  });
+
+  // Redraw (or clear) connectors when markdown preview mode changes
+  $effect(() => {
+    const _ = markdownPreview;
+    if (diff && connectorCanvas) {
       scheduleConnectorRedraw();
     }
   });
@@ -1884,17 +1898,20 @@
         </div>
       {/if}
 
-      <!-- Spine / Divider (hidden in markdown preview mode) -->
+      <!-- Spine / Divider -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="spine"
         class:dragging={isDraggingDivider}
-        class:hidden={isMarkdownFile && markdownPreview}
         onmousedown={handleDividerMouseDown}
         ondblclick={handleDividerDoubleClick}
       >
         <div class="divider-handle"></div>
-        <canvas class="spine-connector" bind:this={connectorCanvas}></canvas>
+        <canvas
+          class="spine-connector"
+          class:hidden={isMarkdownFile && markdownPreview}
+          bind:this={connectorCanvas}
+        ></canvas>
       </div>
 
       <!-- After pane (two-pane mode or created file) -->
@@ -2515,10 +2532,6 @@
     cursor: col-resize;
   }
 
-  .spine.hidden {
-    display: none;
-  }
-
   .spine:hover .divider-handle,
   .spine.dragging .divider-handle {
     opacity: 1;
@@ -2552,6 +2565,10 @@
     flex: 1;
     width: 100%;
     overflow: visible;
+  }
+
+  .spine-connector.hidden {
+    visibility: hidden;
   }
 
   /* Code area wrapper - contains code-container and scrollbar markers */
