@@ -21,6 +21,7 @@
     ChevronsUpDown,
     MoreVertical,
     ExternalLink,
+    AlertCircle,
   } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession, BranchNote, OpenerApp } from './services/branch';
   import * as branchService from './services/branch';
@@ -562,8 +563,11 @@
               <!-- Stuck session - show recovery options -->
               <div class="timeline-row skeleton-row stuck-session-row">
                 <div class="timeline-marker">
-                  <div class="timeline-icon commit-icon stuck">
-                    <GitCommit size={12} />
+                  <div
+                    class="timeline-icon stuck-icon"
+                    title="Session was interrupted before completing"
+                  >
+                    <AlertCircle size={12} />
                   </div>
                   {#if index < timeline.length - 1}
                     <div class="timeline-line"></div>
@@ -572,9 +576,6 @@
                 <div class="timeline-content">
                   <div class="timeline-info">
                     <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                    <div class="timeline-meta">
-                      <span class="skeleton-meta stuck-meta">interrupted</span>
-                    </div>
                   </div>
                 </div>
                 <div class="stuck-actions">
@@ -584,7 +585,7 @@
                       e.stopPropagation();
                       handleRestartSession();
                     }}
-                    title="Restart this session"
+                    title="Try again with the same prompt"
                   >
                     <Play size={12} />
                   </button>
@@ -594,7 +595,7 @@
                       e.stopPropagation();
                       handleDiscardSession();
                     }}
-                    title="Discard this session"
+                    title="Remove this interrupted session"
                   >
                     <Trash2 size={12} />
                   </button>
@@ -1277,15 +1278,9 @@
   }
 
   /* Stuck session styles */
-  .timeline-icon.stuck {
-    background-color: color-mix(in srgb, var(--status-error) 20%, transparent);
-    color: var(--status-error);
-  }
-
-  .stuck-meta {
-    color: var(--status-error);
-    background: none;
-    animation: none;
+  .timeline-icon.stuck-icon {
+    background-color: var(--ui-danger-bg);
+    color: var(--ui-danger);
   }
 
   .stuck-actions {
