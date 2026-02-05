@@ -447,6 +447,88 @@ export async function openInApp(path: string, appId: string): Promise<void> {
 }
 
 // =============================================================================
+// Pull Request Operations
+// =============================================================================
+
+/** Result of creating a pull request */
+export interface CreatePrResult {
+  /** The PR number */
+  number: number;
+  /** URL to the PR on GitHub */
+  url: string;
+}
+
+/** Extended PR info including body and state */
+export interface PullRequestInfo {
+  number: number;
+  title: string;
+  body: string;
+  author: string;
+  baseRef: string;
+  headRef: string;
+  draft: boolean;
+  state: string;
+  url: string;
+}
+
+/**
+ * Get the PR associated with a branch (if one exists).
+ * Returns null if no PR exists for this branch.
+ */
+export async function getPrForBranch(
+  repoPath: string,
+  branch: string
+): Promise<PullRequestInfo | null> {
+  return invoke<PullRequestInfo | null>('get_pr_for_branch', { repoPath, branch });
+}
+
+/**
+ * Push a branch to the remote.
+ * If force is true, uses --force-with-lease for safer force pushing.
+ */
+export async function pushBranch(
+  repoPath: string,
+  branch: string,
+  force: boolean = false
+): Promise<void> {
+  return invoke<void>('push_branch', { repoPath, branch, force });
+}
+
+/**
+ * Create a new pull request on GitHub.
+ * The branch must be pushed to the remote first.
+ */
+export async function createPullRequest(
+  repoPath: string,
+  headBranch: string,
+  baseBranch: string,
+  title: string,
+  body: string,
+  draft: boolean = false
+): Promise<CreatePrResult> {
+  return invoke<CreatePrResult>('create_pull_request', {
+    repoPath,
+    headBranch,
+    baseBranch,
+    title,
+    body,
+    draft,
+  });
+}
+
+/**
+ * Update an existing pull request's title and/or body.
+ */
+export async function updatePullRequest(
+  repoPath: string,
+  prNumber: number,
+  title?: string,
+  body?: string
+): Promise<void> {
+  return invoke<void>('update_pull_request', { repoPath, prNumber, title, body });
+}
+
+// =============================================================================
 // Git Project Operations
 // =============================================================================
 

@@ -799,6 +799,184 @@ pub async fn sync_review_to_github(
 }
 
 // =============================================================================
+// Pull Request Creation
+// =============================================================================
+
+/// Result of creating a pull request
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CreatePrResult {
+    /// The PR number
+    pub number: u64,
+    /// URL to the PR on GitHub
+    pub url: String,
+}
+
+/// Extended PR info including body and state (for checking existing PRs)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequestInfo {
+    pub number: u64,
+    pub title: String,
+    pub body: String,
+    pub author: String,
+    pub base_ref: String,
+    pub head_ref: String,
+    pub draft: bool,
+    pub state: String,
+    pub url: String,
+}
+
+/// Response from `gh pr view --json`
+#[derive(Debug, Deserialize)]
+struct GhPrViewItem {
+    number: u64,
+    title: String,
+    body: String,
+    author: GhAuthor,
+    #[serde(rename = "baseRefName")]
+    base_ref_name: String,
+    #[serde(rename = "headRefName")]
+    head_ref_name: String,
+    #[serde(rename = "isDraft")]
+    is_draft: bool,
+    state: String,
+    url: String,
+}
+
+impl From<GhPrViewItem> for PullRequestInfo {
+    fn from(item: GhPrViewItem) -> Self {
+        PullRequestInfo {
+            number: item.number,
+            title: item.title,
+            body: item.body,
+            author: item.author.login,
+            base_ref: item.base_ref_name,
+            head_ref: item.head_ref_name,
+            draft: item.is_draft,
+            state: item.state.to_lowercase(),
+            url: item.url,
+        }
+    }
+}
+
+/// Get the PR associated with a branch (if one exists).
+/// Returns None if no PR exists for this branch.
+pub fn get_pr_for_branch(repo: &Path, branch: &str) -> Result<Option<PullRequestInfo>, GitError> {
+    let output = run_gh(
+        repo,
+        &[
+            "pr",
+            "view",
+            branch,
+            "--json=number,title,body,author,baseRefName,headRefName,isDraft,state,url",
+        ],
+    );
+
+    match output {
+        Ok(json) => {
+            let item: GhPrViewItem =
+                serde_json::from_str(&json).map_err(|e| GitError::CommandFailed(e.to_string()))?;
+            Ok(Some(item.into()))
+        }
+        Err(e) => {
+            // "no pull requests found" is not an error, just means no PR exists
+            let msg = e.to_string();
+            if msg.contains("no pull requests found") || msg.contains("Could not resolve") {
+                Ok(None)
+            } else {
+                Err(e)
+            }
+        }
+    }
+}
+
+/// Push a branch to the remote.
+/// If force is true, uses --force-with-lease for safer force pushing.
+pub fn push_branch(repo: &Path, branch: &str, force: bool) -> Result<(), GitError> {
+    use super::cli;
+
+    let mut args = vec!["push", "-u", "origin", branch];
+    if force {
+        args.push("--force-with-lease");
+    }
+
+    cli::run(repo, &args)?;
+    Ok(())
+}
+
+/// Create a new pull request.
+/// The branch must be pushed to the remote first.
+pub fn create_pull_request(
+    repo: &Path,
+    head_branch: &str,
+    base_branch: &str,
+    title: &str,
+    body: &str,
+    draft: bool,
+) -> Result<CreatePrResult, GitError> {
+    let mut args = vec![
+        "pr",
+        "create",
+        "--head",
+        head_branch,
+        "--base",
+        base_branch,
+        "--title",
+        title,
+        "--body",
+        body,
+    ];
+
+    if draft {
+        args.push("--draft");
+    }
+
+    let output = run_gh(repo, &args)?;
+
+    // gh pr create outputs the PR URL on success
+    let url = output.trim().to_string();
+
+    // Extract PR number from URL (e.g., https://github.com/owner/repo/pull/123)
+    let number = url
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.parse::<u64>().ok())
+        .ok_or_else(|| {
+            GitError::CommandFailed(format!("Could not parse PR number from URL: {}", url))
+        })?;
+
+    Ok(CreatePrResult { number, url })
+}
+
+/// Update an existing pull request's title and/or body.
+pub fn update_pull_request(
+    repo: &Path,
+    pr_number: u64,
+    title: Option<&str>,
+    body: Option<&str>,
+) -> Result<(), GitError> {
+    let pr_num_str = pr_number.to_string();
+    let mut args = vec!["pr", "edit", &pr_num_str];
+
+    if let Some(t) = title {
+        args.push("--title");
+        args.push(t);
+    }
+
+    if let Some(b) = body {
+        args.push("--body");
+        args.push(b);
+    }
+
+    if args.len() == 3 {
+        // No updates specified
+        return Ok(());
+    }
+
+    run_gh(repo, &args)?;
+    Ok(())
+}
+
+// =============================================================================
 // Tests
 // =============================================================================
 

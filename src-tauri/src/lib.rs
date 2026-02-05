@@ -15,8 +15,8 @@ mod watcher;
 use ai::analysis::ChangesetAnalysis;
 use ai::{SessionManager, SessionStatus};
 use git::{
-    DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus, GitHubSyncResult, GitRef,
-    PullRequest,
+    CreatePrResult, DiffId, DiffSpec, File, FileDiff, FileDiffSummary, GitHubAuthStatus,
+    GitHubSyncResult, GitRef, PullRequest, PullRequestInfo,
 };
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
@@ -519,6 +519,70 @@ async fn sync_review_to_github(
     git::sync_review_to_github(&path, pr_number, &review.comments)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Get the PR associated with a branch (if one exists).
+/// Returns None if no PR exists for this branch.
+#[tauri::command(rename_all = "camelCase")]
+async fn get_pr_for_branch(
+    repo_path: String,
+    branch: String,
+) -> Result<Option<PullRequestInfo>, String> {
+    let path = PathBuf::from(repo_path);
+    tokio::task::spawn_blocking(move || {
+        git::get_pr_for_branch(&path, &branch).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Push a branch to the remote.
+/// If force is true, uses --force-with-lease for safer force pushing.
+#[tauri::command(rename_all = "camelCase")]
+async fn push_branch(repo_path: String, branch: String, force: bool) -> Result<(), String> {
+    let path = PathBuf::from(repo_path);
+    tokio::task::spawn_blocking(move || {
+        git::push_branch(&path, &branch, force).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Create a new pull request on GitHub.
+/// The branch must be pushed to the remote first.
+#[tauri::command(rename_all = "camelCase")]
+async fn create_pull_request(
+    repo_path: String,
+    head_branch: String,
+    base_branch: String,
+    title: String,
+    body: String,
+    draft: bool,
+) -> Result<CreatePrResult, String> {
+    let path = PathBuf::from(repo_path);
+    tokio::task::spawn_blocking(move || {
+        git::create_pull_request(&path, &head_branch, &base_branch, &title, &body, draft)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Update an existing pull request's title and/or body.
+#[tauri::command(rename_all = "camelCase")]
+async fn update_pull_request(
+    repo_path: String,
+    pr_number: u64,
+    title: Option<String>,
+    body: Option<String>,
+) -> Result<(), String> {
+    let path = PathBuf::from(repo_path);
+    tokio::task::spawn_blocking(move || {
+        git::update_pull_request(&path, pr_number, title.as_deref(), body.as_deref())
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 // =============================================================================
@@ -2989,6 +3053,10 @@ pub fn run() {
             fetch_pr,
             sync_review_to_github,
             invalidate_pr_cache,
+            get_pr_for_branch,
+            push_branch,
+            create_pull_request,
+            update_pull_request,
             // AI commands (analysis)
             check_ai_available,
             discover_acp_providers,
