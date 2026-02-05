@@ -87,7 +87,7 @@
     onclick={(e) => e.stopPropagation()}
   >
     <div class="modal-header">
-      <h2>New Session</h2>
+      <h2>New Commit</h2>
       <button class="close-button" onclick={onClose}>
         <X size={18} />
       </button>
