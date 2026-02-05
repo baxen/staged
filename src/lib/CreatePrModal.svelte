@@ -228,14 +228,11 @@
         </div>
 
         <div class="modal-actions">
-          <button
-            type="button"
-            class="btn btn-secondary"
-            on:click={() => dispatch('close')}
-            disabled={isPushing || isCreating}
-          >
-            Cancel
-          </button>
+          {#if !isPushing && !isCreating}
+            <button type="button" class="btn btn-secondary" on:click={() => dispatch('close')}>
+              Cancel
+            </button>
+          {/if}
           <button
             type="submit"
             class="btn btn-primary"
