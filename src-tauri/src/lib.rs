@@ -1,5 +1,4 @@
 //! Tauri commands for the Staged diff viewer.
-#![allow(clippy::uninlined_format_args)]
 //!
 //! This module provides the bridge between the frontend and the git/github modules.
 //! Supports CLI arguments: `staged [path]` opens the app with the specified directory.
