@@ -62,7 +62,7 @@
   });
 
   // Group branches by project (including pending ones)
-  // Empty projects are filtered out at render time
+  // Filter out empty projects unless they were just created (within last 30 seconds)
   let branchesByProject = $derived.by(() => {
     const grouped = new Map<
       string,
@@ -87,6 +87,19 @@
       const projectGroup = grouped.get(pending.projectId);
       if (projectGroup) {
         projectGroup.pending.push(pending);
+      }
+    }
+
+    // Filter out empty projects that are older than 30 seconds
+    // This allows newly created projects to show up so users can add their first branch,
+    // while hiding stale projects where all branches have been deleted
+    const now = Date.now();
+    const thirtySecondsMs = 30 * 1000;
+    for (const [projectId, group] of grouped) {
+      const isEmpty = group.branches.length === 0 && group.pending.length === 0;
+      const isNew = now - group.project.createdAt < thirtySecondsMs;
+      if (isEmpty && !isNew) {
+        grouped.delete(projectId);
       }
     }
 
