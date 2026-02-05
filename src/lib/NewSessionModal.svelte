@@ -11,6 +11,9 @@
   import { X, GitBranch, Loader2, Send } from 'lucide-svelte';
   import type { Branch } from './services/branch';
   import { startBranchSession } from './services/branch';
+  import AgentSelector from './AgentSelector.svelte';
+  import type { AcpProvider } from './stores/agent.svelte';
+  import { preferences } from './stores/preferences.svelte';
 
   interface Props {
     branch: Branch;
@@ -24,6 +27,7 @@
   let prompt = $state('');
   let starting = $state(false);
   let error = $state<string | null>(null);
+  let selectedProvider = $state<AcpProvider>((preferences.aiAgent as AcpProvider) || 'goose');
 
   let textareaEl: HTMLTextAreaElement | null = $state(null);
 
@@ -50,7 +54,7 @@
       const userPrompt = prompt.trim();
 
       // Backend handles all context gathering and prompt building
-      const result = await startBranchSession(branch.id, userPrompt);
+      const result = await startBranchSession(branch.id, userPrompt, selectedProvider);
 
       // Notify parent that session started
       onSessionStarted?.(result.branchSessionId, result.aiSessionId);
@@ -111,6 +115,8 @@
         ></textarea>
         <p class="hint">Press ⌘Enter to start</p>
       </div>
+
+      <AgentSelector bind:provider={selectedProvider} disabled={starting} />
 
       {#if error}
         <p class="error">{error}</p>
