@@ -260,6 +260,30 @@ export async function deleteBranchSessionAndCommit(branchSessionId: string): Pro
 }
 
 /**
+ * Check if a branch session's AI session is actually alive.
+ * Returns true if the session has a live connection,
+ * false if the session is dead (no live connection).
+ */
+export async function isSessionAlive(aiSessionId: string): Promise<boolean> {
+  return invoke<boolean>('is_session_alive', { aiSessionId });
+}
+
+/**
+ * Restart a stuck branch session.
+ * Deletes the old session and starts a new one with the same prompt.
+ * Returns the new session IDs.
+ */
+export async function restartBranchSession(
+  branchSessionId: string,
+  fullPrompt: string
+): Promise<StartBranchSessionResponse> {
+  return invoke<StartBranchSessionResponse>('restart_branch_session', {
+    branchSessionId,
+    fullPrompt,
+  });
+}
+
+/**
  * Recover orphaned sessions for a branch.
  * If there's a "running" session but no live AI session, checks if commits were made
  * and marks the session as completed or errored accordingly.

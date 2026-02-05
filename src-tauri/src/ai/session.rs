@@ -211,6 +211,14 @@ impl SessionManager {
         Ok(SessionStatus::Idle)
     }
 
+    /// Check if a session has a live connection (is in the sessions HashMap).
+    /// This is different from get_session_status which returns Idle for sessions
+    /// that exist in the store but aren't live.
+    pub async fn is_session_live(&self, session_id: &str) -> bool {
+        let sessions = self.sessions.read().await;
+        sessions.contains_key(session_id)
+    }
+
     /// Close a live session (keeps history in store)
     pub async fn close_live_session(&self, session_id: &str) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;

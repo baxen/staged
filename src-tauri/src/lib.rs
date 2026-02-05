@@ -1912,6 +1912,80 @@ fn delete_branch_session_and_commit(
     Ok(commits_removed)
 }
 
+/// Check if a branch session's AI session is actually alive.
+/// Returns true if the session has a live connection in the session manager,
+/// false if the session is dead (no live connection, even if it exists in the store).
+#[tauri::command(rename_all = "camelCase")]
+async fn is_session_alive(
+    session_manager: State<'_, Arc<SessionManager>>,
+    ai_session_id: String,
+) -> Result<bool, String> {
+    // Check if the session exists in the live sessions map.
+    // This directly answers "is there an active connection?" rather than
+    // relying on get_session_status which returns Idle for sessions that
+    // exist in the store but aren't live.
+    Ok(session_manager.is_session_live(&ai_session_id).await)
+}
+
+/// Restart a stuck branch session.
+/// Deletes the old session and starts a new one with the same prompt.
+/// Returns the new session IDs.
+#[tauri::command(rename_all = "camelCase")]
+async fn restart_branch_session(
+    state: State<'_, Arc<Store>>,
+    session_manager: State<'_, Arc<SessionManager>>,
+    branch_session_id: String,
+    full_prompt: String,
+) -> Result<StartBranchSessionResponse, String> {
+    // Get the old session to retrieve the branch ID and prompt
+    let old_session = state
+        .get_branch_session(&branch_session_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Session '{}' not found", branch_session_id))?;
+
+    let branch_id = old_session.branch_id.clone();
+    let user_prompt = old_session.prompt.clone();
+
+    // Delete the old session
+    state
+        .delete_branch_session(&branch_session_id)
+        .map_err(|e| e.to_string())?;
+
+    // Get the branch to find the worktree path
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+
+    // Create a new AI session
+    let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
+    let ai_session_id = session_manager
+        .create_session(worktree_path, None)
+        .await
+        .map_err(|e| format!("Failed to create AI session: {}", e))?;
+
+    // Create the new branch session record
+    let branch_session = BranchSession::new_running(&branch_id, &ai_session_id, &user_prompt);
+    state
+        .create_branch_session(&branch_session)
+        .map_err(|e| format!("Failed to create branch session: {}", e))?;
+
+    // Send the prompt to the AI
+    if let Err(e) = session_manager
+        .send_prompt(&ai_session_id, full_prompt)
+        .await
+    {
+        // Clean up on failure
+        let _ = state.delete_branch_session(&branch_session.id);
+        return Err(format!("Failed to send prompt: {}", e));
+    }
+
+    Ok(StartBranchSessionResponse {
+        branch_session_id: branch_session.id,
+        ai_session_id,
+    })
+}
+
 /// Recover orphaned sessions for a branch.
 /// If there's a "running" session but no live AI session, check if commits were made
 /// and mark the session as completed or errored accordingly.
@@ -2820,6 +2894,8 @@ pub fn run() {
             fail_branch_session,
             cancel_branch_session,
             delete_branch_session_and_commit,
+            is_session_alive,
+            restart_branch_session,
             recover_orphaned_session,
             get_branch_session_by_ai_session,
             get_branch_head,

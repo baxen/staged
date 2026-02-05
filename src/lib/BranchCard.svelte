@@ -21,6 +21,7 @@
     ChevronsUpDown,
     MoreVertical,
     ExternalLink,
+    AlertCircle,
   } from 'lucide-svelte';
   import type { Branch, CommitInfo, BranchSession, BranchNote, OpenerApp } from './services/branch';
   import * as branchService from './services/branch';
@@ -149,6 +150,9 @@
   let commitsToDeleteCount = $state(0);
   let deletingCommit = $state(false);
 
+  // Track if the running session is actually alive (AI session still connected)
+  let isRunningSessionAlive = $state(true);
+
   // Load commits and running session on mount
   onMount(async () => {
     await loadData();
@@ -181,6 +185,19 @@
       runningSession = sessionResult;
       notes = notesResult;
       generatingNote = generatingNoteResult;
+
+      // Check if running session is actually alive
+      if (sessionResult?.aiSessionId) {
+        try {
+          isRunningSessionAlive = await branchService.isSessionAlive(sessionResult.aiSessionId);
+        } catch (e) {
+          // If we can't check, assume it's dead (safer - allows recovery)
+          console.warn('Failed to check session alive status:', e);
+          isRunningSessionAlive = false;
+        }
+      } else {
+        isRunningSessionAlive = true;
+      }
 
       // Load sessions for each commit (for "View" buttons)
       const sessionsMap = new Map<string, BranchSession>();
@@ -392,6 +409,34 @@
   function formatBaseBranch(baseBranch: string): string {
     return baseBranch.replace(/^origin\//, '');
   }
+
+  // Handle discarding a stuck session
+  async function handleDiscardSession() {
+    if (!runningSession) return;
+    try {
+      await branchService.cancelBranchSession(runningSession.id);
+      runningSession = null;
+      isRunningSessionAlive = true;
+      await loadData();
+    } catch (e) {
+      console.error('Failed to discard session:', e);
+    }
+  }
+
+  // Handle restarting a stuck session
+  async function handleRestartSession() {
+    if (!runningSession) return;
+    try {
+      // Use the stored user prompt for restart
+      const fullPrompt = runningSession.prompt;
+      const result = await branchService.restartBranchSession(runningSession.id, fullPrompt);
+      console.log('Session restarted:', result);
+      isRunningSessionAlive = true;
+      await loadData();
+    } catch (e) {
+      console.error('Failed to restart session:', e);
+    }
+  }
 </script>
 
 <svelte:window on:click={handleClickOutside} />
@@ -491,28 +536,72 @@
             </button>
           {:else if item.type === 'running-session'}
             <!-- Running session skeleton -->
-            <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
-              <div class="timeline-marker">
-                <div class="timeline-icon commit-icon">
-                  <Loader2 size={12} class="spinner" />
+            {#if isRunningSessionAlive}
+              <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
+                <div class="timeline-marker">
+                  <div class="timeline-icon commit-icon">
+                    <Loader2 size={12} class="spinner" />
+                  </div>
+                  {#if index < timeline.length - 1}
+                    <div class="timeline-line"></div>
+                  {/if}
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
-              </div>
-              <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                  <div class="timeline-meta">
-                    <span class="skeleton-meta">generating...</span>
+                <div class="timeline-content">
+                  <div class="timeline-info">
+                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
+                    <div class="timeline-meta">
+                      <span class="skeleton-meta">generating...</span>
+                    </div>
                   </div>
                 </div>
+                <div class="watch-button">
+                  <MessageSquare size={12} />
+                  Watch
+                </div>
+              </button>
+            {:else}
+              <!-- Stuck session - show recovery options -->
+              <div class="timeline-row skeleton-row stuck-session-row">
+                <div class="timeline-marker">
+                  <div
+                    class="timeline-icon stuck-icon"
+                    title="Session was interrupted before completing"
+                  >
+                    <AlertCircle size={12} />
+                  </div>
+                  {#if index < timeline.length - 1}
+                    <div class="timeline-line"></div>
+                  {/if}
+                </div>
+                <div class="timeline-content">
+                  <div class="timeline-info">
+                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
+                  </div>
+                </div>
+                <div class="stuck-actions">
+                  <button
+                    class="stuck-btn"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleRestartSession();
+                    }}
+                    title="Try again with the same prompt"
+                  >
+                    <Play size={12} />
+                  </button>
+                  <button
+                    class="stuck-btn stuck-btn-danger"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleDiscardSession();
+                    }}
+                    title="Remove this interrupted session"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
               </div>
-              <div class="watch-button">
-                <MessageSquare size={12} />
-                Watch
-              </div>
-            </button>
+            {/if}
           {:else if item.type === 'commit'}
             <div class="timeline-row commit-row" class:is-head={item.isHead}>
               <div class="timeline-marker">
@@ -1180,6 +1269,42 @@
   .skeleton-row:hover .watch-button {
     border-color: var(--ui-accent);
     color: var(--ui-accent);
+  }
+
+  /* Stuck session styles */
+  .timeline-icon.stuck-icon {
+    background-color: var(--ui-danger-bg);
+    color: var(--ui-danger);
+  }
+
+  .stuck-actions {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+
+  .stuck-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    background: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .stuck-btn:hover {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+  }
+
+  .stuck-btn.stuck-btn-danger:hover {
+    border-color: var(--status-error);
+    color: var(--status-error);
   }
 
   /* Footer */
