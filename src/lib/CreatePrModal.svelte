@@ -104,10 +104,13 @@
         dispatch('created', { url: existingPr.url, number: existingPr.number });
       } else {
         // Create new PR
+        // Strip "origin/" prefix from baseBranch - it's stored as a remote-tracking ref
+        // but GitHub expects just the branch name
+        const targetBranch = branch.baseBranch.replace(/^origin\//, '');
         const result = await createPullRequest(
           branch.repoPath,
           branch.branchName,
-          branch.baseBranch,
+          targetBranch,
           title.trim(),
           body.trim(),
           isDraft
@@ -166,7 +169,7 @@
           <div class="text-content">
             <h2>{existingPr ? 'Update Pull Request' : 'Create Pull Request'}</h2>
             <p class="branch-info">
-              {branch.branchName} → {branch.baseBranch}
+              {branch.branchName} → {branch.baseBranch.replace(/^origin\//, '')}
               {#if commits.length > 0}
                 <span class="commit-count">
                   · {commits.length} commit{commits.length !== 1 ? 's' : ''}
