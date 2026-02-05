@@ -469,15 +469,14 @@
               onclick={() => handleViewNote(item.note, true)}
             >
               <div class="timeline-marker">
-                <Loader2 size={12} class="spinner note-spinner" />
+                <div class="timeline-icon note-icon">
+                  <Loader2 size={12} class="spinner" />
+                </div>
                 {#if index < timeline.length - 1}
                   <div class="timeline-line"></div>
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-icon note-icon generating">
-                  <FileText size={12} />
-                </div>
                 <div class="timeline-info">
                   <span class="timeline-title skeleton-title">{item.note.title}</span>
                   <div class="timeline-meta">
@@ -494,15 +493,14 @@
             <!-- Running session skeleton -->
             <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
               <div class="timeline-marker">
-                <Loader2 size={12} class="spinner commit-spinner" />
+                <div class="timeline-icon commit-icon">
+                  <Loader2 size={12} class="spinner" />
+                </div>
                 {#if index < timeline.length - 1}
                   <div class="timeline-line"></div>
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-icon commit-icon generating">
-                  <GitCommit size={12} />
-                </div>
                 <div class="timeline-info">
                   <span class="timeline-title skeleton-title">{item.session.prompt}</span>
                   <div class="timeline-meta">
@@ -518,19 +516,14 @@
           {:else if item.type === 'commit'}
             <div class="timeline-row commit-row" class:is-head={item.isHead}>
               <div class="timeline-marker">
-                {#if item.isHead}
-                  <div class="head-marker"></div>
-                {:else}
-                  <div class="timeline-dot commit-dot"></div>
-                {/if}
+                <div class="timeline-icon commit-icon">
+                  <GitCommit size={12} />
+                </div>
                 {#if index < timeline.length - 1}
                   <div class="timeline-line"></div>
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-icon commit-icon">
-                  <GitCommit size={12} />
-                </div>
                 <div class="timeline-info">
                   <span class="timeline-title">{item.commit.subject}</span>
                   <div class="timeline-meta">
@@ -620,15 +613,14 @@
               }}
             >
               <div class="timeline-marker">
-                <div class="timeline-dot note-dot"></div>
+                <div class="timeline-icon note-icon">
+                  <FileText size={12} />
+                </div>
                 {#if index < timeline.length - 1}
                   <div class="timeline-line"></div>
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-icon note-icon">
-                  <FileText size={12} />
-                </div>
                 <div class="timeline-info">
                   <span class="timeline-title">{item.note.title}</span>
                   <div class="timeline-meta">
@@ -1013,38 +1005,14 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    width: 12px;
-    padding-top: 6px;
-  }
-
-  .head-marker {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background-color: var(--ui-accent);
-    box-shadow:
-      0 0 0 2px var(--bg-primary),
-      0 0 0 3px var(--ui-accent);
-  }
-
-  .timeline-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-  }
-
-  .commit-dot {
-    background-color: var(--border-emphasis);
-  }
-
-  .note-dot {
-    background-color: var(--text-accent);
+    width: 20px;
+    flex-shrink: 0;
   }
 
   .timeline-line {
     flex: 1;
     width: 2px;
-    min-height: 20px;
+    min-height: 16px;
     background-color: var(--border-subtle);
     margin-top: 4px;
   }
@@ -1065,25 +1033,14 @@
     height: 20px;
     border-radius: 4px;
     flex-shrink: 0;
+    background-color: var(--bg-hover);
   }
 
-  .commit-icon {
-    background-color: rgba(63, 185, 80, 0.15);
+  .timeline-icon.commit-icon {
     color: var(--status-added);
   }
 
-  .commit-icon.generating {
-    background-color: rgba(63, 185, 80, 0.1);
-    color: var(--status-added);
-  }
-
-  .note-icon {
-    background-color: rgba(88, 166, 255, 0.15);
-    color: var(--text-accent);
-  }
-
-  .note-icon.generating {
-    background-color: rgba(88, 166, 255, 0.1);
+  .timeline-icon.note-icon {
     color: var(--text-accent);
   }
 
@@ -1169,18 +1126,18 @@
 
   .action-btn-icon {
     padding: 4px 6px;
-    opacity: 0;
+    visibility: hidden;
   }
 
   .action-btn-hover {
-    opacity: 0;
+    visibility: hidden;
   }
 
   .commit-row:hover .action-btn-icon,
   .commit-row:hover .action-btn-hover,
   .note-row:hover .action-btn-icon,
   .note-row:hover .action-btn-hover {
-    opacity: 1;
+    visibility: visible;
   }
 
   .action-btn-danger {
