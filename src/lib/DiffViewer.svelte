@@ -73,6 +73,7 @@
   import { repoState } from './stores/repoState.svelte';
   import { preferences } from './stores/preferences.svelte';
   import Scrollbar from './Scrollbar.svelte';
+  import HorizontalScrollbar from './HorizontalScrollbar.svelte';
   import { globalSearchState, getFlattenedResults } from './stores/globalSearch.svelte';
   import type { SearchMatch } from './services/diffSearch';
   import type { MatchLocation } from './services/diffSearch';
@@ -478,6 +479,30 @@
   // Content dimensions for scrollbars
   let beforeContentHeight = $derived(beforeLines.length * (measureLineHeight(beforePane) || 20));
   let afterContentHeight = $derived(afterLines.length * (measureLineHeight(afterPane) || 20));
+
+  // Content width needs to be measured after DOM renders, using state + effect
+  let beforeContentWidth = $state(0);
+  let afterContentWidth = $state(0);
+
+  // Re-measure content width when lines change (after DOM update via tick)
+  $effect(() => {
+    const _ = beforeLines.length; // reactive dependency
+    if (beforePane) {
+      // Use requestAnimationFrame to ensure DOM has rendered
+      requestAnimationFrame(() => {
+        beforeContentWidth = measureContentWidth(beforePane);
+      });
+    }
+  });
+
+  $effect(() => {
+    const _ = afterLines.length; // reactive dependency
+    if (afterPane) {
+      requestAnimationFrame(() => {
+        afterContentWidth = measureContentWidth(afterPane);
+      });
+    }
+  });
 
   // ==========================================================================
   // Effects
@@ -928,6 +953,11 @@
     updateCommentEditorPosition();
     updateLineSelectionToolbar();
     updateLineCommentEditorPosition();
+  }
+
+  // Handle horizontal scrollbar (syncs both panes)
+  function handleHorizontalScrollbarScroll(deltaX: number) {
+    scrollController.scrollByXBoth(deltaX);
   }
 
   // Redraw connectors when scroll positions change
@@ -1874,6 +1904,12 @@
                   </div>
                 {/if}
               </div>
+              <HorizontalScrollbar
+                scrollX={scrollController.beforeScrollX}
+                contentWidth={beforeContentWidth}
+                viewportWidth={beforePane?.clientWidth ?? 0}
+                onScroll={handleHorizontalScrollbarScroll}
+              />
             {/if}
           </div>
         </div>
@@ -1918,6 +1954,12 @@
                 {/each}
               </div>
             </div>
+            <HorizontalScrollbar
+              scrollX={scrollController.beforeScrollX}
+              contentWidth={beforeContentWidth}
+              viewportWidth={beforePane?.clientWidth ?? 0}
+              onScroll={handleHorizontalScrollbarScroll}
+            />
           </div>
         </div>
       {/if}
@@ -2045,6 +2087,12 @@
                 onScroll={handleAfterScrollbarScroll}
                 markers={afterMarkers}
               />
+              <HorizontalScrollbar
+                scrollX={scrollController.afterScrollX}
+                contentWidth={afterContentWidth}
+                viewportWidth={afterPane?.clientWidth ?? 0}
+                onScroll={handleHorizontalScrollbarScroll}
+              />
             {/if}
           </div>
         </div>
@@ -2117,6 +2165,12 @@
               side="right"
               onScroll={handleAfterScrollbarScroll}
               markers={[]}
+            />
+            <HorizontalScrollbar
+              scrollX={scrollController.afterScrollX}
+              contentWidth={afterContentWidth}
+              viewportWidth={afterPane?.clientWidth ?? 0}
+              onScroll={handleHorizontalScrollbarScroll}
             />
           </div>
         </div>
@@ -2620,6 +2674,8 @@
     display: block;
     will-change: transform;
     position: relative; /* For AI annotation overlays */
+    width: max-content;
+    min-width: 100%;
   }
 
   .line {
