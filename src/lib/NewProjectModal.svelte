@@ -208,8 +208,8 @@
 
   function handleSubpathFocus() {
     subpathInputFocused = true;
-    // Don't show dropdown on focus - wait for user to type
-    showSubpathDropdown = false;
+    // Show dropdown if field is empty, otherwise wait for user to type
+    showSubpathDropdown = subpath.trim() === '';
   }
 
   function handleSubpathBlur() {
