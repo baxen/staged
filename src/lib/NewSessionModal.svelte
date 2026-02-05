@@ -8,7 +8,7 @@
   builds the full prompt with timeline context.
 -->
 <script lang="ts">
-  import { X, GitCommitHorizontal, Loader2, Send } from 'lucide-svelte';
+  import { X, GitCommitHorizontal, GitBranch, Loader2, Send } from 'lucide-svelte';
   import type { Branch } from './services/branch';
   import { startBranchSession } from './services/branch';
   import AgentSelector from './AgentSelector.svelte';
@@ -37,6 +37,12 @@
       textareaEl.focus();
     }
   });
+
+  // Extract repo name from path
+  function repoName(path: string): string {
+    const parts = path.split('/');
+    return parts[parts.length - 1] || path;
+  }
 
   async function handleStart(e: Event) {
     e.preventDefault();
@@ -100,6 +106,12 @@
     </header>
 
     <form class="modal-content" onsubmit={handleStart}>
+      <div class="branch-info">
+        <GitBranch size={16} />
+        <span class="branch-name">{branch.branchName}</span>
+        <span class="repo-name">in {repoName(branch.repoPath)}</span>
+      </div>
+
       <div class="form-group">
         <label for="prompt">What would you like to work on?</label>
         <textarea
@@ -209,6 +221,29 @@
     display: flex;
     flex-direction: column;
     gap: 16px;
+  }
+
+  .branch-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background-color: var(--bg-hover);
+    border-radius: 6px;
+    font-size: var(--size-sm);
+  }
+
+  .branch-info :global(svg) {
+    color: var(--status-renamed);
+  }
+
+  .branch-name {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  .repo-name {
+    color: var(--text-muted);
   }
 
   .form-group {
