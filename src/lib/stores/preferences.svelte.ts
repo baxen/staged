@@ -55,6 +55,7 @@ const FEATURES_STORE_KEY = 'features';
 const AI_AGENT_STORE_KEY = 'ai-agent';
 const RECENT_REPOS_STORE_KEY = 'recent-repos';
 const WINDOW_TABS_STORE_KEY_PREFIX = 'window-tabs-';
+const VIEW_MODE_STORE_KEY = 'view-mode';
 
 const DEFAULT_SYNTAX_THEME: SyntaxThemeName = 'laserwave';
 const DEFAULT_SIDEBAR_POSITION: SidebarPosition = 'right';
@@ -544,6 +545,33 @@ export async function saveWindowTabsToStore(
 ): Promise<void> {
   const key = `${WINDOW_TABS_STORE_KEY_PREFIX}${windowLabel}`;
   await setStoreValue(key, data);
+}
+
+// =============================================================================
+// View Mode (branches vs diff viewer)
+// =============================================================================
+
+export type ViewMode = 'branches' | 'diff';
+
+const DEFAULT_VIEW_MODE: ViewMode = 'diff';
+
+/**
+ * Save view mode preference.
+ */
+export function saveViewMode(mode: ViewMode): void {
+  setStoreValue(VIEW_MODE_STORE_KEY, mode);
+}
+
+/**
+ * Load saved view mode preference.
+ * Returns the saved mode or the default.
+ */
+export async function loadSavedViewMode(): Promise<ViewMode> {
+  const saved = await getStoreValue<string>(VIEW_MODE_STORE_KEY);
+  if (saved === 'branches' || saved === 'diff') {
+    return saved;
+  }
+  return DEFAULT_VIEW_MODE;
 }
 
 // =============================================================================

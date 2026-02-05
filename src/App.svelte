@@ -61,6 +61,9 @@
     registerPreferenceShortcuts,
     loadSavedAiAgent,
     hasAiAgentSelected,
+    loadSavedViewMode,
+    saveViewMode,
+    type ViewMode,
   } from './lib/stores/preferences.svelte';
   import { loadCustomBindings } from './lib/services/keyboard';
   import { registerShortcut } from './lib/services/keyboard';
@@ -99,7 +102,7 @@
   } from './lib/stores/smartDiff.svelte';
 
   // View mode: 'branches' = branch workflow, 'diff' = traditional diff viewer
-  type ViewMode = 'branches' | 'diff';
+  // ViewMode type is imported from preferences
   let viewMode = $state<ViewMode>('diff');
   /** True when we navigated to diff mode from BranchHome — enables back button */
   let cameFromBranches = $state(false);
@@ -622,6 +625,7 @@
       if (konamiIndex === konamiSequence.length) {
         konamiIndex = 0;
         viewMode = viewMode === 'branches' ? 'diff' : 'branches';
+        saveViewMode(viewMode);
         if (viewMode === 'branches') cameFromBranches = false;
       }
     } else {
@@ -674,6 +678,9 @@
         loadSavedFeatures(),
         loadSavedSyntaxTheme(),
       ]);
+
+      // Load saved view mode (branches vs diff)
+      viewMode = await loadSavedViewMode();
 
       // Check if AI agent has been selected, show setup modal if not
       const hasAgent = await loadSavedAiAgent();
