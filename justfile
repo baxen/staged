@@ -1,7 +1,7 @@
 # Staged - Git Diff Viewer
 
 # Run the app in development mode (optionally point to another repo)
-dev repo="":
+dev repo="": _ensure-deps
     #!/usr/bin/env bash
     set -euo pipefail
     # Pick a free port so multiple worktrees can run simultaneously
@@ -76,6 +76,11 @@ check-all: fmt-check lint typecheck
 # ============================================================================
 # Setup & Maintenance
 # ============================================================================
+
+# Install deps if needed (runs silently if already installed)
+_ensure-deps:
+    @[ -d node_modules/.package-lock.json ] || npm install
+    @[ -d src-tauri/target/debug ] || (cd src-tauri && cargo fetch)
 
 # Install dependencies
 install:

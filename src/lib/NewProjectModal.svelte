@@ -325,7 +325,13 @@
   }
 </script>
 
-<div class="modal-backdrop" role="button" tabindex="-1" onclick={onClose} onkeydown={handleKeydown}>
+<div
+  class="modal-backdrop"
+  role="presentation"
+  tabindex="-1"
+  onclick={onClose}
+  onkeydown={handleKeydown}
+>
   <div
     class="modal"
     role="dialog"

@@ -340,7 +340,6 @@
   }
 
   function handleReviewStarted(branchNoteId: string, aiSessionId: string, provider: string) {
-    console.log('Review started:', { branchNoteId, aiSessionId, provider });
     showNewReviewModal = false;
     loadData();
   }
