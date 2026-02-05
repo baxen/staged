@@ -190,7 +190,7 @@
     border-radius: 6px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     overflow: hidden;
-    z-index: 100;
+    z-index: 1001;
     min-width: 120px;
   }
 
