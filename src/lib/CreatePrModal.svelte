@@ -62,22 +62,16 @@
   function populateDefaults() {
     if (existingPr) return; // Already populated from existing PR
 
-    // Default title: first commit subject or branch name
-    if (commits.length > 0) {
-      // Use first commit subject as title
-      title = commits[0].subject;
+    // Default title: derive from branch name (represents the overall work)
+    // Branch names like "add-dark-mode" become "Add dark mode"
+    title = branch.branchName.replace(/[-_]/g, ' ').replace(/^\w/, (c) => c.toUpperCase());
 
-      // Build body from remaining commits
-      if (commits.length > 1) {
-        const commitList = commits
-          .slice(1)
-          .map((c) => `- ${c.subject}`)
-          .join('\n');
-        body = `## Changes\n\n${commitList}`;
-      }
-    } else {
-      // Fallback to branch name, converting kebab-case to title case
-      title = branch.branchName.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+    // Build body from commits (listed oldest to newest for narrative flow)
+    if (commits.length > 0) {
+      // commits are in reverse chronological order (newest first), so reverse for the body
+      const orderedCommits = [...commits].reverse();
+      const commitList = orderedCommits.map((c) => `- ${c.subject}`).join('\n');
+      body = `## Changes\n\n${commitList}`;
     }
   }
 
