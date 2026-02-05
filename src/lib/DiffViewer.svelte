@@ -1884,11 +1884,12 @@
         </div>
       {/if}
 
-      <!-- Spine / Divider -->
+      <!-- Spine / Divider (hidden in markdown preview mode) -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
         class="spine"
         class:dragging={isDraggingDivider}
+        class:hidden={isMarkdownFile && markdownPreview}
         onmousedown={handleDividerMouseDown}
         ondblclick={handleDividerDoubleClick}
       >
@@ -2512,6 +2513,10 @@
     background-color: transparent;
     position: relative;
     cursor: col-resize;
+  }
+
+  .spine.hidden {
+    display: none;
   }
 
   .spine:hover .divider-handle,
