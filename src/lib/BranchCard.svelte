@@ -22,14 +22,24 @@
     MoreVertical,
     ExternalLink,
     AlertCircle,
+    GitPullRequest,
   } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession, BranchNote, OpenerApp } from './services/branch';
+  import type {
+    Branch,
+    CommitInfo,
+    BranchSession,
+    BranchNote,
+    OpenerApp,
+    PullRequestInfo,
+  } from './services/branch';
   import * as branchService from './services/branch';
   import SessionViewerModal from './SessionViewerModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
   import NewNoteModal from './NewNoteModal.svelte';
   import NoteViewerModal from './NoteViewerModal.svelte';
   import BaseBranchPickerModal from './BaseBranchPickerModal.svelte';
+  import CreatePrModal from './CreatePrModal.svelte';
+  import { openUrl } from './services/window';
 
   interface Props {
     branch: Branch;
@@ -133,6 +143,9 @@
   // Base branch picker modal state
   let showBaseBranchPicker = $state(false);
 
+  // Create PR modal state
+  let showCreatePrModal = $state(false);
+
   // Dropdown state
   let showNewDropdown = $state(false);
   let showMoreMenu = $state(false);
@@ -152,6 +165,10 @@
 
   // Track if the running session is actually alive (AI session still connected)
   let isRunningSessionAlive = $state(true);
+
+  // PR state - fetched from GitHub
+  let existingPr = $state<PullRequestInfo | null>(null);
+  let prLoading = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -210,10 +227,26 @@
         })
       );
       sessionsByCommit = sessionsMap;
+
+      // Load PR info in the background (don't block main data load)
+      loadPrInfo();
     } catch (e) {
       console.error('Failed to load branch data:', e);
     } finally {
       loading = false;
+    }
+  }
+
+  // Load PR info separately (can be slow due to GitHub API)
+  async function loadPrInfo() {
+    prLoading = true;
+    try {
+      existingPr = await branchService.getPrForBranch(branch.repoPath, branch.branchName);
+    } catch (e) {
+      // No PR exists or error fetching - that's fine
+      existingPr = null;
+    } finally {
+      prLoading = false;
     }
   }
 
@@ -760,28 +793,71 @@
   </div>
 
   <div class="card-footer">
-    <div class="new-dropdown-container">
-      <button
-        class="new-button"
-        onclick={toggleDropdown}
-        disabled={!!runningSession || !!generatingNote}
-      >
-        <Plus size={14} />
-        New
-        <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
-      </button>
-      {#if showNewDropdown}
-        <div class="dropdown-menu">
-          <button class="dropdown-item" onclick={handleNewCommit}>
-            <GitCommit size={14} />
-            New Commit
+    <div class="footer-left">
+      {#if commits.length > 0}
+        {#if existingPr}
+          <!-- Show existing PR link -->
+          <button
+            class="pr-button pr-exists"
+            onclick={() => existingPr && openUrl(existingPr.url)}
+            title="View pull request on GitHub"
+          >
+            <GitPullRequest size={14} />
+            #{existingPr.number}
+            {#if existingPr.draft}
+              <span class="pr-draft-badge">Draft</span>
+            {/if}
           </button>
-          <button class="dropdown-item" onclick={handleNewNote}>
-            <FileText size={14} />
-            New Note
+          <button
+            class="pr-update-button"
+            onclick={() => (showCreatePrModal = true)}
+            title="Update pull request"
+          >
+            Update
           </button>
-        </div>
+        {:else if prLoading}
+          <!-- Loading PR state -->
+          <button class="pr-button" disabled>
+            <Loader2 size={14} class="spinner" />
+            PR
+          </button>
+        {:else}
+          <!-- No PR exists, show create button -->
+          <button
+            class="pr-button"
+            onclick={() => (showCreatePrModal = true)}
+            title="Create pull request"
+          >
+            <GitPullRequest size={14} />
+            PR
+          </button>
+        {/if}
       {/if}
+    </div>
+    <div class="footer-right">
+      <div class="new-dropdown-container">
+        <button
+          class="new-button"
+          onclick={toggleDropdown}
+          disabled={!!runningSession || !!generatingNote}
+        >
+          <Plus size={14} />
+          New
+          <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
+        </button>
+        {#if showNewDropdown}
+          <div class="dropdown-menu">
+            <button class="dropdown-item" onclick={handleNewCommit}>
+              <GitCommit size={14} />
+              New Commit
+            </button>
+            <button class="dropdown-item" onclick={handleNewNote}>
+              <FileText size={14} />
+              New Note
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 </div>
@@ -825,6 +901,21 @@
     {branch}
     onClose={() => (showBaseBranchPicker = false)}
     onSelected={handleBaseBranchChanged}
+  />
+{/if}
+
+<!-- Create PR modal -->
+{#if showCreatePrModal}
+  <CreatePrModal
+    {branch}
+    {commits}
+    on:close={() => (showCreatePrModal = false)}
+    on:created={(e) => {
+      showCreatePrModal = false;
+      // Refresh PR info to show the new/updated PR
+      loadPrInfo();
+      openUrl(e.detail.url);
+    }}
   />
 {/if}
 
@@ -1310,9 +1401,81 @@
   /* Footer */
   .card-footer {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     padding: 12px 16px;
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .footer-left {
+    display: flex;
+    gap: 8px;
+  }
+
+  .footer-right {
+    display: flex;
+    gap: 8px;
+  }
+
+  .pr-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .pr-button:hover:not(:disabled) {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
+  }
+
+  .pr-button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+
+  .pr-button.pr-exists {
+    border-color: var(--status-added);
+    color: var(--status-added);
+  }
+
+  .pr-button.pr-exists:hover {
+    background-color: var(--bg-hover);
+  }
+
+  .pr-draft-badge {
+    font-size: var(--size-xs);
+    padding: 1px 5px;
+    background-color: var(--bg-hover);
+    border-radius: 4px;
+    color: var(--text-muted);
+  }
+
+  .pr-update-button {
+    display: flex;
+    align-items: center;
+    padding: 6px 10px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .pr-update-button:hover {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
   }
 
   .new-dropdown-container {
