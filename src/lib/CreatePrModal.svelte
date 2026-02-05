@@ -70,8 +70,9 @@
     error = null;
 
     try {
+      // Use worktreePath for git operations - that's where the branch's commits live
       const result = await generatePrDescription(
-        branch.repoPath,
+        branch.worktreePath,
         branch.branchName,
         branch.baseBranch
       );
