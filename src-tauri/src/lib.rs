@@ -1463,12 +1463,10 @@ async fn delete_branch(state: State<'_, Arc<Store>>, branch_id: String) -> Resul
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
 
-        // Remove the worktree
+        // Remove the worktree (handles both existing and already-deleted directories)
         let repo = Path::new(&branch.repo_path);
         let worktree = Path::new(&branch.worktree_path);
-        if worktree.exists() {
-            git::remove_worktree(repo, worktree).map_err(|e| e.to_string())?;
-        }
+        git::remove_worktree(repo, worktree).map_err(|e| e.to_string())?;
 
         // Delete from database
         store.delete_branch(&branch_id).map_err(|e| e.to_string())?;

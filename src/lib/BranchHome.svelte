@@ -313,7 +313,9 @@
                         <GitBranch size={16} class="pending-branch-icon" />
                         <span class="pending-branch-name">{branch.branchName}</span>
                         <span class="pending-separator">›</span>
-                        <span class="pending-base-branch">{branch.baseBranch.replace(/^origin\//, '')}</span>
+                        <span class="pending-base-branch"
+                          >{branch.baseBranch.replace(/^origin\//, '')}</span
+                        >
                       </div>
                       {#if deleteFailed}
                         <button
