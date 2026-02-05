@@ -1538,17 +1538,20 @@ struct StartBranchSessionResponse {
 }
 
 /// Start a new session on a branch.
-/// Creates an AI session, then a branch_session record linking to it, and sends the prompt.
+/// Creates an AI session, builds the full prompt with context, and sends it.
 ///
-/// - `user_prompt`: The user's original prompt (stored for display in the UI)
-/// - `full_prompt`: The full prompt with context to send to the AI agent
+/// The backend handles all context gathering:
+/// - Fetches branch, commits, sessions, and notes from the Store
+/// - Writes notes to temp files for agent access
+/// - Builds the full prompt with timeline context
+///
+/// - `user_prompt`: The user's task description (stored for display in the UI)
 #[tauri::command(rename_all = "camelCase")]
 async fn start_branch_session(
     state: State<'_, Arc<Store>>,
     session_manager: State<'_, Arc<SessionManager>>,
     branch_id: String,
     user_prompt: String,
-    full_prompt: String,
 ) -> Result<StartBranchSessionResponse, String> {
     // Get the branch to find the worktree path
     let branch = state
@@ -1566,6 +1569,9 @@ async fn start_branch_session(
             running.id
         ));
     }
+
+    // Build the full prompt with context
+    let full_prompt = build_session_prompt(&state, &branch, &user_prompt)?;
 
     // Create an AI session in the worktree directory FIRST
     // This way we have the ai_session_id to store in the branch session
@@ -1596,6 +1602,214 @@ async fn start_branch_session(
         branch_session_id: branch_session.id,
         ai_session_id,
     })
+}
+
+// =============================================================================
+// Prompt Building (internal helpers)
+// =============================================================================
+
+/// Build the full prompt for a branch session, including timeline context.
+fn build_session_prompt(
+    store: &Store,
+    branch: &Branch,
+    user_prompt: &str,
+) -> Result<String, String> {
+    let context = build_branch_context(store, branch)?;
+    let context_block = if context.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n\n", context)
+    };
+
+    Ok(format!(
+        r#"<branch_context>{context_block}
+</branch_context>
+
+<action>The user has indicated via the UI that you should make a new commit on this branch.
+Make the necessary code changes, and when finished create a single commit with a clear message
+that follows conventional commits.
+</action>
+
+{user_prompt}
+"#
+    ))
+}
+
+/// Build the full prompt for a branch note generation, including timeline context.
+fn build_note_prompt(
+    store: &Store,
+    branch: &Branch,
+    title: &str,
+    description: &str,
+) -> Result<String, String> {
+    let context = build_branch_context(store, branch)?;
+    let context_block = if context.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n\n", context)
+    };
+
+    let desc = if description.is_empty() {
+        "Create comprehensive documentation on this topic.".to_string()
+    } else {
+        description.to_string()
+    };
+
+    // TODO we should use an output format and let the LLM provide the title
+    Ok(format!(
+        r#"<branch_context>{context_block}
+</branch_context>
+
+<action>The user has indicated via the UI that you should make a new note for this branch.
+Use your tools as needed to find the content you need, but DO NOT make changes.
+IMPORTANT: Only your FINAL message will become the note content. Any intermediate reasoning, tool calls, or exploratory work you do will NOT be shown to the user. The note must be completely self-contained.
+Be concise.
+</action>
+
+TITLE: {title}
+
+REQUEST: {desc}
+"#
+    ))
+}
+
+/// Build the branch context section for agent prompts.
+/// Includes commit history and note file references in a dense format.
+fn build_branch_context(store: &Store, branch: &Branch) -> Result<String, String> {
+    let worktree = Path::new(&branch.worktree_path);
+
+    // Get commits since base
+    let commits =
+        git::get_commits_since_base(worktree, &branch.base_branch).map_err(|e| e.to_string())?;
+
+    // Get completed notes and write to temp files
+    let notes = store
+        .list_branch_notes(&branch.id)
+        .map_err(|e| e.to_string())?;
+    let completed_notes: Vec<_> = notes
+        .iter()
+        .filter(|n| n.status == store::BranchNoteStatus::Complete && !n.content.is_empty())
+        .collect();
+
+    let note_files = write_notes_to_temp_internal(&branch.id, &completed_notes)?;
+
+    // Check if we have any content
+    let has_commits = !commits.is_empty();
+    let has_notes = !note_files.is_empty();
+
+    if !has_commits && !has_notes {
+        return Ok(String::new());
+    }
+
+    let mut lines = vec![
+        format!(
+            "You are working on branch `{}` (based on `{}`).",
+            branch.branch_name, branch.base_branch
+        ),
+        String::new(),
+        "Here is what has happened on this branch so far (oldest first).".to_string(),
+        String::new(),
+    ];
+
+    // Build timeline entries (commits and notes interleaved by timestamp)
+    struct TimelineEntry {
+        timestamp: i64,
+        text: String,
+    }
+    let mut entries: Vec<TimelineEntry> = Vec::new();
+
+    // Add commits (dense format: just sha and subject)
+    for commit in &commits {
+        entries.push(TimelineEntry {
+            timestamp: commit.timestamp,
+            text: format!("- commit [{}] - {}", commit.short_sha, commit.subject),
+        });
+    }
+
+    // Add notes (dense format: just path and title)
+    for (note, file_path) in completed_notes.iter().zip(note_files.iter()) {
+        entries.push(TimelineEntry {
+            timestamp: note.created_at / 1000, // Convert ms to seconds
+            text: format!("- note [{}] - {}", file_path.path, note.title),
+        });
+    }
+
+    // Sort by timestamp (oldest first)
+    entries.sort_by_key(|e| e.timestamp);
+
+    for entry in entries {
+        lines.push(entry.text);
+    }
+
+    lines.push(String::new());
+    lines.push("You can review the note contents or commit diffs using your tools.".to_string());
+
+    Ok(lines.join("\n"))
+}
+
+/// A note file path result (internal use).
+struct NoteFilePath {
+    #[allow(dead_code)]
+    id: String,
+    #[allow(dead_code)]
+    title: String,
+    path: String,
+}
+
+/// Internal helper to write notes to temp files.
+/// Returns the file paths for the written notes.
+fn write_notes_to_temp_internal(
+    branch_id: &str,
+    notes: &[&BranchNote],
+) -> Result<Vec<NoteFilePath>, String> {
+    if notes.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Create a temp directory for this branch's notes
+    let temp_dir = std::env::temp_dir().join("staged-notes").join(branch_id);
+
+    // Clean up any existing files from previous sessions
+    if temp_dir.exists() {
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    std::fs::create_dir_all(&temp_dir)
+        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+
+    let mut results = Vec::new();
+
+    for note in notes {
+        // Create a safe filename from the title
+        let safe_title: String = note
+            .title
+            .chars()
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .take(50)
+            .collect();
+        let filename = format!("{}-{}.md", safe_title, &note.id[..8.min(note.id.len())]);
+        let file_path = temp_dir.join(&filename);
+
+        // Write the note content with a header
+        let content = format!("# {}\n\n{}\n", note.title, note.content);
+
+        std::fs::write(&file_path, &content)
+            .map_err(|e| format!("Failed to write note file: {}", e))?;
+
+        results.push(NoteFilePath {
+            id: note.id.clone(),
+            title: note.title.clone(),
+            path: file_path.to_string_lossy().to_string(),
+        });
+    }
+
+    Ok(results)
 }
 
 /// Mark a branch session as completed with a commit SHA.
@@ -1788,14 +2002,22 @@ struct StartBranchNoteResponse {
 }
 
 /// Start generating a new note on a branch.
-/// Creates an AI session, then a branch_note record, and sends the prompt.
+/// Creates an AI session, builds the full prompt with context, and sends it.
+///
+/// The backend handles all context gathering:
+/// - Fetches branch, commits, sessions, and notes from the Store
+/// - Writes notes to temp files for agent access
+/// - Builds the full prompt with timeline context
+///
+/// - `title`: The title for the note
+/// - `description`: What the note should cover (user's description)
 #[tauri::command(rename_all = "camelCase")]
 async fn start_branch_note(
     state: State<'_, Arc<Store>>,
     session_manager: State<'_, Arc<SessionManager>>,
     branch_id: String,
     title: String,
-    prompt: String,
+    description: String,
 ) -> Result<StartBranchNoteResponse, String> {
     // Get the branch to find the worktree path
     let branch = state
@@ -1814,6 +2036,9 @@ async fn start_branch_note(
         ));
     }
 
+    // Build the full prompt with context
+    let full_prompt = build_note_prompt(&state, &branch, &title, &description)?;
+
     // Create an AI session in the worktree directory
     let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
     let ai_session_id = session_manager
@@ -1821,14 +2046,22 @@ async fn start_branch_note(
         .await
         .map_err(|e| format!("Failed to create AI session: {}", e))?;
 
-    // Create the branch note record
-    let branch_note = BranchNote::new_generating(&branch_id, &ai_session_id, &title, &prompt);
+    // Create the branch note record (store the user's description as the prompt for display)
+    let user_prompt = if description.is_empty() {
+        title.clone()
+    } else {
+        description.clone()
+    };
+    let branch_note = BranchNote::new_generating(&branch_id, &ai_session_id, &title, &user_prompt);
     state
         .create_branch_note(&branch_note)
         .map_err(|e| format!("Failed to create branch note: {}", e))?;
 
-    // Send the prompt (this runs async in background)
-    if let Err(e) = session_manager.send_prompt(&ai_session_id, prompt).await {
+    // Send the full prompt (with context) to the AI
+    if let Err(e) = session_manager
+        .send_prompt(&ai_session_id, full_prompt)
+        .await
+    {
         // Clean up on failure
         let _ = state.delete_branch_note(&branch_note.id);
         return Err(format!("Failed to send prompt: {}", e));

@@ -3,30 +3,22 @@
 
   Simple modal with a prompt input. The session will run in the branch's
   worktree and produce a commit when complete.
+
+  The backend handles all context gathering (commits, notes, etc.) and
+  builds the full prompt with timeline context.
 -->
 <script lang="ts">
   import { X, GitBranch, Loader2, Send } from 'lucide-svelte';
-  import type { Branch, CommitInfo, BranchSession, BranchNote } from './services/branch';
+  import type { Branch } from './services/branch';
   import { startBranchSession } from './services/branch';
-  import { buildTimelineContext } from './services/timelineContext';
 
   interface Props {
     branch: Branch;
-    commits?: CommitInfo[];
-    sessionsByCommit?: Map<string, BranchSession>;
-    notes?: BranchNote[];
     onClose: () => void;
     onSessionStarted?: (branchSessionId: string, aiSessionId: string) => void;
   }
 
-  let {
-    branch,
-    commits = [],
-    sessionsByCommit = new Map(),
-    notes = [],
-    onClose,
-    onSessionStarted,
-  }: Props = $props();
+  let { branch, onClose, onSessionStarted }: Props = $props();
 
   // State
   let prompt = $state('');
@@ -48,31 +40,6 @@
     return parts[parts.length - 1] || path;
   }
 
-  // Build the full prompt with instructions for commit-focused work
-  function buildCommitPrompt(userPrompt: string): string {
-    const context = buildTimelineContext({
-      branchName: branch.branchName,
-      baseBranch: branch.baseBranch,
-      commits,
-      sessionsByCommit,
-      notes,
-    });
-
-    const contextBlock = context ? `${context}\n\n` : '';
-
-    return `${contextBlock}You are working on a feature branch. Your goal is to complete the following task and create a git commit with your changes.
-
-TASK: ${userPrompt}
-
-Guidelines:
-- Make the necessary code changes to complete the task
-- When finished, create a git commit with a clear, descriptive commit message
-- The commit message should summarize what was done
-- Keep changes focused and atomic - one logical change per session
-
-Begin working on the task now.`;
-  }
-
   async function handleStart() {
     if (!prompt.trim()) return;
 
@@ -81,8 +48,9 @@ Begin working on the task now.`;
 
     try {
       const userPrompt = prompt.trim();
-      const fullPrompt = buildCommitPrompt(userPrompt);
-      const result = await startBranchSession(branch.id, userPrompt, fullPrompt);
+
+      // Backend handles all context gathering and prompt building
+      const result = await startBranchSession(branch.id, userPrompt);
 
       // Notify parent that session started
       onSessionStarted?.(result.branchSessionId, result.aiSessionId);

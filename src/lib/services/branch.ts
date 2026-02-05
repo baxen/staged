@@ -207,21 +207,18 @@ export interface StartBranchSessionResponse {
 
 /**
  * Start a new session on a branch.
- * Creates a branch_session record, starts an AI session, and sends the prompt.
+ * The backend handles all context gathering (commits, notes, etc.) and builds the full prompt.
  *
  * @param branchId - The branch to start the session on
- * @param userPrompt - The user's original prompt (stored for display)
- * @param fullPrompt - The full prompt with context to send to the AI
+ * @param userPrompt - The user's task description
  */
 export async function startBranchSession(
   branchId: string,
-  userPrompt: string,
-  fullPrompt: string
+  userPrompt: string
 ): Promise<StartBranchSessionResponse> {
   return invoke<StartBranchSessionResponse>('start_branch_session', {
     branchId,
     userPrompt,
-    fullPrompt,
   });
 }
 
@@ -294,14 +291,18 @@ export interface StartBranchNoteResponse {
 
 /**
  * Start generating a new note on a branch.
- * Creates an AI session, a branch_note record, and sends the prompt.
+ * The backend handles all context gathering (commits, notes, etc.) and builds the full prompt.
+ *
+ * @param branchId - The branch to create the note on
+ * @param title - The title for the note
+ * @param description - What the note should cover (user's description)
  */
 export async function startBranchNote(
   branchId: string,
   title: string,
-  prompt: string
+  description: string
 ): Promise<StartBranchNoteResponse> {
-  return invoke<StartBranchNoteResponse>('start_branch_note', { branchId, title, prompt });
+  return invoke<StartBranchNoteResponse>('start_branch_note', { branchId, title, description });
 }
 
 /**
