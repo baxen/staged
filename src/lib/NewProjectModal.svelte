@@ -422,40 +422,42 @@
         </div>
 
         <div class="form-group">
-          <label for="project-subpath">Subpath</label>
-          <input
-            bind:this={subpathInputEl}
-            bind:value={subpath}
-            id="project-subpath"
-            type="text"
-            placeholder="e.g., packages/frontend"
-            disabled={saving}
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            onfocus={handleSubpathFocus}
-            onblur={handleSubpathBlur}
-            oninput={handleSubpathInput}
-            onkeydown={handleSubpathKeydown}
-          />
-          {#if showSubpathDropdown && filteredSubpathSuggestions.length > 0}
-            <div class="subpath-suggestions">
-              {#each filteredSubpathSuggestions as entry, index (entry.path)}
-                <button
-                  class="subpath-suggestion"
-                  class:selected={index === subpathSelectedIndex}
-                  onmousedown={(e) => {
-                    e.preventDefault();
-                    selectSubpathSuggestion(entry);
-                  }}
-                >
-                  <Folder size={14} class="suggestion-icon" />
-                  <span class="suggestion-name">{entry.name}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
+          <label for="project-subpath">Subpath <span class="optional-label">(optional)</span></label>
+          <div class="subpath-input-container">
+            <input
+              bind:this={subpathInputEl}
+              bind:value={subpath}
+              id="project-subpath"
+              type="text"
+              placeholder="e.g., packages/frontend"
+              disabled={saving}
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              onfocus={handleSubpathFocus}
+              onblur={handleSubpathBlur}
+              oninput={handleSubpathInput}
+              onkeydown={handleSubpathKeydown}
+            />
+            {#if showSubpathDropdown && filteredSubpathSuggestions.length > 0}
+              <div class="subpath-suggestions">
+                {#each filteredSubpathSuggestions as entry, index (entry.path)}
+                  <button
+                    class="subpath-suggestion"
+                    class:selected={index === subpathSelectedIndex}
+                    onmousedown={(e) => {
+                      e.preventDefault();
+                      selectSubpathSuggestion(entry);
+                    }}
+                  >
+                    <Folder size={14} class="suggestion-icon" />
+                    <span class="suggestion-name">{entry.name}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
           <span class="help-text">
             For monorepos: subdirectory to use as working directory for AI sessions
           </span>
@@ -706,7 +708,17 @@
     color: var(--text-primary);
   }
 
+  .optional-label {
+    font-weight: 400;
+    color: var(--text-faint);
+  }
+
+  .subpath-input-container {
+    position: relative;
+  }
+
   .form-group input {
+    width: 100%;
     padding: 10px 12px;
     background-color: var(--bg-primary);
     border: 1px solid var(--border-muted);
@@ -715,6 +727,7 @@
     color: var(--text-primary);
     outline: none;
     transition: border-color 0.15s;
+    box-sizing: border-box;
   }
 
   .form-group input:focus {
@@ -732,6 +745,12 @@
 
   /* Subpath suggestions dropdown */
   .subpath-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    margin-top: 4px;
     max-height: 160px;
     overflow-y: auto;
     border: 1px solid var(--border-muted);
