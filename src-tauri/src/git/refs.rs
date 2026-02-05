@@ -2,9 +2,36 @@ use super::cli::{self, GitError};
 use std::path::Path;
 
 /// Get the absolute path to the repository root.
+/// For worktrees, this returns the main repository path (not the worktree path).
 pub fn get_repo_root(repo: &Path) -> Result<String, GitError> {
-    let output = cli::run(repo, &["rev-parse", "--show-toplevel"])?;
-    Ok(output.trim().to_string())
+    // First, get the common git directory (works for both regular repos and worktrees)
+    // For a regular repo: /path/to/repo/.git
+    // For a worktree: /path/to/main-repo/.git (the main repo's .git)
+    let git_common_dir = cli::run(repo, &["rev-parse", "--git-common-dir"])?;
+    let git_common_dir = git_common_dir.trim();
+
+    // The main repo path is the parent of the .git directory
+    // Handle both "/path/to/repo/.git" and ".git" (relative path)
+    let main_repo_path = if git_common_dir == ".git" {
+        // We're in the main repo, use --show-toplevel
+        cli::run(repo, &["rev-parse", "--show-toplevel"])?
+            .trim()
+            .to_string()
+    } else {
+        // We're in a worktree or got an absolute path
+        // Strip the "/.git" suffix to get the repo root
+        Path::new(git_common_dir)
+            .parent()
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|| {
+                // Fallback to --show-toplevel if we can't parse
+                cli::run(repo, &["rev-parse", "--show-toplevel"])
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default()
+            })
+    };
+
+    Ok(main_repo_path)
 }
 
 /// List refs (branches, tags, remotes) for autocomplete
