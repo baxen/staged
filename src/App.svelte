@@ -49,6 +49,7 @@
   import { findRecentRepos, type RecentRepo } from './lib/services/files';
   import {
     preferences,
+    initPreferences,
     loadSavedSize,
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
@@ -60,6 +61,9 @@
     registerPreferenceShortcuts,
     loadSavedAiAgent,
     hasAiAgentSelected,
+    loadSavedViewMode,
+    saveViewMode,
+    type ViewMode,
   } from './lib/stores/preferences.svelte';
   import { loadCustomBindings } from './lib/services/keyboard';
   import { registerShortcut } from './lib/services/keyboard';
@@ -98,7 +102,7 @@
   } from './lib/stores/smartDiff.svelte';
 
   // View mode: 'branches' = branch workflow, 'diff' = traditional diff viewer
-  type ViewMode = 'branches' | 'diff';
+  // ViewMode type is imported from preferences
   let viewMode = $state<ViewMode>('diff');
   /** True when we navigated to diff mode from BranchHome — enables back button */
   let cameFromBranches = $state(false);
@@ -621,6 +625,7 @@
       if (konamiIndex === konamiSequence.length) {
         konamiIndex = 0;
         viewMode = viewMode === 'branches' ? 'diff' : 'branches';
+        saveViewMode(viewMode);
         if (viewMode === 'branches') cameFromBranches = false;
       }
     } else {
@@ -634,17 +639,7 @@
 
   onMount(() => {
     document.addEventListener('keydown', handleKonamiKey);
-    loadSavedSize();
-    loadSavedSidebarPosition();
-    loadSavedSidebarWidth();
-    loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
-
-    // Check if AI agent has been selected, show setup modal if not
-    const hasAgent = loadSavedAiAgent();
-    if (!hasAgent) {
-      showAgentSetupModal = true;
-    }
 
     // Initialize live session store for streaming AI sessions
     liveSessionStore.init();
@@ -653,11 +648,6 @@
     findRecentRepos(24, 10).then((repos) => {
       suggestedRepos = repos;
     });
-
-    // Apply custom keyboard bindings after a short delay to let shortcuts register
-    setTimeout(() => {
-      loadCustomBindings(getCustomKeyboardBindings());
-    }, 100);
 
     // Register Cmd+O to open file search
     unregisterFileSearchShortcut = registerShortcut({
@@ -677,7 +667,30 @@
     setReferenceFilesLoader(loadReferenceFiles);
 
     (async () => {
-      await loadSavedSyntaxTheme();
+      // Initialize persistent store first (required before loading any preferences)
+      await initPreferences();
+
+      // Load all saved preferences (now async since they use Tauri store)
+      await Promise.all([
+        loadSavedSize(),
+        loadSavedSidebarPosition(),
+        loadSavedSidebarWidth(),
+        loadSavedFeatures(),
+        loadSavedSyntaxTheme(),
+      ]);
+
+      // Load saved view mode (branches vs diff)
+      viewMode = await loadSavedViewMode();
+
+      // Check if AI agent has been selected, show setup modal if not
+      const hasAgent = await loadSavedAiAgent();
+      if (!hasAgent) {
+        showAgentSetupModal = true;
+      }
+
+      // Apply custom keyboard bindings after preferences are loaded
+      const customBindings = await getCustomKeyboardBindings();
+      loadCustomBindings(customBindings);
 
       // Get window label and initialize tab state
       const label = await getWindowLabel();
