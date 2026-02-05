@@ -567,6 +567,9 @@
                 <div class="timeline-icon note-icon">
                   <Loader2 size={12} class="spinner" />
                 </div>
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
               </div>
               <div class="timeline-content">
                 <span class="timeline-title skeleton-title">{item.note.title}</span>
@@ -586,6 +589,9 @@
                   <div class="timeline-icon commit-icon">
                     <Loader2 size={12} class="spinner" />
                   </div>
+                  {#if index < timeline.length - 1}
+                    <div class="timeline-line"></div>
+                  {/if}
                 </div>
                 <div class="timeline-content">
                   <span class="timeline-title skeleton-title">{item.session.prompt}</span>
@@ -607,6 +613,9 @@
                   >
                     <AlertCircle size={12} />
                   </div>
+                  {#if index < timeline.length - 1}
+                    <div class="timeline-line"></div>
+                  {/if}
                 </div>
                 <div class="timeline-content">
                   <span class="timeline-title skeleton-title">{item.session.prompt}</span>
@@ -641,6 +650,9 @@
                 <div class="timeline-icon commit-icon">
                   <GitCommit size={12} />
                 </div>
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
               </div>
               <div class="timeline-content">
                 <span class="timeline-title">{item.commit.subject}</span>
@@ -716,6 +728,9 @@
                     <FileText size={12} />
                   {/if}
                 </div>
+                {#if index < timeline.length - 1}
+                  <div class="timeline-line"></div>
+                {/if}
               </div>
               <div class="timeline-content">
                 <span class="timeline-title">{item.note.title}</span>
@@ -1165,7 +1180,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    padding: 6px 8px;
+    padding: 8px 8px;
     margin: 0 -8px;
     background: transparent;
     border: none;
@@ -1199,6 +1214,14 @@
     display: flex;
     align-items: center;
     min-width: 0;
+  }
+
+  .timeline-line {
+    flex: 1;
+    width: 2px;
+    min-height: 12px;
+    background-color: var(--border-subtle);
+    margin-top: 2px;
   }
 
   .timeline-icon {
