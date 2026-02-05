@@ -11,6 +11,11 @@ import type { CommentsState } from './comments.svelte';
 import type { DiffSelection } from './diffSelection.svelte';
 import type { AgentState } from './agent.svelte';
 import type { ReferenceFilesState } from './referenceFiles.svelte';
+import {
+  loadWindowTabsFromStore,
+  saveWindowTabsToStore,
+  type StoredTabData,
+} from './preferences.svelte';
 
 // Re-export types for convenience
 export type { DiffState, CommentsState, DiffSelection, AgentState, ReferenceFilesState };
@@ -198,14 +203,11 @@ export function clearNeedsRefresh(tab: TabState): void {
 // Persistence
 // =============================================================================
 
-const STORAGE_KEY_PREFIX = 'staged-window-';
-
 /**
- * Save tabs to localStorage.
+ * Save tabs to persistent store.
  */
 function saveTabsToStorage(): void {
-  const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
-  const data = {
+  const data: StoredTabData = {
     tabs: windowState.tabs.map((t) => ({
       id: t.id,
       projectId: t.projectId,
@@ -215,45 +217,40 @@ function saveTabsToStorage(): void {
     })),
     activeTabIndex: windowState.activeTabIndex,
   };
-  localStorage.setItem(key, JSON.stringify(data));
+  // Fire and forget - don't block on save
+  saveWindowTabsToStore(windowState.windowLabel, data);
 }
 
 /**
- * Load tabs from localStorage.
+ * Load tabs from persistent store.
  * Tabs are recreated with fresh state instances.
  */
-export function loadTabsFromStorage(
+export async function loadTabsFromStorage(
   createDiffState: () => DiffState,
   createCommentsState: () => CommentsState,
   createDiffSelection: () => DiffSelection,
   createAgentState: () => AgentState,
   createReferenceFilesState: () => ReferenceFilesState
-): void {
-  const key = `${STORAGE_KEY_PREFIX}${windowState.windowLabel}-tabs`;
-  const stored = localStorage.getItem(key);
+): Promise<void> {
+  const data = await loadWindowTabsFromStore(windowState.windowLabel);
 
-  if (stored) {
-    try {
-      const data = JSON.parse(stored);
-      // Create tabs with isolated state instances
-      // Plain objects are created - the parent windowState.tabs array is already reactive
-      windowState.tabs = data.tabs.map((t: any) => ({
-        id: t.id || t.projectId, // Fallback for old format
-        projectId: t.projectId || t.id, // Fallback for old format
-        repoPath: t.repoPath,
-        repoName: t.repoName,
-        subpath: t.subpath || null,
-        diffState: createDiffState(),
-        commentsState: createCommentsState(),
-        diffSelection: createDiffSelection(),
-        agentState: createAgentState(),
-        referenceFilesState: createReferenceFilesState(),
-        needsRefresh: false,
-      }));
-      windowState.activeTabIndex = data.activeTabIndex;
-    } catch (e) {
-      console.error('Failed to load tabs from storage:', e);
-    }
+  if (data) {
+    // Create tabs with isolated state instances
+    // Plain objects are created - the parent windowState.tabs array is already reactive
+    windowState.tabs = data.tabs.map((t) => ({
+      id: t.id || t.projectId, // Fallback for old format
+      projectId: t.projectId || t.id, // Fallback for old format
+      repoPath: t.repoPath,
+      repoName: t.repoName,
+      subpath: t.subpath || null,
+      diffState: createDiffState(),
+      commentsState: createCommentsState(),
+      diffSelection: createDiffSelection(),
+      agentState: createAgentState(),
+      referenceFilesState: createReferenceFilesState(),
+      needsRefresh: false,
+    }));
+    windowState.activeTabIndex = data.activeTabIndex;
   }
 }
 

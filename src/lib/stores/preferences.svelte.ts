@@ -1,8 +1,12 @@
 /**
  * User Preferences Store
  *
- * Manages persistent user preferences (localStorage-backed).
+ * Manages persistent user preferences (Tauri store-backed).
  * Handles UI scaling and syntax theme selection.
+ *
+ * Uses Tauri's store plugin instead of localStorage to ensure preferences
+ * persist across dev server restarts (localStorage is origin-scoped and
+ * breaks when the dev port changes).
  *
  * Rebuildable: This module owns all preference state. The rest of the app
  * imports the reactive state directly - no subscriptions needed.
@@ -21,6 +25,12 @@ import {
   type SyntaxThemeName,
 } from '../services/highlighter';
 import { getCustomThemes, readCustomTheme } from '../services/customThemes';
+import {
+  initPersistentStore,
+  getStoreValue,
+  setStoreValue,
+  deleteStoreValue,
+} from '../services/persistentStore';
 
 // Re-export for convenience
 export { isLightTheme };
@@ -35,13 +45,17 @@ const SIZE_MIN = 10;
 const SIZE_MAX = 24;
 const SIZE_DEFAULT = 13;
 
-const SIZE_STORAGE_KEY = 'staged-size-base';
-const SYNTAX_THEME_STORAGE_KEY = 'staged-syntax-theme';
-const SIDEBAR_POSITION_STORAGE_KEY = 'staged-sidebar-position';
-const SIDEBAR_WIDTH_STORAGE_KEY = 'staged-sidebar-width';
-const KEYBOARD_BINDINGS_STORAGE_KEY = 'staged-keyboard-bindings';
-const FEATURES_STORAGE_KEY = 'staged-features';
-const AI_AGENT_STORAGE_KEY = 'staged-ai-agent';
+// Store keys (prefixed for clarity)
+const SIZE_STORE_KEY = 'size-base';
+const SYNTAX_THEME_STORE_KEY = 'syntax-theme';
+const SIDEBAR_POSITION_STORE_KEY = 'sidebar-position';
+const SIDEBAR_WIDTH_STORE_KEY = 'sidebar-width';
+const KEYBOARD_BINDINGS_STORE_KEY = 'keyboard-bindings';
+const FEATURES_STORE_KEY = 'features';
+const AI_AGENT_STORE_KEY = 'ai-agent';
+const RECENT_REPOS_STORE_KEY = 'recent-repos';
+const WINDOW_TABS_STORE_KEY_PREFIX = 'window-tabs-';
+
 const DEFAULT_SYNTAX_THEME: SyntaxThemeName = 'laserwave';
 const DEFAULT_SIDEBAR_POSITION: SidebarPosition = 'right';
 
@@ -129,6 +143,18 @@ function applyAdaptiveTheme() {
 }
 
 // =============================================================================
+// Initialization
+// =============================================================================
+
+/**
+ * Initialize the preferences system.
+ * Must be called once at app startup before loading preferences.
+ */
+export async function initPreferences(): Promise<void> {
+  await initPersistentStore();
+}
+
+// =============================================================================
 // Getters
 // =============================================================================
 
@@ -164,7 +190,7 @@ export function increaseSize(): void {
   if (preferences.sizeBase < SIZE_MAX) {
     preferences.sizeBase += SIZE_STEP;
     applySize();
-    localStorage.setItem(SIZE_STORAGE_KEY, String(preferences.sizeBase));
+    setStoreValue(SIZE_STORE_KEY, preferences.sizeBase);
   }
 }
 
@@ -175,7 +201,7 @@ export function decreaseSize(): void {
   if (preferences.sizeBase > SIZE_MIN) {
     preferences.sizeBase -= SIZE_STEP;
     applySize();
-    localStorage.setItem(SIZE_STORAGE_KEY, String(preferences.sizeBase));
+    setStoreValue(SIZE_STORE_KEY, preferences.sizeBase);
   }
 }
 
@@ -185,19 +211,16 @@ export function decreaseSize(): void {
 export function resetSize(): void {
   preferences.sizeBase = SIZE_DEFAULT;
   applySize();
-  localStorage.setItem(SIZE_STORAGE_KEY, String(preferences.sizeBase));
+  setStoreValue(SIZE_STORE_KEY, preferences.sizeBase);
 }
 
 /**
  * Load saved size preference and apply it.
  */
-export function loadSavedSize(): void {
-  const saved = localStorage.getItem(SIZE_STORAGE_KEY);
-  if (saved) {
-    const parsed = parseInt(saved, 10);
-    if (!isNaN(parsed) && parsed >= SIZE_MIN && parsed <= SIZE_MAX) {
-      preferences.sizeBase = parsed;
-    }
+export async function loadSavedSize(): Promise<void> {
+  const saved = await getStoreValue<number>(SIZE_STORE_KEY);
+  if (saved !== undefined && saved >= SIZE_MIN && saved <= SIZE_MAX) {
+    preferences.sizeBase = saved;
   }
   applySize();
 }
@@ -227,7 +250,7 @@ export async function selectSyntaxTheme(name: string): Promise<void> {
   // Update state (cast to any since custom themes aren't in the type)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   preferences.syntaxTheme = name as any;
-  localStorage.setItem(SYNTAX_THEME_STORAGE_KEY, name);
+  await setStoreValue(SYNTAX_THEME_STORE_KEY, name);
   preferences.syntaxThemeVersion++;
   applyAdaptiveTheme();
 }
@@ -265,7 +288,7 @@ export async function loadSavedSyntaxTheme(): Promise<void> {
   // First, discover custom themes
   await loadCustomThemes();
 
-  const saved = localStorage.getItem(SYNTAX_THEME_STORAGE_KEY);
+  const saved = await getStoreValue<string>(SYNTAX_THEME_STORE_KEY);
 
   if (saved) {
     // Check if it's a custom theme
@@ -295,7 +318,7 @@ export async function loadSavedSyntaxTheme(): Promise<void> {
  */
 export function setSidebarPosition(position: SidebarPosition): void {
   preferences.sidebarPosition = position;
-  localStorage.setItem(SIDEBAR_POSITION_STORAGE_KEY, position);
+  setStoreValue(SIDEBAR_POSITION_STORE_KEY, position);
 }
 
 /**
@@ -308,8 +331,8 @@ export function toggleSidebarPosition(): void {
 /**
  * Load saved sidebar position.
  */
-export function loadSavedSidebarPosition(): void {
-  const saved = localStorage.getItem(SIDEBAR_POSITION_STORAGE_KEY);
+export async function loadSavedSidebarPosition(): Promise<void> {
+  const saved = await getStoreValue<string>(SIDEBAR_POSITION_STORE_KEY);
   if (saved === 'left' || saved === 'right') {
     preferences.sidebarPosition = saved;
   }
@@ -325,7 +348,7 @@ export function loadSavedSidebarPosition(): void {
 export function setSidebarWidth(width: number): void {
   const clamped = Math.max(SIDEBAR_WIDTH_MIN, Math.min(SIDEBAR_WIDTH_MAX, width));
   preferences.sidebarWidth = clamped;
-  localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(clamped));
+  setStoreValue(SIDEBAR_WIDTH_STORE_KEY, clamped);
 }
 
 /**
@@ -333,19 +356,16 @@ export function setSidebarWidth(width: number): void {
  */
 export function resetSidebarWidth(): void {
   preferences.sidebarWidth = SIDEBAR_WIDTH_DEFAULT;
-  localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(SIDEBAR_WIDTH_DEFAULT));
+  setStoreValue(SIDEBAR_WIDTH_STORE_KEY, SIDEBAR_WIDTH_DEFAULT);
 }
 
 /**
  * Load saved sidebar width.
  */
-export function loadSavedSidebarWidth(): void {
-  const saved = localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY);
-  if (saved) {
-    const parsed = parseInt(saved, 10);
-    if (!isNaN(parsed) && parsed >= SIDEBAR_WIDTH_MIN && parsed <= SIDEBAR_WIDTH_MAX) {
-      preferences.sidebarWidth = parsed;
-    }
+export async function loadSavedSidebarWidth(): Promise<void> {
+  const saved = await getStoreValue<number>(SIDEBAR_WIDTH_STORE_KEY);
+  if (saved !== undefined && saved >= SIDEBAR_WIDTH_MIN && saved <= SIDEBAR_WIDTH_MAX) {
+    preferences.sidebarWidth = saved;
   }
 }
 
@@ -354,43 +374,39 @@ export function loadSavedSidebarWidth(): void {
 // =============================================================================
 
 /**
- * Get all custom keyboard bindings from localStorage.
+ * Get all custom keyboard bindings from store.
  */
-export function getCustomKeyboardBindings(): Record<string, KeyboardBinding> {
-  const saved = localStorage.getItem(KEYBOARD_BINDINGS_STORAGE_KEY);
-  if (saved) {
-    try {
-      return JSON.parse(saved);
-    } catch {
-      return {};
-    }
-  }
-  return {};
+export async function getCustomKeyboardBindings(): Promise<Record<string, KeyboardBinding>> {
+  const saved = await getStoreValue<Record<string, KeyboardBinding>>(KEYBOARD_BINDINGS_STORE_KEY);
+  return saved ?? {};
 }
 
 /**
  * Save a custom keyboard binding.
  */
-export function saveCustomKeyboardBinding(id: string, binding: KeyboardBinding): void {
-  const bindings = getCustomKeyboardBindings();
+export async function saveCustomKeyboardBinding(
+  id: string,
+  binding: KeyboardBinding
+): Promise<void> {
+  const bindings = await getCustomKeyboardBindings();
   bindings[id] = binding;
-  localStorage.setItem(KEYBOARD_BINDINGS_STORAGE_KEY, JSON.stringify(bindings));
+  await setStoreValue(KEYBOARD_BINDINGS_STORE_KEY, bindings);
 }
 
 /**
  * Remove a custom keyboard binding (revert to default).
  */
-export function removeCustomKeyboardBinding(id: string): void {
-  const bindings = getCustomKeyboardBindings();
+export async function removeCustomKeyboardBinding(id: string): Promise<void> {
+  const bindings = await getCustomKeyboardBindings();
   delete bindings[id];
-  localStorage.setItem(KEYBOARD_BINDINGS_STORAGE_KEY, JSON.stringify(bindings));
+  await setStoreValue(KEYBOARD_BINDINGS_STORE_KEY, bindings);
 }
 
 /**
  * Reset all custom keyboard bindings.
  */
-export function resetAllKeyboardBindings(): void {
-  localStorage.removeItem(KEYBOARD_BINDINGS_STORAGE_KEY);
+export async function resetAllKeyboardBindings(): Promise<void> {
+  await deleteStoreValue(KEYBOARD_BINDINGS_STORE_KEY);
 }
 
 // =============================================================================
@@ -409,7 +425,7 @@ export function isFeatureEnabled(flag: string): boolean {
  */
 export function setFeatureFlag(flag: string, enabled: boolean): void {
   preferences.features[flag] = enabled;
-  localStorage.setItem(FEATURES_STORAGE_KEY, JSON.stringify(preferences.features));
+  setStoreValue(FEATURES_STORE_KEY, preferences.features);
 }
 
 /**
@@ -420,29 +436,23 @@ export function toggleFeatureFlag(flag: string): void {
 }
 
 /**
- * Load saved feature flags from localStorage.
+ * Load saved feature flags from store.
  * Merges with defaults so new flags get their default values.
  */
-export function loadSavedFeatures(): void {
-  const saved = localStorage.getItem(FEATURES_STORAGE_KEY);
+export async function loadSavedFeatures(): Promise<void> {
+  const saved = await getStoreValue<Record<string, boolean>>(FEATURES_STORE_KEY);
   if (saved) {
-    try {
-      const parsed = JSON.parse(saved);
-      // Merge: defaults first, then saved values override
-      preferences.features = { ...DEFAULT_FEATURES, ...parsed };
-    } catch {
-      // Invalid JSON, use defaults
-      preferences.features = { ...DEFAULT_FEATURES };
-    }
+    // Merge: defaults first, then saved values override
+    preferences.features = { ...DEFAULT_FEATURES, ...saved };
   }
 }
 
 /**
  * Reset all feature flags to defaults.
  */
-export function resetFeatureFlags(): void {
+export async function resetFeatureFlags(): Promise<void> {
   preferences.features = { ...DEFAULT_FEATURES };
-  localStorage.removeItem(FEATURES_STORAGE_KEY);
+  await deleteStoreValue(FEATURES_STORE_KEY);
 }
 
 // =============================================================================
@@ -454,15 +464,15 @@ export function resetFeatureFlags(): void {
  */
 export function setAiAgent(agentId: string): void {
   preferences.aiAgent = agentId;
-  localStorage.setItem(AI_AGENT_STORAGE_KEY, agentId);
+  setStoreValue(AI_AGENT_STORE_KEY, agentId);
 }
 
 /**
  * Load saved AI agent preference.
  * Returns true if a preference was found.
  */
-export function loadSavedAiAgent(): boolean {
-  const saved = localStorage.getItem(AI_AGENT_STORAGE_KEY);
+export async function loadSavedAiAgent(): Promise<boolean> {
+  const saved = await getStoreValue<string>(AI_AGENT_STORE_KEY);
   if (saved) {
     preferences.aiAgent = saved;
     return true;
@@ -475,6 +485,65 @@ export function loadSavedAiAgent(): boolean {
  */
 export function hasAiAgentSelected(): boolean {
   return preferences.aiAgent !== null;
+}
+
+// =============================================================================
+// Recent Repos (exported for repoState.svelte.ts)
+// =============================================================================
+
+export interface RepoEntry {
+  path: string;
+  name: string;
+}
+
+/**
+ * Load recent repos from store.
+ */
+export async function loadRecentReposFromStore(): Promise<RepoEntry[]> {
+  const saved = await getStoreValue<RepoEntry[]>(RECENT_REPOS_STORE_KEY);
+  return saved ?? [];
+}
+
+/**
+ * Save recent repos to store.
+ */
+export async function saveRecentReposToStore(repos: RepoEntry[]): Promise<void> {
+  await setStoreValue(RECENT_REPOS_STORE_KEY, repos);
+}
+
+// =============================================================================
+// Window Tabs (exported for tabState.svelte.ts)
+// =============================================================================
+
+export interface StoredTabData {
+  tabs: Array<{
+    id: string;
+    projectId: string;
+    repoPath: string;
+    repoName: string;
+    subpath: string | null;
+  }>;
+  activeTabIndex: number;
+}
+
+/**
+ * Load window tabs from store.
+ */
+export async function loadWindowTabsFromStore(windowLabel: string): Promise<StoredTabData | null> {
+  const key = `${WINDOW_TABS_STORE_KEY_PREFIX}${windowLabel}`;
+  const saved = await getStoreValue<StoredTabData>(key);
+  return saved ?? null;
+}
+
+/**
+ * Save window tabs to store.
+ */
+export async function saveWindowTabsToStore(
+  windowLabel: string,
+  data: StoredTabData
+): Promise<void> {
+  const key = `${WINDOW_TABS_STORE_KEY_PREFIX}${windowLabel}`;
+  await setStoreValue(key, data);
 }
 
 // =============================================================================

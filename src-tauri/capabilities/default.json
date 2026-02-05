@@ -11,6 +11,7 @@
     "dialog:default",
     "clipboard-manager:allow-write-text",
     "window-state:default",
-    "mcp-bridge:default"
+    "mcp-bridge:default",
+    "store:default"
   ]
 }

@@ -49,6 +49,7 @@
   import { findRecentRepos, type RecentRepo } from './lib/services/files';
   import {
     preferences,
+    initPreferences,
     loadSavedSize,
     loadSavedSyntaxTheme,
     loadSavedSidebarPosition,
@@ -634,17 +635,7 @@
 
   onMount(() => {
     document.addEventListener('keydown', handleKonamiKey);
-    loadSavedSize();
-    loadSavedSidebarPosition();
-    loadSavedSidebarWidth();
-    loadSavedFeatures();
     unregisterPreferenceShortcuts = registerPreferenceShortcuts();
-
-    // Check if AI agent has been selected, show setup modal if not
-    const hasAgent = loadSavedAiAgent();
-    if (!hasAgent) {
-      showAgentSetupModal = true;
-    }
 
     // Initialize live session store for streaming AI sessions
     liveSessionStore.init();
@@ -653,11 +644,6 @@
     findRecentRepos(24, 10).then((repos) => {
       suggestedRepos = repos;
     });
-
-    // Apply custom keyboard bindings after a short delay to let shortcuts register
-    setTimeout(() => {
-      loadCustomBindings(getCustomKeyboardBindings());
-    }, 100);
 
     // Register Cmd+O to open file search
     unregisterFileSearchShortcut = registerShortcut({
@@ -677,7 +663,27 @@
     setReferenceFilesLoader(loadReferenceFiles);
 
     (async () => {
-      await loadSavedSyntaxTheme();
+      // Initialize persistent store first (required before loading any preferences)
+      await initPreferences();
+
+      // Load all saved preferences (now async since they use Tauri store)
+      await Promise.all([
+        loadSavedSize(),
+        loadSavedSidebarPosition(),
+        loadSavedSidebarWidth(),
+        loadSavedFeatures(),
+        loadSavedSyntaxTheme(),
+      ]);
+
+      // Check if AI agent has been selected, show setup modal if not
+      const hasAgent = await loadSavedAiAgent();
+      if (!hasAgent) {
+        showAgentSetupModal = true;
+      }
+
+      // Apply custom keyboard bindings after preferences are loaded
+      const customBindings = await getCustomKeyboardBindings();
+      loadCustomBindings(customBindings);
 
       // Get window label and initialize tab state
       const label = await getWindowLabel();

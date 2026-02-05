@@ -4778,6 +4778,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-log",
  "tauri-plugin-mcp-bridge",
+ "tauri-plugin-store",
  "tauri-plugin-window-state",
  "tempfile",
  "thiserror 2.0.17",
@@ -5256,6 +5257,22 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows-core 0.61.2",
+]
+
+[[package]]
+name = "tauri-plugin-store"
+version = "2.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5ca1a8ff83c269b115e98726ffc13f9e548a10161544a92ad121d6d0a96e16ea"
+dependencies = [
+ "dunce",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-plugin",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

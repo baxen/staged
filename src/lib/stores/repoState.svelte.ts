@@ -2,27 +2,25 @@
  * Repository State Store
  *
  * Manages the current repository path and recent repositories list.
- * Persists recent repos to localStorage.
+ * Persists recent repos to Tauri store (not localStorage, which breaks on dev port changes).
  */
 
 import { getRepoRoot } from '../services/git';
 import { getInitialPath } from '../services/window';
+import {
+  loadRecentReposFromStore,
+  saveRecentReposToStore,
+  type RepoEntry,
+} from './preferences.svelte';
+
+// Re-export the type
+export type { RepoEntry };
 
 // =============================================================================
 // Constants
 // =============================================================================
 
-const RECENT_REPOS_KEY = 'staged-recent-repos';
 const MAX_RECENT_REPOS = 10;
-
-// =============================================================================
-// Types
-// =============================================================================
-
-export interface RepoEntry {
-  path: string;
-  name: string;
-}
 
 // =============================================================================
 // Reactive State
@@ -41,23 +39,14 @@ export const repoState = $state({
 // Persistence
 // =============================================================================
 
-function loadRecentRepos(): RepoEntry[] {
-  try {
-    const saved = localStorage.getItem(RECENT_REPOS_KEY);
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) {
-        return parsed.slice(0, MAX_RECENT_REPOS);
-      }
-    }
-  } catch {
-    // Ignore parse errors
-  }
-  return [];
+async function loadRecentRepos(): Promise<RepoEntry[]> {
+  const repos = await loadRecentReposFromStore();
+  return repos.slice(0, MAX_RECENT_REPOS);
 }
 
 function saveRecentRepos(repos: RepoEntry[]): void {
-  localStorage.setItem(RECENT_REPOS_KEY, JSON.stringify(repos.slice(0, MAX_RECENT_REPOS)));
+  // Fire and forget - don't block on save
+  saveRecentReposToStore(repos.slice(0, MAX_RECENT_REPOS));
 }
 
 function addToRecentRepos(entry: RepoEntry): void {
@@ -90,7 +79,7 @@ function extractRepoName(repoPath: string): string {
  * Returns the canonical repo path, or null if not in a git repo.
  */
 export async function initRepoState(): Promise<string | null> {
-  repoState.recentRepos = loadRecentRepos();
+  repoState.recentRepos = await loadRecentRepos();
 
   // Check for CLI argument first (e.g., `staged /path/to/repo`)
   let initialPath = await getInitialPath();
