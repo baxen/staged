@@ -537,9 +537,7 @@
       {#if openerApps.length > 0}
         <div class="open-in-container">
           <button class="open-button" onclick={toggleOpenInDropdown} title="Open in...">
-            <ExternalLink size={13} />
-            Open
-            <ChevronDown size={12} />
+            <ExternalLink size={13} /> Open <ChevronDown size={12} />
           </button>
           {#if showOpenInDropdown}
             <div class="open-in-dropdown">
@@ -548,7 +546,6 @@
                   {app.name}
                 </button>
               {/each}
-              <div class="open-in-divider"></div>
               <button class="open-in-item" onclick={handleCopyPath}>
                 Copy Path
               </button>
