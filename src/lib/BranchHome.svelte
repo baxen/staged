@@ -26,16 +26,17 @@
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal, { type PendingBranch } from './NewBranchModal.svelte';
+  import NewProjectModal from './NewProjectModal.svelte';
   import ProjectSettingsModal from './ProjectSettingsModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
 
   interface Props {
     onViewDiff?: (repoPath: string, spec: DiffSpec, label: string) => void;
-    onNewBranchRequest?: (trigger: () => void) => void;
+    onAddProjectRequest?: (trigger: () => void) => void;
   }
 
-  let { onViewDiff, onNewBranchRequest }: Props = $props();
+  let { onViewDiff, onAddProjectRequest }: Props = $props();
 
   // State
   let branches = $state<Branch[]>([]);
@@ -62,36 +63,35 @@
   let newBranchForProject = $state<GitProject | null>(null);
   let branchToDelete = $state<Branch | null>(null);
   let projectToEdit = $state<GitProject | null>(null);
+  let showNewProjectModal = $state(false);
 
-  // Expose the new branch trigger to parent
+  // Expose the add project trigger to parent (top bar "Add Project" button)
   $effect(() => {
-    onNewBranchRequest?.(() => {
-      newBranchForProject = null;
-      showNewBranchModal = true;
+    onAddProjectRequest?.(() => {
+      showNewProjectModal = true;
     });
   });
 
   // Group branches by project (including pending ones)
-  // Projects are created lazily when branches exist for a repo
+  // Seed all known projects so empty ones still appear in the list
   let branchesByProject = $derived.by(() => {
     const grouped = new Map<
       string,
       { project: GitProject; branches: Branch[]; pending: PendingBranch[] }
     >();
 
-    // Create a map from repoPath to project for quick lookup
+    // Seed every project (even those with no branches yet)
     const projectByRepo = new Map<string, GitProject>();
     for (const project of projects) {
       projectByRepo.set(project.repoPath, project);
+      grouped.set(project.id, { project, branches: [], pending: [] });
     }
 
     // Add real branches
     for (const branch of branches) {
       const project = projectByRepo.get(branch.repoPath);
       if (project) {
-        const existing = grouped.get(project.id) || { project, branches: [], pending: [] };
-        existing.branches.push(branch);
-        grouped.set(project.id, existing);
+        grouped.get(project.id)!.branches.push(branch);
       }
     }
 
@@ -99,17 +99,15 @@
     for (const pending of pendingBranches) {
       const project = projectByRepo.get(pending.repoPath);
       if (project) {
-        const existing = grouped.get(project.id) || { project, branches: [], pending: [] };
-        existing.pending.push(pending);
-        grouped.set(project.id, existing);
+        grouped.get(project.id)!.pending.push(pending);
       }
     }
 
     return grouped;
   });
 
-  // Check if we have any branches or pending branches
-  let hasBranches = $derived(branches.length > 0 || pendingBranches.length > 0);
+  // Show the main list when there's anything to display
+  let hasContent = $derived(branches.length > 0 || pendingBranches.length > 0 || projects.length > 0);
 
   // Generate a unique key for a pending branch
   function pendingKey(pending: PendingBranch): string {
@@ -299,6 +297,11 @@
     projectToEdit = project;
   }
 
+  function handleNewProjectCreated(project: GitProject) {
+    projects = [...projects, project];
+    showNewProjectModal = false;
+  }
+
   async function handleProjectUpdated(updated: GitProject) {
     // Update the project in our list
     projects = projects.map((p) => (p.id === updated.id ? updated : p));
@@ -323,12 +326,14 @@
 
     // Escape - Close modals
     if (e.key === 'Escape') {
-      if (showNewBranchModal) {
+      if (showNewProjectModal) {
+        e.preventDefault();
+        showNewProjectModal = false;
+      } else if (showNewBranchModal) {
         e.preventDefault();
         showNewBranchModal = false;
         newBranchForProject = null;
-      }
-      if (projectToEdit) {
+      } else if (projectToEdit) {
         e.preventDefault();
         projectToEdit = null;
       }
@@ -356,7 +361,7 @@
       <div class="error-state">
         <p>{error}</p>
       </div>
-    {:else if !hasBranches}
+    {:else if !hasContent}
       <div class="empty-state">
         <Sparkles size={48} strokeWidth={1} />
         <h2>Welcome to Staged</h2>
@@ -488,17 +493,18 @@
           </div>
         {/each}
 
-        <!-- New branch button at bottom -->
-        <div class="new-branch-section">
-          <button class="new-branch-button" onclick={() => handleNewBranch()}>
-            <Plus size={16} />
-            New Branch
-          </button>
-        </div>
       </div>
     {/if}
   </div>
 </div>
+
+<!-- New project modal -->
+{#if showNewProjectModal}
+  <NewProjectModal
+    onCreated={handleNewProjectCreated}
+    onClose={() => (showNewProjectModal = false)}
+  />
+{/if}
 
 <!-- New branch modal -->
 {#if showNewBranchModal}
@@ -691,33 +697,6 @@
     display: flex;
     flex-direction: column;
     gap: 12px;
-  }
-
-  /* New branch button at bottom */
-  .new-branch-section {
-    display: flex;
-    justify-content: center;
-    padding-top: 8px;
-  }
-
-  .new-branch-button {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 20px;
-    background-color: transparent;
-    border: 1px dashed var(--border-muted);
-    border-radius: 8px;
-    color: var(--text-muted);
-    font-size: var(--size-md);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .new-branch-button:hover {
-    border-color: var(--ui-accent);
-    color: var(--ui-accent);
-    background-color: var(--bg-hover);
   }
 
   /* Pending branch card */

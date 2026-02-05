@@ -101,8 +101,8 @@
   let viewMode = $state<ViewMode>('diff');
   /** True when we navigated to diff mode from BranchHome — enables back button */
   let cameFromBranches = $state(false);
-  /** Trigger function to open new branch modal, provided by BranchHome */
-  let triggerNewBranch = $state<(() => void) | undefined>(undefined);
+  /** Trigger function to open add project modal, provided by BranchHome */
+  let triggerAddProject = $state<(() => void) | undefined>(undefined);
 
   // UI State
   let unsubscribeWatcher: Unsubscribe | null = null;
@@ -772,10 +772,10 @@
 <main>
   {#if viewMode === 'branches'}
     <!-- Branch-based workflow view -->
-    <BranchTopBar onNewBranch={triggerNewBranch} />
+    <BranchTopBar onAddProject={triggerAddProject} />
     <BranchHome
       onViewDiff={handleViewDiffFromBranches}
-      onNewBranchRequest={(fn) => (triggerNewBranch = fn)}
+      onAddProjectRequest={(fn) => (triggerAddProject = fn)}
     />
   {:else}
     <!-- Traditional diff viewer -->
