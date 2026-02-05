@@ -126,6 +126,27 @@
     return items;
   });
 
+  // Initial prompt for new commit (if latest item is a note)
+  let initialCommitPrompt = $derived.by(() => {
+    if (timeline.length === 0) return undefined;
+
+    // Get the latest non-running, non-generating item
+    let latestItem: TimelineItem | undefined;
+    for (let i = timeline.length - 1; i >= 0; i--) {
+      const item = timeline[i];
+      if (item.type === 'note' || item.type === 'commit') {
+        latestItem = item;
+        break;
+      }
+    }
+
+    if (latestItem && latestItem.type === 'note') {
+      return `Implement "${latestItem.note.title}"`;
+    }
+
+    return undefined;
+  });
+
   // Session viewer modal state (used for both commits and notes)
   let showSessionViewer = $state(false);
   let viewingSessionId = $state<string | null>(null);
@@ -901,6 +922,7 @@
     {branch}
     onClose={() => (showContinueModal = false)}
     onSessionStarted={handleSessionStarted}
+    initialPrompt={initialCommitPrompt}
   />
 {/if}
 

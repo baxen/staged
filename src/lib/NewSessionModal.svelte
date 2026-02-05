@@ -19,12 +19,13 @@
     branch: Branch;
     onClose: () => void;
     onSessionStarted?: (branchSessionId: string, aiSessionId: string) => void;
+    initialPrompt?: string;
   }
 
-  let { branch, onClose, onSessionStarted }: Props = $props();
+  let { branch, onClose, onSessionStarted, initialPrompt }: Props = $props();
 
   // State
-  let prompt = $state('');
+  let prompt = $state(initialPrompt || '');
   let starting = $state(false);
   let error = $state<string | null>(null);
   let selectedProvider = $state<AcpProvider>((preferences.aiAgent as AcpProvider) || 'goose');
