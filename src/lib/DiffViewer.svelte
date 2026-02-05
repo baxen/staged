@@ -21,7 +21,11 @@
     Trash2,
     Wand2,
     Loader2,
+    Eye,
+    Code,
   } from 'lucide-svelte';
+  import { marked } from 'marked';
+  import DOMPurify from 'dompurify';
   import type { FileDiff, Alignment, Comment, Span } from './types';
   import {
     commentsState,
@@ -207,6 +211,9 @@
     visible: boolean;
   } | null = $state(null);
 
+  // Markdown preview mode
+  let markdownPreview = $state(false);
+
   // ==========================================================================
   // Derived state
   // ==========================================================================
@@ -244,6 +251,28 @@
   let beforePath = $derived(diff?.before?.path ?? null);
   let afterPath = $derived(diff?.after?.path ?? null);
   let currentFilePath = $derived(afterPath ?? beforePath ?? '');
+
+  // Markdown file detection
+  let isMarkdownFile = $derived(
+    currentFilePath.endsWith('.md') || currentFilePath.endsWith('.markdown')
+  );
+
+  // Rendered markdown content
+  let beforeMarkdownHtml = $derived.by(() => {
+    if (!isMarkdownFile || !markdownPreview) return '';
+    const content = beforeLines.join('\n');
+    if (!content.trim()) return '';
+    const html = marked.parse(content, { async: false }) as string;
+    return DOMPurify.sanitize(html);
+  });
+
+  let afterMarkdownHtml = $derived.by(() => {
+    if (!isMarkdownFile || !markdownPreview) return '';
+    const content = afterLines.join('\n');
+    if (!content.trim()) return '';
+    const html = marked.parse(content, { async: false }) as string;
+    return DOMPurify.sanitize(html);
+  });
 
   // AI annotations for current file
   // Only show informational annotations (explanations/context) as blur overlays
@@ -571,6 +600,12 @@
   function redrawConnectorsImpl() {
     if (!connectorRenderer || !afterPane || !diff) return;
 
+    // Don't draw connectors in markdown preview mode
+    if (isMarkdownFile && markdownPreview) {
+      connectorRenderer.clear();
+      return;
+    }
+
     // For single-pane modes, we still draw comment highlights
     const sourcePane = beforePane ?? afterPane;
     const firstLine = sourcePane.querySelector('.line') as HTMLElement | null;
@@ -597,6 +632,14 @@
   $effect(() => {
     const _ = sizeBase;
     if (diff && connectorCanvas && afterPane) {
+      scheduleConnectorRedraw();
+    }
+  });
+
+  // Redraw (or clear) connectors when markdown preview mode changes
+  $effect(() => {
+    const _ = markdownPreview;
+    if (diff && connectorCanvas) {
       scheduleConnectorRedraw();
     }
   });
@@ -1713,76 +1756,101 @@
               {diffBaseDisplay}
             </span>
             <span class="pane-path" title={beforePath}>{beforePath ?? 'No file'}</span>
-          </div>
-          <div class="code-area" onwheel={handleBeforeWheel}>
-            <Scrollbar
-              scrollY={scrollController.beforeScrollY}
-              contentHeight={beforeContentHeight}
-              viewportHeight={beforePane?.clientHeight ?? 0}
-              side="left"
-              onScroll={handleBeforeScrollbarScroll}
-              markers={beforeMarkers}
-            />
-            <div class="code-container" bind:this={beforePane}>
-              <div
-                class="lines-wrapper"
-                style="transform: translateY(-{scrollController.beforeScrollY}px)"
+            {#if isMarkdownFile}
+              <button
+                class="markdown-toggle"
+                onclick={() => (markdownPreview = !markdownPreview)}
+                title={markdownPreview ? 'Show code' : 'Preview markdown'}
               >
-                {#each beforeLines as line, i}
-                  {@const boundary = showRangeMarkers
-                    ? getLineBoundary(activeAlignments, 'before', i)
-                    : { isStart: false, isEnd: false }}
-                  {@const isInHoveredRange = isLineInHoveredRange('before', i)}
-                  {@const isInFocusedHunk = isLineInFocusedHunk('before', i)}
-                  {@const isChanged = showRangeMarkers && isLineInChangedAlignment('before', i)}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <div
-                    class="line"
-                    class:range-start={boundary.isStart}
-                    class:range-end={boundary.isEnd}
-                    class:range-hovered={isInHoveredRange}
-                    class:range-focused={isInFocusedHunk}
-                    class:content-changed={isChanged}
-                    onmouseenter={() => handleLineMouseEnter('before', i)}
-                    onmouseleave={handleLineMouseLeave}
-                  >
-                    <span class="line-content">
-                      {#each getHighlightedTokens(i, 'left') as segment}
-                        <span
-                          style="color: {segment.color}"
-                          class:search-match={segment.isMatch}
-                          class:search-current={segment.isCurrent}>{segment.content}</span
-                        >
-                      {/each}
-                    </span>
-                  </div>
-                {/each}
-                {#if beforeLines.length === 0}
-                  <div class="empty-pane-notice">
-                    <span class="empty-pane-label">No previous version</span>
+                {#if markdownPreview}
+                  <Code size={14} />
+                {:else}
+                  <Eye size={14} />
+                {/if}
+              </button>
+            {/if}
+          </div>
+          <div
+            class="code-area"
+            class:markdown-mode={isMarkdownFile && markdownPreview}
+            onwheel={isMarkdownFile && markdownPreview ? undefined : handleBeforeWheel}
+          >
+            {#if isMarkdownFile && markdownPreview}
+              <div class="markdown-preview-container">
+                <div class="markdown-body">
+                  {@html beforeMarkdownHtml}
+                </div>
+              </div>
+            {:else}
+              <Scrollbar
+                scrollY={scrollController.beforeScrollY}
+                contentHeight={beforeContentHeight}
+                viewportHeight={beforePane?.clientHeight ?? 0}
+                side="left"
+                onScroll={handleBeforeScrollbarScroll}
+                markers={beforeMarkers}
+              />
+              <div class="code-container" bind:this={beforePane}>
+                <div
+                  class="lines-wrapper"
+                  style="transform: translateY(-{scrollController.beforeScrollY}px)"
+                >
+                  {#each beforeLines as line, i}
+                    {@const boundary = showRangeMarkers
+                      ? getLineBoundary(activeAlignments, 'before', i)
+                      : { isStart: false, isEnd: false }}
+                    {@const isInHoveredRange = isLineInHoveredRange('before', i)}
+                    {@const isInFocusedHunk = isLineInFocusedHunk('before', i)}
+                    {@const isChanged = showRangeMarkers && isLineInChangedAlignment('before', i)}
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                      class="line"
+                      class:range-start={boundary.isStart}
+                      class:range-end={boundary.isEnd}
+                      class:range-hovered={isInHoveredRange}
+                      class:range-focused={isInFocusedHunk}
+                      class:content-changed={isChanged}
+                      onmouseenter={() => handleLineMouseEnter('before', i)}
+                      onmouseleave={handleLineMouseLeave}
+                    >
+                      <span class="line-content">
+                        {#each getHighlightedTokens(i, 'left') as segment}
+                          <span
+                            style="color: {segment.color}"
+                            class:search-match={segment.isMatch}
+                            class:search-current={segment.isCurrent}>{segment.content}</span
+                          >
+                        {/each}
+                      </span>
+                    </div>
+                  {/each}
+                  {#if beforeLines.length === 0}
+                    <div class="empty-pane-notice">
+                      <span class="empty-pane-label">No previous version</span>
+                    </div>
+                  {/if}
+                </div>
+                <!-- Full-pane AI blur overlay with before_description text -->
+                {#if showBeforeAnnotations && annotationsRevealed}
+                  {@const lineHeight = scrollController.getDimensions('before').lineHeight || 20}
+                  <div class="ai-blur-overlay">
+                    {#each beforeFileAnnotations as annotation}
+                      {#if annotation.before_span}
+                        <BeforeAnnotationOverlay
+                          {annotation}
+                          top={annotation.before_span.start * lineHeight -
+                            scrollController.beforeScrollY}
+                          height={(annotation.before_span.end - annotation.before_span.start) *
+                            lineHeight}
+                          revealed={true}
+                          containerWidth={beforePaneWidth}
+                        />
+                      {/if}
+                    {/each}
                   </div>
                 {/if}
               </div>
-              <!-- Full-pane AI blur overlay with before_description text -->
-              {#if showBeforeAnnotations && annotationsRevealed}
-                {@const lineHeight = scrollController.getDimensions('before').lineHeight || 20}
-                <div class="ai-blur-overlay">
-                  {#each beforeFileAnnotations as annotation}
-                    {#if annotation.before_span}
-                      <BeforeAnnotationOverlay
-                        {annotation}
-                        top={annotation.before_span.start * lineHeight -
-                          scrollController.beforeScrollY}
-                        height={(annotation.before_span.end - annotation.before_span.start) *
-                          lineHeight}
-                        revealed={true}
-                        containerWidth={beforePaneWidth}
-                      />
-                    {/if}
-                  {/each}
-                </div>
-              {/if}
-            </div>
+            {/if}
           </div>
         </div>
       {/if}
@@ -1839,7 +1907,11 @@
         ondblclick={handleDividerDoubleClick}
       >
         <div class="divider-handle"></div>
-        <canvas class="spine-connector" bind:this={connectorCanvas}></canvas>
+        <canvas
+          class="spine-connector"
+          class:hidden={isMarkdownFile && markdownPreview}
+          bind:this={connectorCanvas}
+        ></canvas>
       </div>
 
       <!-- After pane (two-pane mode or created file) -->
@@ -1852,79 +1924,104 @@
               {diffHeadDisplay}
             </span>
             <span class="pane-path" title={afterPath}>{afterPath ?? 'No file'}</span>
-          </div>
-          <div class="code-area" onwheel={handleAfterWheel}>
-            <div class="code-container" bind:this={afterPane}>
-              <div
-                class="lines-wrapper"
-                style="transform: translateY(-{scrollController.afterScrollY}px)"
+            {#if isMarkdownFile}
+              <button
+                class="markdown-toggle"
+                onclick={() => (markdownPreview = !markdownPreview)}
+                title={markdownPreview ? 'Show code' : 'Preview markdown'}
               >
-                {#each afterLines as line, i}
-                  {@const boundary = showRangeMarkers
-                    ? getLineBoundary(activeAlignments, 'after', i)
-                    : { isStart: false, isEnd: false }}
-                  {@const isInHoveredRange = isLineInHoveredRange('after', i)}
-                  {@const isInFocusedHunk = isLineInFocusedHunk('after', i)}
-                  {@const isChanged = showRangeMarkers && isLineInChangedAlignment('after', i)}
-                  {@const isSelected = isLineSelected('after', i)}
-                  <!-- svelte-ignore a11y_no_static_element_interactions -->
-                  <div
-                    class="line"
-                    class:range-start={boundary.isStart}
-                    class:range-end={boundary.isEnd}
-                    class:range-hovered={isInHoveredRange}
-                    class:range-focused={isInFocusedHunk}
-                    class:content-changed={isChanged}
-                    class:line-selected={isSelected}
-                    onmouseenter={() => handleLineMouseEnter('after', i)}
-                    onmouseleave={handleLineMouseLeave}
-                    onmousedown={(e) => handleLineMouseDown('after', i, e)}
-                  >
-                    <span class="line-content">
-                      {#each getHighlightedTokens(i, 'right') as segment}
-                        <span
-                          style="color: {segment.color}"
-                          class:search-match={segment.isMatch}
-                          class:search-current={segment.isCurrent}>{segment.content}</span
-                        >
-                      {/each}
-                    </span>
-                  </div>
-                {/each}
-                {#if afterLines.length === 0}
-                  <div class="empty-pane-notice">
-                    <span class="empty-pane-label">File deleted</span>
+                {#if markdownPreview}
+                  <Code size={14} />
+                {:else}
+                  <Eye size={14} />
+                {/if}
+              </button>
+            {/if}
+          </div>
+          <div
+            class="code-area"
+            class:markdown-mode={isMarkdownFile && markdownPreview}
+            onwheel={isMarkdownFile && markdownPreview ? undefined : handleAfterWheel}
+          >
+            {#if isMarkdownFile && markdownPreview}
+              <div class="markdown-preview-container">
+                <div class="markdown-body">
+                  {@html afterMarkdownHtml}
+                </div>
+              </div>
+            {:else}
+              <div class="code-container" bind:this={afterPane}>
+                <div
+                  class="lines-wrapper"
+                  style="transform: translateY(-{scrollController.afterScrollY}px)"
+                >
+                  {#each afterLines as line, i}
+                    {@const boundary = showRangeMarkers
+                      ? getLineBoundary(activeAlignments, 'after', i)
+                      : { isStart: false, isEnd: false }}
+                    {@const isInHoveredRange = isLineInHoveredRange('after', i)}
+                    {@const isInFocusedHunk = isLineInFocusedHunk('after', i)}
+                    {@const isChanged = showRangeMarkers && isLineInChangedAlignment('after', i)}
+                    {@const isSelected = isLineSelected('after', i)}
+                    <!-- svelte-ignore a11y_no_static_element_interactions -->
+                    <div
+                      class="line"
+                      class:range-start={boundary.isStart}
+                      class:range-end={boundary.isEnd}
+                      class:range-hovered={isInHoveredRange}
+                      class:range-focused={isInFocusedHunk}
+                      class:content-changed={isChanged}
+                      class:line-selected={isSelected}
+                      onmouseenter={() => handleLineMouseEnter('after', i)}
+                      onmouseleave={handleLineMouseLeave}
+                      onmousedown={(e) => handleLineMouseDown('after', i, e)}
+                    >
+                      <span class="line-content">
+                        {#each getHighlightedTokens(i, 'right') as segment}
+                          <span
+                            style="color: {segment.color}"
+                            class:search-match={segment.isMatch}
+                            class:search-current={segment.isCurrent}>{segment.content}</span
+                          >
+                        {/each}
+                      </span>
+                    </div>
+                  {/each}
+                  {#if afterLines.length === 0}
+                    <div class="empty-pane-notice">
+                      <span class="empty-pane-label">File deleted</span>
+                    </div>
+                  {/if}
+                </div>
+                <!-- Full-pane AI blur overlay with annotation text -->
+                {#if showAiAnnotations && annotationsRevealed}
+                  {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
+                  <div class="ai-blur-overlay">
+                    {#each currentFileAnnotations as annotation}
+                      {#if annotation.after_span}
+                        <AnnotationOverlay
+                          {annotation}
+                          top={annotation.after_span.start * lineHeight -
+                            scrollController.afterScrollY}
+                          height={(annotation.after_span.end - annotation.after_span.start) *
+                            lineHeight}
+                          revealed={true}
+                          containerWidth={afterPaneWidth}
+                        />
+                      {/if}
+                    {/each}
                   </div>
                 {/if}
               </div>
-              <!-- Full-pane AI blur overlay with annotation text -->
-              {#if showAiAnnotations && annotationsRevealed}
-                {@const lineHeight = scrollController.getDimensions('after').lineHeight || 20}
-                <div class="ai-blur-overlay">
-                  {#each currentFileAnnotations as annotation}
-                    {#if annotation.after_span}
-                      <AnnotationOverlay
-                        {annotation}
-                        top={annotation.after_span.start * lineHeight -
-                          scrollController.afterScrollY}
-                        height={(annotation.after_span.end - annotation.after_span.start) *
-                          lineHeight}
-                        revealed={true}
-                        containerWidth={afterPaneWidth}
-                      />
-                    {/if}
-                  {/each}
-                </div>
-              {/if}
-            </div>
-            <Scrollbar
-              scrollY={scrollController.afterScrollY}
-              contentHeight={afterContentHeight}
-              viewportHeight={afterPane?.clientHeight ?? 0}
-              side="right"
-              onScroll={handleAfterScrollbarScroll}
-              markers={afterMarkers}
-            />
+              <Scrollbar
+                scrollY={scrollController.afterScrollY}
+                contentHeight={afterContentHeight}
+                viewportHeight={afterPane?.clientHeight ?? 0}
+                side="right"
+                onScroll={handleAfterScrollbarScroll}
+                markers={afterMarkers}
+              />
+            {/if}
           </div>
         </div>
       {:else if isNewFile}
@@ -2283,6 +2380,147 @@
     white-space: nowrap;
   }
 
+  .markdown-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    padding: 4px;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+      color 0.1s,
+      background-color 0.1s;
+  }
+
+  .markdown-toggle:hover {
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
+  }
+
+  .code-area.markdown-mode {
+    overflow-y: auto;
+  }
+
+  .markdown-preview-container {
+    padding: 16px 20px;
+  }
+
+  .markdown-body {
+    color: var(--text-primary);
+    font-size: var(--size-sm);
+    line-height: 1.6;
+  }
+
+  .markdown-body :global(h1),
+  .markdown-body :global(h2),
+  .markdown-body :global(h3),
+  .markdown-body :global(h4),
+  .markdown-body :global(h5),
+  .markdown-body :global(h6) {
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+
+  .markdown-body :global(h1) {
+    font-size: 1.75em;
+  }
+  .markdown-body :global(h2) {
+    font-size: 1.5em;
+  }
+  .markdown-body :global(h3) {
+    font-size: 1.25em;
+  }
+  .markdown-body :global(h4) {
+    font-size: 1.1em;
+  }
+
+  .markdown-body :global(p) {
+    margin: 0.75em 0;
+  }
+
+  .markdown-body :global(code) {
+    padding: 0.2em 0.4em;
+    background-color: var(--bg-primary);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+  }
+
+  .markdown-body :global(pre) {
+    margin: 1em 0;
+    padding: 12px 16px;
+    background-color: var(--bg-primary);
+    border-radius: 6px;
+    overflow-x: auto;
+  }
+
+  .markdown-body :global(pre code) {
+    padding: 0;
+    background: none;
+  }
+
+  .markdown-body :global(ul),
+  .markdown-body :global(ol) {
+    margin: 0.75em 0;
+    padding-left: 1.5em;
+  }
+
+  .markdown-body :global(li) {
+    margin: 0.25em 0;
+  }
+
+  .markdown-body :global(blockquote) {
+    margin: 1em 0;
+    padding: 0.5em 1em;
+    border-left: 4px solid var(--border-muted);
+    color: var(--text-muted);
+    background-color: var(--bg-primary);
+  }
+
+  .markdown-body :global(a) {
+    color: var(--text-link);
+    text-decoration: none;
+  }
+
+  .markdown-body :global(a:hover) {
+    text-decoration: underline;
+  }
+
+  .markdown-body :global(table) {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1em 0;
+  }
+
+  .markdown-body :global(th),
+  .markdown-body :global(td) {
+    padding: 8px 12px;
+    border: 1px solid var(--border-muted);
+    text-align: left;
+  }
+
+  .markdown-body :global(th) {
+    background-color: var(--bg-primary);
+    font-weight: 600;
+  }
+
+  .markdown-body :global(hr) {
+    border: none;
+    border-top: 1px solid var(--border-muted);
+    margin: 1.5em 0;
+  }
+
+  .markdown-body :global(img) {
+    max-width: 100%;
+    height: auto;
+  }
+
   /* Spine / Divider */
   .spine {
     width: 16px;
@@ -2327,6 +2565,10 @@
     flex: 1;
     width: 100%;
     overflow: visible;
+  }
+
+  .spine-connector.hidden {
+    visibility: hidden;
   }
 
   /* Code area wrapper - contains code-container and scrollbar markers */
