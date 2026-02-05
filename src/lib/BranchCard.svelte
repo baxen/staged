@@ -24,7 +24,6 @@
     ExternalLink,
     AlertCircle,
     GitPullRequest,
-    Copy,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -551,7 +550,6 @@
               {/each}
               <div class="open-in-divider"></div>
               <button class="open-in-item" onclick={handleCopyPath}>
-                <Copy size={14} />
                 Copy Path
               </button>
             </div>
@@ -1109,10 +1107,6 @@
     height: 1px;
     background-color: var(--border-subtle);
     margin: 4px 0;
-  }
-
-  .open-in-item :global(svg) {
-    color: var(--text-muted);
   }
 
   /* More menu */
