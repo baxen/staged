@@ -102,12 +102,12 @@ let badgeHeight = textHeight + padding * 2
 let cornerRadius = badgeHeight * 0.2
 let badgeWidth = maxLineWidth + padding * 4
 let badgeX = (size.width - badgeWidth) / 2
-let badgeY = padding + size.height * 0.05  // Raised slightly higher
+let badgeY = size.height - badgeHeight - padding - size.height * 0.05
 
-// Draw badge background (dark semi-transparent, no border)
-let badgePath = NSBezierPath(roundedRect: NSRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight), 
+// Draw badge background (light blue semi-transparent)
+let badgePath = NSBezierPath(roundedRect: NSRect(x: badgeX, y: badgeY, width: badgeWidth, height: badgeHeight),
                               xRadius: cornerRadius, yRadius: cornerRadius)
-NSColor(calibratedRed: 0.1, green: 0.1, blue: 0.1, alpha: 0.85).setFill()
+NSColor(calibratedRed: 0.4, green: 0.7, blue: 1.0, alpha: 0.85).setFill()
 badgePath.fill()
 
 // Draw text centered in badge (multiple lines, bottom to top)
