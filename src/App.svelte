@@ -50,18 +50,11 @@
   import {
     preferences,
     initPreferences,
-    loadSavedSize,
-    loadSavedSyntaxTheme,
-    loadSavedSidebarPosition,
-    loadSavedSidebarWidth,
-    loadSavedFeatures,
+    loadAllPreferences,
     setSidebarWidth,
     resetSidebarWidth,
     getCustomKeyboardBindings,
     registerPreferenceShortcuts,
-    loadSavedAiAgent,
-    hasAiAgentSelected,
-    loadSavedViewMode,
     saveViewMode,
     type ViewMode,
   } from './lib/stores/preferences.svelte';
@@ -670,20 +663,11 @@
       // Initialize persistent store first (required before loading any preferences)
       await initPreferences();
 
-      // Load all saved preferences (now async since they use Tauri store)
-      await Promise.all([
-        loadSavedSize(),
-        loadSavedSidebarPosition(),
-        loadSavedSidebarWidth(),
-        loadSavedFeatures(),
-        loadSavedSyntaxTheme(),
-      ]);
+      // Load all saved preferences at once - this sets preferences.loaded = true
+      const { viewMode: savedViewMode, hasAgent } = await loadAllPreferences();
+      viewMode = savedViewMode;
 
-      // Load saved view mode (branches vs diff)
-      viewMode = await loadSavedViewMode();
-
-      // Check if AI agent has been selected, show setup modal if not
-      const hasAgent = await loadSavedAiAgent();
+      // Show agent setup modal if no agent has been selected
       if (!hasAgent) {
         showAgentSetupModal = true;
       }
@@ -806,7 +790,12 @@
 </script>
 
 <main>
-  {#if viewMode === 'branches'}
+  {#if !preferences.loaded}
+    <!-- Block rendering until preferences are loaded to prevent flash of default state -->
+    <div class="loading-state">
+      <p>Loading...</p>
+    </div>
+  {:else if viewMode === 'branches'}
     <!-- Branch-based workflow view -->
     <BranchTopBar onAddProject={triggerAddProject} />
     <BranchHome
