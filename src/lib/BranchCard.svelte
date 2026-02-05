@@ -716,9 +716,6 @@
 {#if showContinueModal}
   <NewSessionModal
     {branch}
-    {commits}
-    {sessionsByCommit}
-    {notes}
     onClose={() => (showContinueModal = false)}
     onSessionStarted={handleSessionStarted}
   />
@@ -728,9 +725,6 @@
 {#if showNewNoteModal}
   <NewNoteModal
     {branch}
-    {commits}
-    {sessionsByCommit}
-    {notes}
     onClose={() => (showNewNoteModal = false)}
     onNoteStarted={handleNoteStarted}
   />

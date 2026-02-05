@@ -2,73 +2,25 @@
   NewNoteModal.svelte - Modal for creating a new note on a branch
 
   Prompts for a title and description, then starts AI generation.
+  The backend handles all context gathering and prompt building.
 -->
 <script lang="ts">
   import { X, FileText, Loader2 } from 'lucide-svelte';
-  import type {
-    Branch,
-    CommitInfo,
-    BranchSession,
-    BranchNote,
-    NoteFilePath,
-  } from './services/branch';
+  import type { Branch } from './services/branch';
   import * as branchService from './services/branch';
-  import { buildTimelineContext } from './services/timelineContext';
 
   interface Props {
     branch: Branch;
-    commits?: CommitInfo[];
-    sessionsByCommit?: Map<string, BranchSession>;
-    notes?: BranchNote[];
     onClose: () => void;
     onNoteStarted: (branchNoteId: string, aiSessionId: string) => void;
   }
 
-  let {
-    branch,
-    commits = [],
-    sessionsByCommit = new Map(),
-    notes = [],
-    onClose,
-    onNoteStarted,
-  }: Props = $props();
+  let { branch, onClose, onNoteStarted }: Props = $props();
 
   let title = $state('');
   let description = $state('');
   let submitting = $state(false);
   let error = $state<string | null>(null);
-
-  // Build the prompt for the AI - note-focused work
-  function buildPrompt(noteFiles: NoteFilePath[]): string {
-    const context = buildTimelineContext({
-      branchId: branch.id,
-      branchName: branch.branchName,
-      baseBranch: branch.baseBranch,
-      commits,
-      sessionsByCommit,
-      noteFiles,
-    });
-
-    const contextBlock = context ? `${context}\n\n` : '';
-
-    return `${contextBlock}You are creating a documentation artifact. Your task is to research and write a markdown document.
-
-TITLE: ${title}
-
-DESCRIPTION: ${description || 'Create comprehensive documentation on this topic.'}
-
-IMPORTANT: Only your FINAL message will become the note content. Any intermediate reasoning, tool calls, or exploratory work you do will NOT be shown to the user. The note must be completely self-contained.
-
-Guidelines for your final response:
-- Write in well-structured Markdown
-- Use clear headings (##, ###) to organize content  
-- Include code blocks with language tags when showing code
-- Be thorough but concise
-- The document should stand alone without needing the conversation context
-- Do NOT include any preamble like "Here is the document" - start directly with the content
-
-Begin by exploring the codebase if needed, then write your final response as the complete markdown document.`;
-  }
 
   async function handleSubmit(e: Event) {
     e.preventDefault();
@@ -82,19 +34,12 @@ Begin by exploring the codebase if needed, then write your final response as the
     error = null;
 
     try {
-      // Write existing notes to temp files (outside workspace to avoid committing them)
-      const completedNotes = notes.filter((n) => n.status === 'complete' && n.content);
-      const noteFiles = await branchService.writeNotesToTemp(
+      // Backend handles all context gathering and prompt building
+      const response = await branchService.startBranchNote(
         branch.id,
-        completedNotes.map((n) => ({
-          id: n.id,
-          title: n.title,
-          content: n.content,
-        }))
+        title.trim(),
+        description.trim()
       );
-
-      const prompt = buildPrompt(noteFiles);
-      const response = await branchService.startBranchNote(branch.id, title.trim(), prompt);
       onNoteStarted(response.branchNoteId, response.aiSessionId);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
