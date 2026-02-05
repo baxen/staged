@@ -381,14 +381,24 @@
     return firstLine ? firstLine.getBoundingClientRect().height : 20;
   }
 
+  // Measure content width (max line width)
+  function measureContentWidth(pane: HTMLElement | null): number {
+    if (!pane) return 0;
+    const linesWrapper = pane.querySelector('.lines-wrapper') as HTMLElement | null;
+    return linesWrapper ? linesWrapper.scrollWidth : 0;
+  }
+
   // Update dimensions when panes are available or content changes
   $effect(() => {
     if (beforePane && beforeLines.length > 0) {
       const lineHeight = measureLineHeight(beforePane);
+      const contentWidth = measureContentWidth(beforePane);
       scrollController.setDimensions('before', {
         viewportHeight: beforePane.clientHeight,
         contentHeight: beforeLines.length * lineHeight,
         lineHeight,
+        viewportWidth: beforePane.clientWidth,
+        contentWidth,
       });
     }
   });
@@ -396,10 +406,13 @@
   $effect(() => {
     if (afterPane && afterLines.length > 0) {
       const lineHeight = measureLineHeight(afterPane);
+      const contentWidth = measureContentWidth(afterPane);
       scrollController.setDimensions('after', {
         viewportHeight: afterPane.clientHeight,
         contentHeight: afterLines.length * lineHeight,
         lineHeight,
+        viewportWidth: afterPane.clientWidth,
+        contentWidth,
       });
     }
   });
@@ -865,7 +878,18 @@
 
   function handleWheel(side: 'before' | 'after', e: WheelEvent) {
     e.preventDefault();
-    scrollController.scrollBy(side, e.deltaY);
+
+    // Handle vertical scroll
+    if (e.deltaY !== 0) {
+      scrollController.scrollBy(side, e.deltaY);
+    }
+
+    // Handle horizontal scroll (shift+wheel or trackpad horizontal gesture)
+    const deltaX = e.shiftKey ? e.deltaY : e.deltaX;
+    if (deltaX !== 0) {
+      // Sync horizontal scroll for both panes
+      scrollController.scrollByXBoth(deltaX);
+    }
 
     // Trigger UI updates
     redrawConnectors();
@@ -1793,7 +1817,7 @@
               <div class="code-container" bind:this={beforePane}>
                 <div
                   class="lines-wrapper"
-                  style="transform: translateY(-{scrollController.beforeScrollY}px)"
+                  style="transform: translate(-{scrollController.beforeScrollX}px, -{scrollController.beforeScrollY}px)"
                 >
                   {#each beforeLines as line, i}
                     {@const boundary = showRangeMarkers
@@ -1877,7 +1901,7 @@
             <div class="code-container" bind:this={beforePane}>
               <div
                 class="lines-wrapper"
-                style="transform: translateY(-{scrollController.beforeScrollY}px)"
+                style="transform: translate(-{scrollController.beforeScrollX}px, -{scrollController.beforeScrollY}px)"
               >
                 {#each beforeLines as line, i}
                   <div class="line">
@@ -1953,7 +1977,7 @@
               <div class="code-container" bind:this={afterPane}>
                 <div
                   class="lines-wrapper"
-                  style="transform: translateY(-{scrollController.afterScrollY}px)"
+                  style="transform: translate(-{scrollController.afterScrollX}px, -{scrollController.afterScrollY}px)"
                 >
                   {#each afterLines as line, i}
                     {@const boundary = showRangeMarkers
@@ -2039,7 +2063,7 @@
             <div class="code-container" bind:this={afterPane}>
               <div
                 class="lines-wrapper"
-                style="transform: translateY(-{scrollController.afterScrollY}px)"
+                style="transform: translate(-{scrollController.afterScrollX}px, -{scrollController.afterScrollY}px)"
               >
                 {#each afterLines as line, i}
                   {@const isSelected = isLineSelected('after', i)}
