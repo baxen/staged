@@ -82,13 +82,21 @@ pub fn create_worktree(
 /// Remove a worktree.
 ///
 /// Removes both the worktree directory and the git worktree reference.
+/// If the worktree directory was already deleted from disk, prunes the
+/// stale administrative files instead.
 pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> Result<(), GitError> {
-    let worktree_str = worktree_path
-        .to_str()
-        .ok_or_else(|| GitError::InvalidPath(worktree_path.display().to_string()))?;
+    if worktree_path.exists() {
+        // Worktree exists on disk - remove it normally
+        let worktree_str = worktree_path
+            .to_str()
+            .ok_or_else(|| GitError::InvalidPath(worktree_path.display().to_string()))?;
 
-    // Remove the worktree: git worktree remove <path> --force
-    cli::run(repo, &["worktree", "remove", worktree_str, "--force"])?;
+        // Remove the worktree: git worktree remove <path> --force
+        cli::run(repo, &["worktree", "remove", worktree_str, "--force"])?;
+    } else {
+        // Worktree was already deleted from disk - prune stale references
+        cli::run(repo, &["worktree", "prune"])?;
+    }
 
     Ok(())
 }
