@@ -1,108 +1,76 @@
-<!--
-  NoteViewerModal.svelte - View a branch note (live or historical)
+<script module lang="ts">
+  // Simple markdown renderer - converts basic markdown to HTML
+  // For a production app, you'd want to use a proper markdown library
+  function renderMarkdown(content: string): string {
+    let html = escapeHtml(content);
 
-  Shows the markdown content of a note. For generating notes,
-  subscribes to streaming events for real-time updates via the shared store.
+    // Headers
+    html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+    // Bold and italic
+    html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+
+    // Code blocks
+    html = html.replace(
+      /```(\w*)\n([\s\S]*?)```/g,
+      '<pre><code class="language-$1">$2</code></pre>'
+    );
+
+    // Inline code
+    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+    // Links
+    html = html.replace(
+      /\[([^\]]+)\]\(([^)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener">$1</a>'
+    );
+
+    // Unordered lists
+    html = html.replace(/^- (.+)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+    // Paragraphs (double newlines)
+    html = html.replace(/\n\n+/g, '</p><p>');
+    html = '<p>' + html + '</p>';
+
+    // Clean up empty paragraphs and fix list wrapping
+    html = html.replace(/<p>\s*<\/p>/g, '');
+    html = html.replace(/<p>\s*(<ul>)/g, '$1');
+    html = html.replace(/(<\/ul>)\s*<\/p>/g, '$1');
+    html = html.replace(/<p>\s*(<h[123]>)/g, '$1');
+    html = html.replace(/(<\/h[123]>)\s*<\/p>/g, '$1');
+    html = html.replace(/<p>\s*(<pre>)/g, '$1');
+    html = html.replace(/(<\/pre>)\s*<\/p>/g, '$1');
+
+    return html;
+  }
+
+  function escapeHtml(text: string): string {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+</script>
+
+<!--
+  NoteViewerModal.svelte - View a branch note's markdown content
+
+  Shows the rendered markdown content of a note in a modal.
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
-  import { X, FileText, Loader2, AlertCircle, MessageSquare } from 'lucide-svelte';
+  import { X } from 'lucide-svelte';
   import type { BranchNote } from './services/branch';
-  import { getSession, type SessionFull } from './services/ai';
-  import { toDisplayMessage, type DisplayMessage } from './types/streaming';
-  import {
-    connectToSession,
-    disconnectFromSession,
-    type StreamingSessionState,
-    type ConnectOptions,
-  } from './stores/streamingSession.svelte';
-  import StreamingMessages from './StreamingMessages.svelte';
-  import { marked } from 'marked';
-  import DOMPurify from 'dompurify';
 
   interface Props {
     note: BranchNote;
-    /** Whether this is a live generating note */
-    isLive?: boolean;
     onClose: () => void;
   }
 
-  let { note, isLive = false, onClose }: Props = $props();
-
-  // View mode: 'content' shows rendered markdown, 'session' shows the AI conversation
-  let viewMode = $state<'content' | 'session'>('content');
-
-  // Session data (loaded when switching to session view)
-  let session = $state<SessionFull | null>(null);
-  let sessionLoading = $state(false);
-  let sessionError = $state<string | null>(null);
-
-  // Streaming store connection
-  let streamState = $state<StreamingSessionState | null>(null);
-  let connectOptions: ConnectOptions | undefined;
-
-  // Derived state
-  let isGenerating = $derived(note.status === 'generating');
-  let isError = $derived(note.status === 'error');
-  let hasSession = $derived(!!note.aiSessionId);
-
-  // Render markdown content
-  let renderedContent = $derived.by(() => {
-    if (!note.content) return '';
-    const rawHtml = marked(note.content) as string;
-    return DOMPurify.sanitize(rawHtml);
-  });
-
-  // Refs
-  let contentContainer: HTMLDivElement;
-
-  onMount(async () => {
-    if (isLive && isGenerating && note.aiSessionId) {
-      connectOptions = {
-        onIdle: () => onClose(),
-        onError: () => {
-          // Error state is handled via note.status
-        },
-      };
-      streamState = connectToSession(note.aiSessionId, connectOptions);
-    }
-  });
-
-  onDestroy(() => {
-    if (note.aiSessionId) {
-      disconnectFromSession(note.aiSessionId, connectOptions);
-    }
-  });
-
-  async function loadSession() {
-    if (!note.aiSessionId || session) return;
-
-    sessionLoading = true;
-    sessionError = null;
-
-    try {
-      session = await getSession(note.aiSessionId);
-      if (!session) {
-        sessionError = 'Session not found';
-      }
-    } catch (e) {
-      sessionError = e instanceof Error ? e.message : String(e);
-    } finally {
-      sessionLoading = false;
-    }
-  }
-
-  // Convert session messages to DisplayMessage format for StreamingMessages
-  let sessionMessages = $derived<DisplayMessage[]>(session?.messages.map(toDisplayMessage) ?? []);
-
-  function switchToContent() {
-    viewMode = 'content';
-  }
-
-  function switchToSession() {
-    viewMode = 'session';
-    loadSession();
-  }
+  let { note, onClose }: Props = $props();
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
@@ -125,95 +93,21 @@
   >
     <header class="modal-header">
       <div class="header-content">
-        <FileText size={18} />
         <span class="header-title">{note.title}</span>
-        {#if isGenerating}
-          <span class="status-badge generating">
-            <Loader2 size={12} class="spinning" />
-            Generating
-          </span>
-        {/if}
       </div>
-      <div class="header-right">
-        {#if hasSession && !isGenerating}
-          <div class="view-toggle">
-            <button
-              class="toggle-btn"
-              class:active={viewMode === 'content'}
-              onclick={switchToContent}
-              title="View content"
-            >
-              <FileText size={14} />
-              <span>Content</span>
-            </button>
-            <button
-              class="toggle-btn"
-              class:active={viewMode === 'session'}
-              onclick={switchToSession}
-              title="View session"
-            >
-              <MessageSquare size={14} />
-              <span>Session</span>
-            </button>
-          </div>
-        {/if}
-        <button class="close-btn" onclick={onClose}>
-          <X size={18} />
-        </button>
-      </div>
+      <button class="close-btn" onclick={onClose}>
+        <X size={18} />
+      </button>
     </header>
 
-    <div class="modal-content" bind:this={contentContainer}>
-      {#if isGenerating}
-        <!-- Live streaming view during generation -->
-        <div class="generating-view">
-          <div class="generating-header">
-            <Loader2 size={16} class="spinning" />
-            <span>Generating note...</span>
-          </div>
-
-          <div class="streaming-content">
-            <StreamingMessages
-              messages={[]}
-              streamingSegments={streamState?.streamingSegments ?? []}
-              isActive={true}
-              waitingText="Waiting for AI response..."
-            />
-          </div>
-        </div>
-      {:else if isError}
-        <div class="error-content">
-          <div class="error-indicator">
-            <AlertCircle size={24} />
-            <span>Generation Failed</span>
-          </div>
-          <p class="error-message">{note.errorMessage || 'An unknown error occurred'}</p>
-        </div>
-      {:else if viewMode === 'session'}
-        <!-- Session view -->
-        <div class="session-view">
-          {#if sessionLoading}
-            <div class="session-loading">
-              <Loader2 size={24} class="spinning" />
-              <span>Loading session...</span>
-            </div>
-          {:else if sessionError}
-            <div class="session-error">
-              <AlertCircle size={24} />
-              <span>{sessionError}</span>
-            </div>
-          {:else if session}
-            <StreamingMessages messages={sessionMessages} streamingSegments={[]} isActive={false} />
-          {/if}
+    <div class="modal-content">
+      {#if note.content}
+        <div class="markdown-content">
+          {@html renderMarkdown(note.content)}
         </div>
       {:else}
-        <!-- Content view (rendered markdown) -->
-        <div class="markdown-content">
-          {#if note.content}
-            {@html renderedContent}
-          {:else}
-            <p class="empty-content">No content yet</p>
-          {/if}
+        <div class="empty-state">
+          <span>No content available</span>
         </div>
       {/if}
     </div>
@@ -258,11 +152,7 @@
     gap: 10px;
     color: var(--text-primary);
     min-width: 0;
-  }
-
-  .header-content :global(svg) {
-    flex-shrink: 0;
-    color: var(--text-accent);
+    flex: 1;
   }
 
   .header-title {
@@ -271,60 +161,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-
-  .status-badge {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    padding: 2px 8px;
-    border-radius: 10px;
-    font-size: var(--size-xs);
-    font-weight: 500;
-    flex-shrink: 0;
-  }
-
-  .status-badge.generating {
-    background: var(--text-accent);
-    color: var(--bg-deepest);
-  }
-
-  .header-right {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .view-toggle {
-    display: flex;
-    background: var(--bg-elevated);
-    border-radius: 6px;
-    padding: 2px;
-    gap: 2px;
-  }
-
-  .toggle-btn {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 10px;
-    background: transparent;
-    border: none;
-    border-radius: 4px;
-    color: var(--text-muted);
-    font-size: var(--size-xs);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .toggle-btn:hover {
-    color: var(--text-primary);
-  }
-
-  .toggle-btn.active {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
   }
 
   .close-btn {
@@ -353,120 +189,48 @@
     padding: 20px;
   }
 
-  /* Generating view */
-  .generating-view {
-    display: flex;
-    flex-direction: column;
-    height: 100%;
-  }
-
-  .generating-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-bottom: 16px;
-    margin-bottom: 16px;
-    border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-accent);
-    font-size: var(--size-sm);
-    font-weight: 500;
-  }
-
-  .streaming-content {
-    flex: 1;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  /* Error state */
-  .error-content {
+  .empty-state {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    height: 100%;
-    gap: 16px;
+    gap: 12px;
     padding: 40px;
-  }
-
-  .error-indicator {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    color: var(--ui-danger);
-    font-size: var(--size-lg);
-  }
-
-  .error-message {
-    font-size: var(--size-sm);
-    color: var(--ui-danger);
-    margin: 0;
-    text-align: center;
-    max-width: 400px;
-  }
-
-  /* Session view */
-  .session-view {
-    height: 100%;
-  }
-
-  .session-loading,
-  .session-error {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    gap: 12px;
     color: var(--text-muted);
   }
 
-  .session-error {
-    color: var(--ui-danger);
-  }
-
-  /* Markdown content */
+  /* Markdown content styles */
   .markdown-content {
-    font-size: var(--size-md);
-    line-height: 1.6;
     color: var(--text-primary);
-  }
-
-  .empty-content {
-    color: var(--text-faint);
-    font-style: italic;
-    text-align: center;
-    padding: 40px;
+    line-height: 1.6;
   }
 
   .markdown-content :global(h1) {
     font-size: var(--size-xl);
     font-weight: 600;
     margin: 0 0 16px 0;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
   }
 
   .markdown-content :global(h2) {
     font-size: var(--size-lg);
     font-weight: 600;
     margin: 24px 0 12px 0;
+    color: var(--text-primary);
   }
 
   .markdown-content :global(h3) {
     font-size: var(--size-md);
     font-weight: 600;
     margin: 20px 0 8px 0;
+    color: var(--text-primary);
   }
 
   .markdown-content :global(p) {
     margin: 0 0 12px 0;
   }
 
-  .markdown-content :global(ul),
-  .markdown-content :global(ol) {
+  .markdown-content :global(ul) {
     margin: 0 0 12px 0;
     padding-left: 24px;
   }
@@ -477,14 +241,14 @@
 
   .markdown-content :global(code) {
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    font-size: var(--size-sm);
-    background-color: var(--bg-elevated);
+    font-size: 0.9em;
+    background: var(--bg-hover);
     padding: 2px 6px;
     border-radius: 4px;
   }
 
   .markdown-content :global(pre) {
-    background-color: var(--bg-deepest);
+    background: var(--bg-primary);
     border-radius: 8px;
     padding: 16px;
     overflow-x: auto;
@@ -494,14 +258,11 @@
   .markdown-content :global(pre code) {
     background: none;
     padding: 0;
-  }
-
-  .markdown-content :global(strong) {
-    font-weight: 600;
+    font-size: var(--size-sm);
   }
 
   .markdown-content :global(a) {
-    color: var(--text-accent);
+    color: var(--ui-accent);
     text-decoration: none;
   }
 
@@ -509,17 +270,7 @@
     text-decoration: underline;
   }
 
-  /* Spinner animation */
-  :global(.spinning) {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    from {
-      transform: rotate(0deg);
-    }
-    to {
-      transform: rotate(360deg);
-    }
+  .markdown-content :global(strong) {
+    font-weight: 600;
   }
 </style>

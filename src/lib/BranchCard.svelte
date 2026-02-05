@@ -35,10 +35,10 @@
   } from './services/branch';
   import * as branchService from './services/branch';
   import SessionViewerModal from './SessionViewerModal.svelte';
+  import NoteViewerModal from './NoteViewerModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
   import NewNoteModal from './NewNoteModal.svelte';
   import NewReviewModal from './NewReviewModal.svelte';
-  import NoteViewerModal from './NoteViewerModal.svelte';
   import BaseBranchPickerModal from './BaseBranchPickerModal.svelte';
   import CreatePrModal from './CreatePrModal.svelte';
   import { openUrl } from './services/window';
@@ -126,15 +126,15 @@
     return items;
   });
 
-  // Session viewer modal state
+  // Session viewer modal state (used for both commits and notes)
   let showSessionViewer = $state(false);
-  let viewingSession = $state<BranchSession | null>(null);
+  let viewingSessionId = $state<string | null>(null);
+  let viewingSessionTitle = $state<string>('');
   let isViewingLive = $state(false);
 
-  // Note viewer modal state
+  // Note viewer modal state (for viewing note content)
   let showNoteViewer = $state(false);
   let viewingNote = $state<BranchNote | null>(null);
-  let isNoteGenerating = $state(false);
 
   // Continue session modal state
   let showContinueModal = $state(false);
@@ -282,34 +282,36 @@
 
   function handleWatchSession() {
     if (runningSession?.aiSessionId) {
-      viewingSession = runningSession;
+      viewingSessionId = runningSession.aiSessionId;
+      viewingSessionTitle = runningSession.prompt;
       isViewingLive = true;
       showSessionViewer = true;
     }
   }
 
   function handleViewSession(session: BranchSession) {
-    viewingSession = session;
-    isViewingLive = false;
-    showSessionViewer = true;
+    if (session.aiSessionId) {
+      viewingSessionId = session.aiSessionId;
+      viewingSessionTitle = session.prompt;
+      isViewingLive = false;
+      showSessionViewer = true;
+    }
+  }
+
+  function handleViewNote(note: BranchNote, generating: boolean = false) {
+    if (note.aiSessionId) {
+      viewingSessionId = note.aiSessionId;
+      viewingSessionTitle = note.title;
+      isViewingLive = generating;
+      showSessionViewer = true;
+    }
   }
 
   function closeSessionViewer() {
     showSessionViewer = false;
-    viewingSession = null;
+    viewingSessionId = null;
+    viewingSessionTitle = '';
     isViewingLive = false;
-  }
-
-  function handleViewNote(note: BranchNote, generating: boolean = false) {
-    viewingNote = note;
-    isNoteGenerating = generating;
-    showNoteViewer = true;
-  }
-
-  function closeNoteViewer() {
-    showNoteViewer = false;
-    viewingNote = null;
-    isNoteGenerating = false;
   }
 
   function handleSessionStarted(branchSessionId: string, aiSessionId: string) {
@@ -726,29 +728,8 @@
               </div>
             </div>
           {:else if item.type === 'note'}
-            <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-            <div
-              class="timeline-row note-row"
-              role="button"
-              tabindex="0"
-              onclick={() => {
-                if (confirmingDeleteNoteId === item.note.id) {
-                  confirmingDeleteNoteId = null;
-                } else {
-                  handleViewNote(item.note);
-                }
-              }}
-              onkeydown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  if (confirmingDeleteNoteId === item.note.id) {
-                    confirmingDeleteNoteId = null;
-                  } else {
-                    handleViewNote(item.note);
-                  }
-                }
-              }}
-            >
+            <!-- Note row - similar to commit row with separate action buttons -->
+            <div class="timeline-row note-row">
               <div class="timeline-marker">
                 <div class="timeline-icon note-icon">
                   {#if item.note.title.startsWith('Code Review')}
@@ -792,6 +773,25 @@
                     </button>
                   </div>
                 {:else}
+                  {#if item.note.aiSessionId}
+                    <button
+                      class="action-btn action-btn-icon action-btn-hover"
+                      onclick={() => handleViewNote(item.note)}
+                      title="View session"
+                    >
+                      <MessageSquare size={12} />
+                    </button>
+                  {/if}
+                  <button
+                    class="action-btn action-btn-icon action-btn-hover"
+                    onclick={() => {
+                      viewingNote = item.note;
+                      showNoteViewer = true;
+                    }}
+                    title="View note"
+                  >
+                    <FileText size={12} />
+                  </button>
                   <button
                     class="action-btn action-btn-icon action-btn-hover"
                     onclick={(e) => {
@@ -885,19 +885,14 @@
   </div>
 </div>
 
-<!-- Session viewer modal -->
-{#if showSessionViewer && viewingSession?.aiSessionId}
+<!-- Session viewer modal (used for both commits and notes) -->
+{#if showSessionViewer && viewingSessionId}
   <SessionViewerModal
-    sessionId={viewingSession.aiSessionId}
-    title={viewingSession.prompt}
+    sessionId={viewingSessionId}
+    title={viewingSessionTitle}
     isLive={isViewingLive}
     onClose={closeSessionViewer}
   />
-{/if}
-
-<!-- Note viewer modal -->
-{#if showNoteViewer && viewingNote}
-  <NoteViewerModal note={viewingNote} isLive={isNoteGenerating} onClose={closeNoteViewer} />
 {/if}
 
 <!-- Continue session modal -->
@@ -947,6 +942,17 @@
       // Refresh PR info to show the new/updated PR
       loadPrInfo();
       openUrl(e.detail.url);
+    }}
+  />
+{/if}
+
+<!-- Note viewer modal -->
+{#if showNoteViewer && viewingNote}
+  <NoteViewerModal
+    note={viewingNote}
+    onClose={() => {
+      showNoteViewer = false;
+      viewingNote = null;
     }}
   />
 {/if}
@@ -1197,13 +1203,13 @@
     transition: background-color 0.15s ease;
   }
 
-  .timeline-row.note-row,
   .timeline-row.skeleton-row {
     cursor: pointer;
   }
 
+  .timeline-row.skeleton-row:hover,
   .timeline-row.note-row:hover,
-  .timeline-row.skeleton-row:hover {
+  .timeline-row.commit-row:hover {
     background-color: var(--bg-hover);
   }
 

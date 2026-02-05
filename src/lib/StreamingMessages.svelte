@@ -1,11 +1,13 @@
 <!--
   StreamingMessages.svelte - Shared component for rendering AI session messages
 
-  Pure presentational component. Renders persisted messages from the database
-  and live streaming segments from the streaming store.
+  Design principles (matching reference):
+  - Human messages: gray bubble, right-aligned
+  - Assistant messages: no bubble, plain text
+  - Tool calls: minimal inline text like "Ran `command`"
 -->
 <script lang="ts">
-  import { Bot, User, Loader2, Wrench } from 'lucide-svelte';
+  import { Loader2 } from 'lucide-svelte';
   import { marked } from 'marked';
   import DOMPurify from 'dompurify';
   import type { DisplayMessage, DisplaySegment } from './types/streaming';
@@ -33,152 +35,155 @@
   function renderMarkdown(content: string): string {
     return DOMPurify.sanitize(marked.parse(content) as string);
   }
+
+  // Format tool title for minimal inline display
+  function formatToolDisplay(title: string): { prefix: string; command: string | null } {
+    // Common patterns: "Ran command", "Read file.ts", "Edited file.ts", etc.
+    const ranMatch = title.match(/^Ran\s+(.+)$/i);
+    if (ranMatch) {
+      return { prefix: 'Ran', command: ranMatch[1] };
+    }
+
+    const readMatch = title.match(/^Read\s+(.+)$/i);
+    if (readMatch) {
+      return { prefix: 'Read', command: readMatch[1] };
+    }
+
+    const editedMatch = title.match(/^Edited?\s+(.+)$/i);
+    if (editedMatch) {
+      return { prefix: 'Edited', command: editedMatch[1] };
+    }
+
+    const viewedMatch = title.match(/^Viewed?\s+(.+)$/i);
+    if (viewedMatch) {
+      return { prefix: 'Viewed', command: viewedMatch[1] };
+    }
+
+    const exploredMatch = title.match(/^Explored?\s+(.+)$/i);
+    if (exploredMatch) {
+      return { prefix: 'Explored', command: exploredMatch[1] };
+    }
+
+    const analyzedMatch = title.match(/^Analyzed?\s+(.+)$/i);
+    if (analyzedMatch) {
+      return { prefix: 'Analyzed', command: analyzedMatch[1] };
+    }
+
+    // Default: just show the title as-is
+    return { prefix: title, command: null };
+  }
 </script>
 
-{#each messages as message}
-  <div class="message" class:user={message.role === 'user'}>
-    <div class="message-icon">
-      {#if message.role === 'user'}
-        <User size={14} />
-      {:else}
-        <Bot size={14} />
-      {/if}
-    </div>
-    <div class="message-content">
-      {#if message.role === 'user'}
-        <div class="message-text">{message.content}</div>
-      {:else}
+<div class="messages">
+  {#each messages as message}
+    {#if message.role === 'user'}
+      <!-- Human message: bubble style, right-aligned -->
+      <div class="human-message">
+        <div class="human-bubble">
+          {message.content}
+        </div>
+      </div>
+    {:else}
+      <!-- Assistant message: no bubble, natural flow -->
+      <div class="assistant-message">
         {#each message.segments as segment}
           {#if segment.type === 'text'}
-            <div class="message-text markdown-content">
+            <div class="assistant-text markdown-content">
               {@html renderMarkdown(segment.text)}
             </div>
           {:else}
-            <div class="tool-call" class:completed={segment.status === 'completed'}>
-              <Wrench size={12} />
-              <span class="tool-title">{segment.title}</span>
+            {@const display = formatToolDisplay(segment.title)}
+            <div class="tool-call">
+              <span class="tool-prefix">{display.prefix}</span>
+              {#if display.command}
+                <code>{display.command}</code>
+              {/if}
             </div>
           {/if}
         {/each}
-      {/if}
-    </div>
-  </div>
-{/each}
+      </div>
+    {/if}
+  {/each}
 
-<!-- Streaming content -->
-{#if isActive && streamingSegments.length > 0}
-  <div class="message">
-    <div class="message-icon">
-      <Bot size={14} />
-    </div>
-    <div class="message-content">
+  <!-- Streaming content -->
+  {#if isActive && streamingSegments.length > 0}
+    <div class="assistant-message">
       {#each streamingSegments as segment, i}
         {#if segment.type === 'text'}
-          <div class="message-text streaming-text">
+          <div class="assistant-text streaming-text">
             {segment.text}{#if i === streamingSegments.length - 1}<span class="cursor">▋</span>{/if}
           </div>
         {:else}
-          <div
-            class="tool-call"
-            class:running={segment.status === 'running'}
-            class:completed={segment.status === 'completed'}
-          >
+          {@const display = formatToolDisplay(segment.title)}
+          <div class="tool-call" class:running={segment.status === 'running'}>
             {#if segment.status === 'running'}
               <Loader2 size={12} class="spinning" />
-            {:else}
-              <Wrench size={12} />
             {/if}
-            <span class="tool-title">{segment.title}</span>
+            <span class="tool-prefix">{display.prefix}</span>
+            {#if display.command}
+              <code>{display.command}</code>
+            {/if}
           </div>
         {/if}
       {/each}
     </div>
-  </div>
-{:else if isActive}
-  <div class="message">
-    <div class="message-icon">
-      <Bot size={14} />
-    </div>
-    <div class="message-content">
-      <div class="message-text thinking">
+  {:else if isActive}
+    <div class="assistant-message">
+      <div class="thinking">
         <Loader2 size={14} class="spinning" />
         <span>{waitingText}</span>
       </div>
     </div>
-  </div>
-{/if}
+  {/if}
+</div>
 
 <style>
-  .message {
-    display: flex;
-    gap: 10px;
-  }
-
-  .message.user {
-    flex-direction: row-reverse;
-  }
-
-  .message-icon {
-    flex-shrink: 0;
-    width: 24px;
-    height: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-primary);
-    border-radius: 50%;
-    color: var(--text-muted);
-  }
-
-  .message.user .message-icon {
-    background: var(--ui-accent);
-    color: var(--bg-primary);
-  }
-
-  .message-content {
-    flex: 1;
-    min-width: 0;
+  .messages {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 16px;
   }
 
-  .message.user .message-content {
-    align-items: flex-end;
+  /* Human message - bubble style, right-aligned */
+  .human-message {
+    display: flex;
+    justify-content: flex-end;
   }
 
-  .message-text {
+  .human-bubble {
+    max-width: 85%;
+    padding: 10px 14px;
+    background: var(--bg-elevated);
+    border-radius: 18px;
     font-size: var(--size-sm);
     color: var(--text-primary);
     line-height: 1.5;
     word-break: break-word;
   }
 
-  /* Streaming text keeps pre-wrap for live updates */
-  .message-text.streaming-text {
+  /* Assistant message - no bubble, natural flow */
+  .assistant-message {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .assistant-text {
+    font-size: var(--size-sm);
+    color: var(--text-primary);
+    line-height: 1.6;
+  }
+
+  .streaming-text {
     white-space: pre-wrap;
   }
 
-  .message.user .message-text {
-    background: var(--ui-accent);
-    color: var(--bg-primary);
-    padding: 8px 12px;
-    border-radius: 12px 12px 4px 12px;
-    max-width: 85%;
-  }
-
-  .message:not(.user) .message-text {
-    background: var(--bg-primary);
-    padding: 8px 12px;
-    border-radius: 12px 12px 12px 4px;
-    max-width: 85%;
-  }
-
-  .message-text.thinking {
+  .thinking {
     display: flex;
     align-items: center;
     gap: 8px;
     color: var(--text-muted);
+    font-size: var(--size-sm);
   }
 
   .cursor {
@@ -196,34 +201,27 @@
     }
   }
 
+  /* Tool calls - minimal inline style like "Ran `pwd`" */
   .tool-call {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 6px;
-    font-size: var(--size-xs);
+    font-size: var(--size-sm);
     color: var(--text-muted);
-    padding: 4px 8px;
-    background: var(--bg-primary);
-    border-radius: 4px;
-    border: 1px solid var(--border-subtle);
   }
 
   .tool-call.running {
-    border-color: var(--text-accent);
+    color: var(--text-accent);
   }
 
-  .tool-call.completed {
-    border-color: var(--ui-accent);
+  .tool-prefix {
+    color: var(--text-faint);
   }
 
-  .tool-call :global(svg) {
-    flex-shrink: 0;
-  }
-
-  .tool-title {
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .tool-call code {
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: var(--size-xs);
+    color: var(--text-muted);
   }
 
   :global(.spinning) {
@@ -287,9 +285,9 @@
   }
 
   .markdown-content :global(code) {
-    font-family: var(--font-mono, 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace);
+    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
     font-size: 0.9em;
-    background: var(--bg-hover);
+    background: var(--bg-elevated);
     padding: 0.15em 0.35em;
     border-radius: 3px;
   }
@@ -297,8 +295,8 @@
   .markdown-content :global(pre) {
     margin: 0.5em 0;
     padding: 0.75em;
-    background: var(--bg-hover);
-    border-radius: 4px;
+    background: var(--bg-elevated);
+    border-radius: 6px;
     overflow-x: auto;
   }
 
