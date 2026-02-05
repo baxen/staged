@@ -656,10 +656,11 @@
               </div>
               <div class="timeline-content">
                 <span class="timeline-title">{item.commit.subject}</span>
-                <span class="commit-sha">{item.commit.shortSha}</span>
-                <span class="timeline-time">{formatRelativeTime(item.commit.timestamp)}</span>
               </div>
-              <div class="timeline-actions">
+              <div class="timeline-actions-wrapper">
+                <span class="timeline-time fade-on-hover">{formatRelativeTime(item.commit.timestamp)}</span>
+                <span class="commit-sha">{item.commit.shortSha}</span>
+                <div class="timeline-actions">
                 {#if confirmingDeleteCommitSha === item.commit.sha}
                   <div class="delete-confirm">
                     {#if commitsToDeleteCount > 1}
@@ -713,6 +714,7 @@
                     </button>
                   {/if}
                 {/if}
+                </div>
               </div>
             </div>
           {:else if item.type === 'note'}
@@ -732,10 +734,10 @@
               </div>
               <div class="timeline-content">
                 <span class="timeline-title">{item.note.title}</span>
-                <span class="note-spacer"></span>
-                <span class="timeline-time">{formatRelativeTimeMs(item.note.createdAt)}</span>
               </div>
-              <div class="timeline-actions">
+              <div class="timeline-actions-wrapper">
+                <span class="timeline-time fade-on-hover">{formatRelativeTimeMs(item.note.createdAt)}</span>
+                <div class="timeline-actions">
                 {#if confirmingDeleteNoteId === item.note.id}
                   <div class="delete-confirm">
                     <button
@@ -788,6 +790,7 @@
                     <Trash2 size={12} />
                   </button>
                 {/if}
+                </div>
               </div>
             </div>
           {/if}
@@ -1216,10 +1219,8 @@
 
   .timeline-content {
     flex: 1;
-    display: grid;
-    grid-template-columns: 1fr auto auto;
+    display: flex;
     align-items: center;
-    gap: 12px;
     min-width: 0;
   }
 
@@ -1243,6 +1244,7 @@
   }
 
   .timeline-title {
+    flex: 1;
     font-size: var(--size-sm);
     color: var(--text-primary);
     overflow: hidden;
@@ -1260,6 +1262,14 @@
     /* Empty spacer for notes to align with commit hash column */
   }
 
+  .timeline-actions-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    flex-shrink: 0;
+  }
+
   .commit-sha {
     font-size: var(--size-xs);
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
@@ -1267,6 +1277,7 @@
     white-space: nowrap;
     display: flex;
     align-items: center;
+    margin-right: 6px;
   }
 
   .timeline-time {
@@ -1277,6 +1288,19 @@
     display: flex;
     align-items: center;
     justify-content: flex-end;
+    position: absolute;
+    right: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+
+  .fade-on-hover {
+    opacity: 1;
+  }
+
+  .commit-row:hover .fade-on-hover,
+  .note-row:hover .fade-on-hover {
+    opacity: 0;
   }
 
   .skeleton-meta {
