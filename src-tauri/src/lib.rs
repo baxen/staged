@@ -2227,6 +2227,126 @@ fn extract_text_from_assistant_content(content: &str) -> String {
 }
 
 // =============================================================================
+// Git Project Commands (branch grouping with settings)
+// =============================================================================
+
+use store::GitProject;
+
+/// Create a new git project.
+/// If a project already exists for the repo_path, returns an error.
+#[tauri::command(rename_all = "camelCase")]
+fn create_git_project(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+    name: String,
+    subpath: Option<String>,
+) -> Result<GitProject, String> {
+    // Check if project already exists for this repo
+    if let Some(existing) = state
+        .get_git_project_by_repo(&repo_path)
+        .map_err(|e| e.to_string())?
+    {
+        return Err(format!(
+            "Project already exists for this repository: {}",
+            existing.name
+        ));
+    }
+
+    let mut project = GitProject::new(&repo_path, &name);
+    if let Some(sp) = subpath {
+        if !sp.is_empty() {
+            project = project.with_subpath(sp);
+        }
+    }
+
+    state
+        .create_git_project(&project)
+        .map_err(|e| e.to_string())?;
+    Ok(project)
+}
+
+/// Get a git project by ID.
+#[tauri::command(rename_all = "camelCase")]
+fn get_git_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Option<GitProject>, String> {
+    state
+        .get_git_project(&project_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get a git project by repo_path.
+#[tauri::command(rename_all = "camelCase")]
+fn get_git_project_by_repo(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+) -> Result<Option<GitProject>, String> {
+    state
+        .get_git_project_by_repo(&repo_path)
+        .map_err(|e| e.to_string())
+}
+
+/// List all git projects.
+#[tauri::command(rename_all = "camelCase")]
+fn list_git_projects(state: State<'_, Arc<Store>>) -> Result<Vec<GitProject>, String> {
+    state.list_git_projects().map_err(|e| e.to_string())
+}
+
+/// Update a git project's name and/or subpath.
+#[tauri::command(rename_all = "camelCase")]
+fn update_git_project(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+    name: Option<String>,
+    subpath: Option<Option<String>>,
+) -> Result<(), String> {
+    // Convert Option<Option<String>> to Option<Option<&str>> for the store method
+    let subpath_ref = subpath.as_ref().map(|opt| opt.as_deref());
+    state
+        .update_git_project(&project_id, name.as_deref(), subpath_ref)
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a git project.
+/// Note: This does NOT delete associated branches - they still work via repo_path.
+#[tauri::command(rename_all = "camelCase")]
+fn delete_git_project(state: State<'_, Arc<Store>>, project_id: String) -> Result<(), String> {
+    state
+        .delete_git_project(&project_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Get or create a git project for a repo_path.
+/// If no project exists, creates one with the repo folder name as the project name.
+#[tauri::command(rename_all = "camelCase")]
+fn get_or_create_git_project(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+) -> Result<GitProject, String> {
+    // Check if project already exists
+    if let Some(existing) = state
+        .get_git_project_by_repo(&repo_path)
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(existing);
+    }
+
+    // Create a new project with the repo folder name
+    let name = Path::new(&repo_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("Unknown")
+        .to_string();
+
+    let project = GitProject::new(&repo_path, &name);
+    state
+        .create_git_project(&project)
+        .map_err(|e| e.to_string())?;
+    Ok(project)
+}
+
+// =============================================================================
 // Theme Commands
 // =============================================================================
 
@@ -2833,6 +2953,14 @@ pub fn run() {
             fail_branch_note,
             delete_branch_note,
             recover_orphaned_note,
+            // Git project commands
+            create_git_project,
+            get_git_project,
+            get_git_project_by_repo,
+            list_git_projects,
+            update_git_project,
+            delete_git_project,
+            get_or_create_git_project,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

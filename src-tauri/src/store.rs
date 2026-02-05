@@ -122,6 +122,8 @@ impl ArtifactStatus {
 }
 
 /// A goal-oriented collection of artifacts.
+/// Note: This is the legacy "Project" for artifacts. See `GitProject` for the new
+/// git-integrated project entity that groups branches.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Project {
@@ -139,6 +141,69 @@ impl Project {
             name: name.into(),
             created_at: now,
             updated_at: now,
+        }
+    }
+}
+
+// =============================================================================
+// Git Project Types (branch grouping)
+// =============================================================================
+
+/// A git project that groups branches together.
+/// This replaces the implicit repo_path grouping with an explicit entity
+/// that can have settings like subpath for monorepo support.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitProject {
+    pub id: String,
+    /// Display name (defaults to repo folder name)
+    pub name: String,
+    /// Path to the git repository
+    pub repo_path: String,
+    /// Optional subpath within the repo (for monorepos)
+    pub subpath: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl GitProject {
+    pub fn new(repo_path: impl Into<String>, name: impl Into<String>) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            name: name.into(),
+            repo_path: repo_path.into(),
+            subpath: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn with_subpath(mut self, subpath: impl Into<String>) -> Self {
+        self.subpath = Some(subpath.into());
+        self
+    }
+
+    /// Create a GitProject from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(Self {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            repo_path: row.get(2)?,
+            subpath: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    }
+
+    /// Get the effective working directory for AI sessions.
+    /// If subpath is set, returns repo_path/subpath, otherwise just repo_path.
+    pub fn effective_cwd(&self, worktree_path: &str) -> String {
+        match &self.subpath {
+            Some(subpath) if !subpath.is_empty() => {
+                format!("{}/{}", worktree_path, subpath)
+            }
+            _ => worktree_path.to_string(),
         }
     }
 }
@@ -672,6 +737,21 @@ impl Store {
             CREATE INDEX IF NOT EXISTS idx_branch_sessions_commit ON branch_sessions(branch_id, commit_sha);
             CREATE INDEX IF NOT EXISTS idx_branches_repo ON branches(repo_path);
             CREATE INDEX IF NOT EXISTS idx_branch_notes_branch ON branch_notes(branch_id);
+
+            -- =================================================================
+            -- Git Projects (branch grouping with settings)
+            -- =================================================================
+
+            CREATE TABLE IF NOT EXISTS git_projects (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                repo_path TEXT NOT NULL,
+                subpath TEXT,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_git_projects_repo ON git_projects(repo_path);
             "#,
         )?;
 
@@ -1622,6 +1702,122 @@ impl Store {
     pub fn delete_branch_note(&self, id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM branch_notes WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    // =========================================================================
+    // Git Project operations
+    // =========================================================================
+
+    /// Create a new git project
+    pub fn create_git_project(&self, project: &GitProject) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO git_projects (id, name, repo_path, subpath, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                &project.id,
+                &project.name,
+                &project.repo_path,
+                &project.subpath,
+                project.created_at,
+                project.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get a git project by ID
+    pub fn get_git_project(&self, id: &str) -> Result<Option<GitProject>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, name, repo_path, subpath, created_at, updated_at
+             FROM git_projects WHERE id = ?1",
+            params![id],
+            GitProject::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// Get a git project by repo_path
+    pub fn get_git_project_by_repo(&self, repo_path: &str) -> Result<Option<GitProject>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, name, repo_path, subpath, created_at, updated_at
+             FROM git_projects WHERE repo_path = ?1",
+            params![repo_path],
+            GitProject::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all git projects, ordered by most recently updated
+    pub fn list_git_projects(&self) -> Result<Vec<GitProject>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, repo_path, subpath, created_at, updated_at
+             FROM git_projects ORDER BY updated_at DESC",
+        )?;
+        let projects = stmt
+            .query_map([], GitProject::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(projects)
+    }
+
+    /// Update a git project's name and/or subpath
+    pub fn update_git_project(
+        &self,
+        id: &str,
+        name: Option<&str>,
+        subpath: Option<Option<&str>>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+
+        match (name, subpath) {
+            (Some(name), Some(subpath)) => {
+                conn.execute(
+                    "UPDATE git_projects SET name = ?1, subpath = ?2, updated_at = ?3 WHERE id = ?4",
+                    params![name, subpath, now, id],
+                )?;
+            }
+            (Some(name), None) => {
+                conn.execute(
+                    "UPDATE git_projects SET name = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![name, now, id],
+                )?;
+            }
+            (None, Some(subpath)) => {
+                conn.execute(
+                    "UPDATE git_projects SET subpath = ?1, updated_at = ?2 WHERE id = ?3",
+                    params![subpath, now, id],
+                )?;
+            }
+            (None, None) => {
+                return Ok(());
+            }
+        }
+        Ok(())
+    }
+
+    /// Delete a git project
+    /// Note: This does NOT cascade to branches - branches still reference repo_path directly
+    pub fn delete_git_project(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM git_projects WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Touch git project (update updated_at)
+    pub fn touch_git_project(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE git_projects SET updated_at = ?1 WHERE id = ?2",
+            params![now, id],
+        )?;
         Ok(())
     }
 }

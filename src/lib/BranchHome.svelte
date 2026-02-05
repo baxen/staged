@@ -1,7 +1,7 @@
 <!--
   BranchHome.svelte - Branch-based workflow homepage
 
-  Shows all tracked branches grouped by repository, with their commit stacks.
+  Shows all tracked branches grouped by project, with their commit stacks.
   Each branch has a worktree for isolated development.
 
   Keyboard shortcuts:
@@ -10,13 +10,23 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Plus, Sparkles, Folder, GitBranch, Loader2, X } from 'lucide-svelte';
-  import type { Branch } from './services/branch';
+  import {
+    Plus,
+    Sparkles,
+    Folder,
+    GitBranch,
+    Loader2,
+    X,
+    Settings,
+    ChevronDown,
+  } from 'lucide-svelte';
+  import type { Branch, GitProject } from './services/branch';
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
   import type { UnlistenFn } from '@tauri-apps/api/event';
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal, { type PendingBranch } from './NewBranchModal.svelte';
+  import ProjectSettingsModal from './ProjectSettingsModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
 
@@ -29,6 +39,7 @@
 
   // State
   let branches = $state<Branch[]>([]);
+  let projects = $state<GitProject[]>([]);
   let loading = $state(true);
   let error = $state<string | null>(null);
   let refreshKey = $state(0);
@@ -48,31 +59,50 @@
 
   // Modal state
   let showNewBranchModal = $state(false);
+  let newBranchForProject = $state<GitProject | null>(null);
   let branchToDelete = $state<Branch | null>(null);
+  let projectToEdit = $state<GitProject | null>(null);
 
   // Expose the new branch trigger to parent
   $effect(() => {
     onNewBranchRequest?.(() => {
+      newBranchForProject = null;
       showNewBranchModal = true;
     });
   });
 
-  // Group branches by repo path (including pending ones)
-  let branchesByRepo = $derived.by(() => {
-    const grouped = new Map<string, { branches: Branch[]; pending: PendingBranch[] }>();
+  // Group branches by project (including pending ones)
+  // Projects are created lazily when branches exist for a repo
+  let branchesByProject = $derived.by(() => {
+    const grouped = new Map<
+      string,
+      { project: GitProject; branches: Branch[]; pending: PendingBranch[] }
+    >();
+
+    // Create a map from repoPath to project for quick lookup
+    const projectByRepo = new Map<string, GitProject>();
+    for (const project of projects) {
+      projectByRepo.set(project.repoPath, project);
+    }
 
     // Add real branches
     for (const branch of branches) {
-      const existing = grouped.get(branch.repoPath) || { branches: [], pending: [] };
-      existing.branches.push(branch);
-      grouped.set(branch.repoPath, existing);
+      const project = projectByRepo.get(branch.repoPath);
+      if (project) {
+        const existing = grouped.get(project.id) || { project, branches: [], pending: [] };
+        existing.branches.push(branch);
+        grouped.set(project.id, existing);
+      }
     }
 
     // Add pending branches
     for (const pending of pendingBranches) {
-      const existing = grouped.get(pending.repoPath) || { branches: [], pending: [] };
-      existing.pending.push(pending);
-      grouped.set(pending.repoPath, existing);
+      const project = projectByRepo.get(pending.repoPath);
+      if (project) {
+        const existing = grouped.get(project.id) || { project, branches: [], pending: [] };
+        existing.pending.push(pending);
+        grouped.set(project.id, existing);
+      }
     }
 
     return grouped;
@@ -81,20 +111,14 @@
   // Check if we have any branches or pending branches
   let hasBranches = $derived(branches.length > 0 || pendingBranches.length > 0);
 
-  // Extract repo name from path
-  function repoName(path: string): string {
-    const parts = path.split('/');
-    return parts[parts.length - 1] || path;
-  }
-
   // Generate a unique key for a pending branch
   function pendingKey(pending: PendingBranch): string {
     return `${pending.repoPath}:${pending.branchName}`;
   }
 
-  // Load branches on mount and set up session status listener
+  // Load branches and projects on mount and set up session status listener
   onMount(async () => {
-    await loadBranches();
+    await loadData();
 
     // Listen for AI session status changes to update branch sessions
     unlistenStatus = await listenToSessionStatus(handleSessionStatus);
@@ -130,11 +154,34 @@
     }
   }
 
-  async function loadBranches() {
+  async function loadData() {
     loading = true;
     error = null;
     try {
-      branches = await branchService.listBranches();
+      // Load branches and projects in parallel
+      const [branchList, projectList] = await Promise.all([
+        branchService.listBranches(),
+        branchService.listGitProjects(),
+      ]);
+      branches = branchList;
+      projects = projectList;
+
+      // Ensure projects exist for all branches (lazy creation)
+      const projectRepos = new Set(projectList.map((p) => p.repoPath));
+      const missingRepos = new Set<string>();
+      for (const branch of branchList) {
+        if (!projectRepos.has(branch.repoPath)) {
+          missingRepos.add(branch.repoPath);
+        }
+      }
+
+      // Create missing projects
+      if (missingRepos.size > 0) {
+        const newProjects = await Promise.all(
+          [...missingRepos].map((repoPath) => branchService.getOrCreateGitProject(repoPath))
+        );
+        projects = [...projects, ...newProjects];
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     } finally {
@@ -142,11 +189,23 @@
     }
   }
 
-  function handleNewBranch() {
+  function handleNewBranch(project?: GitProject) {
+    newBranchForProject = project || null;
     showNewBranchModal = true;
   }
 
-  function handleBranchCreating(pending: PendingBranch) {
+  async function handleBranchCreating(pending: PendingBranch) {
+    // Ensure project exists for this repo
+    let project = projects.find((p) => p.repoPath === pending.repoPath);
+    if (!project) {
+      try {
+        project = await branchService.getOrCreateGitProject(pending.repoPath);
+        projects = [...projects, project];
+      } catch (e) {
+        console.error('Failed to create project for repo:', pending.repoPath, e);
+      }
+    }
+
     // Add to pending list and close modal immediately
     pendingBranches = [...pendingBranches, pending];
     // Clear any previous failure for this branch
@@ -157,6 +216,7 @@
       failedBranches = newFailed;
     }
     showNewBranchModal = false;
+    newBranchForProject = null;
   }
 
   function handleBranchCreated(branch: Branch) {
@@ -235,6 +295,16 @@
     );
   }
 
+  function handleEditProject(project: GitProject) {
+    projectToEdit = project;
+  }
+
+  async function handleProjectUpdated(updated: GitProject) {
+    // Update the project in our list
+    projects = projects.map((p) => (p.id === updated.id ? updated : p));
+    projectToEdit = null;
+  }
+
   // Keyboard shortcuts
   function handleKeydown(e: KeyboardEvent) {
     const target = e.target as HTMLElement;
@@ -256,6 +326,11 @@
       if (showNewBranchModal) {
         e.preventDefault();
         showNewBranchModal = false;
+        newBranchForProject = null;
+      }
+      if (projectToEdit) {
+        e.preventDefault();
+        projectToEdit = null;
       }
       return;
     }
@@ -286,24 +361,44 @@
         <Sparkles size={48} strokeWidth={1} />
         <h2>Welcome to Staged</h2>
         <p>Create a branch to start working</p>
-        <button class="create-button" onclick={handleNewBranch}>
+        <button class="create-button" onclick={() => handleNewBranch()}>
           <Plus size={16} />
           New Branch
         </button>
         <span class="shortcut-hint">or press ⌘N</span>
       </div>
     {:else}
-      <!-- Branches grouped by repo -->
-      <div class="repos-list">
-        {#each [...branchesByRepo.entries()] as [repoPath, { branches: repoBranches, pending: repoPending }] (repoPath)}
-          <div class="repo-section">
-            <div class="repo-header">
-              <Folder size={14} class="repo-icon" />
-              <span class="repo-name">{repoName(repoPath)}</span>
-              <span class="repo-path">{repoPath}</span>
+      <!-- Branches grouped by project -->
+      <div class="projects-list">
+        {#each [...branchesByProject.entries()] as [projectId, { project, branches: projectBranches, pending: projectPending }] (projectId)}
+          <div class="project-section">
+            <div class="project-header">
+              <div class="project-info">
+                <Folder size={14} class="project-icon" />
+                <span class="project-name">{project.name}</span>
+                {#if project.subpath}
+                  <span class="project-subpath">/{project.subpath}</span>
+                {/if}
+              </div>
+              <div class="project-actions">
+                <button
+                  class="project-action-button"
+                  onclick={() => handleEditProject(project)}
+                  title="Project settings"
+                >
+                  <Settings size={14} />
+                </button>
+                <button
+                  class="project-new-branch-button"
+                  onclick={() => handleNewBranch(project)}
+                  title="New branch in this project"
+                >
+                  <Plus size={14} />
+                </button>
+              </div>
             </div>
             <div class="branches-list">
-              {#each repoBranches as branch (branch.id)}
+              {#each projectBranches as branch (branch.id)}
                 {@const isDeleting = deletingBranchIds.has(branch.id)}
                 {@const deleteFailed = deleteErrors.get(branch.id)}
                 {#if isDeleting || deleteFailed}
@@ -352,7 +447,7 @@
                 {/if}
               {/each}
               <!-- Pending branches (being created) -->
-              {#each repoPending as pending (pendingKey(pending))}
+              {#each projectPending as pending (pendingKey(pending))}
                 {@const failed = failedBranches.get(pendingKey(pending))}
                 <div class="pending-branch-card" class:failed={!!failed}>
                   <div class="pending-header">
@@ -395,7 +490,7 @@
 
         <!-- New branch button at bottom -->
         <div class="new-branch-section">
-          <button class="new-branch-button" onclick={handleNewBranch}>
+          <button class="new-branch-button" onclick={() => handleNewBranch()}>
             <Plus size={16} />
             New Branch
           </button>
@@ -408,10 +503,23 @@
 <!-- New branch modal -->
 {#if showNewBranchModal}
   <NewBranchModal
+    initialRepoPath={newBranchForProject?.repoPath}
     onCreating={handleBranchCreating}
     onCreated={handleBranchCreated}
     onCreateFailed={handleBranchCreateFailed}
-    onClose={() => (showNewBranchModal = false)}
+    onClose={() => {
+      showNewBranchModal = false;
+      newBranchForProject = null;
+    }}
+  />
+{/if}
+
+<!-- Project settings modal -->
+{#if projectToEdit}
+  <ProjectSettingsModal
+    project={projectToEdit}
+    onSave={handleProjectUpdated}
+    onClose={() => (projectToEdit = null)}
   />
 {/if}
 
@@ -502,8 +610,8 @@
     color: var(--text-faint);
   }
 
-  /* Repos list */
-  .repos-list {
+  /* Projects list */
+  .projects-list {
     max-width: 800px;
     margin: 0 auto;
     display: flex;
@@ -511,34 +619,72 @@
     gap: 32px;
   }
 
-  .repo-section {
+  .project-section {
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
 
-  .repo-header {
+  .project-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: space-between;
     padding: 0 4px;
   }
 
-  :global(.repo-icon) {
+  .project-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  :global(.project-icon) {
     color: var(--text-faint);
     flex-shrink: 0;
   }
 
-  .repo-name {
+  .project-name {
     font-size: var(--size-md);
     font-weight: 500;
     color: var(--text-primary);
   }
 
-  .repo-path {
-    font-size: var(--size-xs);
-    color: var(--text-faint);
+  .project-subpath {
+    font-size: var(--size-sm);
+    color: var(--text-muted);
     font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
+  }
+
+  .project-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .project-action-button,
+  .project-new-branch-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-faint);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .project-action-button:hover,
+  .project-new-branch-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .project-new-branch-button:hover {
+    color: var(--ui-accent);
   }
 
   .branches-list {

@@ -35,13 +35,15 @@
   }
 
   interface Props {
+    /** If provided, skip repo selection and go straight to name input */
+    initialRepoPath?: string;
     onCreating: (pending: PendingBranch) => void;
     onCreated: (branch: Branch) => void;
     onCreateFailed: (pending: PendingBranch, error: string) => void;
     onClose: () => void;
   }
 
-  let { onCreating, onCreated, onCreateFailed, onClose }: Props = $props();
+  let { initialRepoPath, onCreating, onCreated, onCreateFailed, onClose }: Props = $props();
 
   // State
   type Step = 'repo' | 'name';
@@ -91,6 +93,11 @@
     const dir = await getHomeDir();
     homeDir = dir;
     currentDir = dir;
+
+    // If initialRepoPath is provided, skip to name step
+    if (initialRepoPath) {
+      await selectRepo(initialRepoPath);
+    }
   });
 
   // Focus appropriate input

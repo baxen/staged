@@ -4,6 +4,19 @@ import { invoke } from '@tauri-apps/api/core';
 // Types
 // =============================================================================
 
+/** A git project that groups branches together with settings */
+export interface GitProject {
+  id: string;
+  /** Display name (defaults to repo folder name) */
+  name: string;
+  /** Path to the git repository */
+  repoPath: string;
+  /** Optional subpath within the repo (for monorepos) */
+  subpath: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
 /** A tracked branch with an associated worktree */
 export interface Branch {
   id: string;
@@ -392,4 +405,69 @@ export async function getAvailableOpeners(): Promise<OpenerApp[]> {
  */
 export async function openInApp(path: string, appId: string): Promise<void> {
   return invoke<void>('open_in_app', { path, appId });
+}
+
+// =============================================================================
+// Git Project Operations
+// =============================================================================
+
+/**
+ * Create a new git project.
+ * If a project already exists for the repo_path, returns an error.
+ */
+export async function createGitProject(
+  repoPath: string,
+  name: string,
+  subpath?: string
+): Promise<GitProject> {
+  return invoke<GitProject>('create_git_project', { repoPath, name, subpath });
+}
+
+/**
+ * Get a git project by ID.
+ */
+export async function getGitProject(projectId: string): Promise<GitProject | null> {
+  return invoke<GitProject | null>('get_git_project', { projectId });
+}
+
+/**
+ * Get a git project by repo path.
+ */
+export async function getGitProjectByRepo(repoPath: string): Promise<GitProject | null> {
+  return invoke<GitProject | null>('get_git_project_by_repo', { repoPath });
+}
+
+/**
+ * List all git projects.
+ */
+export async function listGitProjects(): Promise<GitProject[]> {
+  return invoke<GitProject[]>('list_git_projects');
+}
+
+/**
+ * Update a git project's name and/or subpath.
+ * Pass null for subpath to clear it.
+ */
+export async function updateGitProject(
+  projectId: string,
+  name?: string,
+  subpath?: string | null
+): Promise<void> {
+  return invoke<void>('update_git_project', { projectId, name, subpath });
+}
+
+/**
+ * Delete a git project.
+ * Note: This does NOT delete associated branches - they still work via repo_path.
+ */
+export async function deleteGitProject(projectId: string): Promise<void> {
+  return invoke<void>('delete_git_project', { projectId });
+}
+
+/**
+ * Get or create a git project for a repo path.
+ * If no project exists, creates one with the repo folder name as the project name.
+ */
+export async function getOrCreateGitProject(repoPath: string): Promise<GitProject> {
+  return invoke<GitProject>('get_or_create_git_project', { repoPath });
 }
