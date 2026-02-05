@@ -1680,6 +1680,57 @@ async fn create_branch(
     .map_err(|e| format!("Task failed: {}", e))?
 }
 
+/// Create a new branch from an existing GitHub PR.
+/// Fetches the PR's head ref and creates a local branch + worktree at that commit.
+/// Returns the created Branch with the PR's base as the base_branch.
+#[tauri::command(rename_all = "camelCase")]
+async fn create_branch_from_pr(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+    repo_path: String,
+    pr_number: u64,
+    head_ref: String,
+    base_ref: String,
+) -> Result<Branch, String> {
+    // Clone Arc for move into spawn_blocking
+    let store = state.inner().clone();
+
+    // Run blocking git operations on a separate thread
+    tauri::async_runtime::spawn_blocking(move || {
+        let repo = Path::new(&repo_path);
+
+        // Create the worktree from the PR
+        let (worktree_path, branch_name, base_branch) =
+            git::create_worktree_from_pr(repo, pr_number, &head_ref, &base_ref).map_err(|e| {
+                let msg = e.to_string();
+                if msg.contains("already exists") {
+                    format!("Branch '{}' already exists locally", head_ref)
+                } else {
+                    msg
+                }
+            })?;
+
+        // Create the branch record
+        let branch = Branch::new(
+            &project_id,
+            &repo_path,
+            &branch_name,
+            worktree_path.to_string_lossy().to_string(),
+            &base_branch,
+        );
+
+        // If DB insert fails, clean up the worktree
+        if let Err(e) = store.create_branch(&branch) {
+            let _ = git::remove_worktree(repo, &worktree_path); // Best-effort cleanup
+            return Err(e.to_string());
+        }
+
+        Ok(branch)
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
 /// List git branches (local and remote) for base branch selection.
 #[tauri::command(rename_all = "camelCase")]
 fn list_git_branches(repo_path: String) -> Result<Vec<git::BranchRef>, String> {
@@ -3318,6 +3369,7 @@ pub fn run() {
             generate_artifact,
             // Branch commands (git-integrated workflow)
             create_branch,
+            create_branch_from_pr,
             get_branch,
             list_branches,
             list_branches_for_repo,

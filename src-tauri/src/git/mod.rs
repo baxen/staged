@@ -23,6 +23,7 @@ pub use refs::{
 };
 pub use types::*;
 pub use worktree::{
-    branch_exists, create_worktree, get_commits_since_base, get_head_sha, get_parent_commit,
-    list_worktrees, remove_worktree, reset_to_commit, worktree_path_for, CommitInfo,
+    branch_exists, create_worktree, create_worktree_from_pr, get_commits_since_base, get_head_sha,
+    get_parent_commit, list_worktrees, remove_worktree, reset_to_commit, worktree_path_for,
+    CommitInfo,
 };

@@ -265,6 +265,79 @@ pub fn get_parent_commit(worktree: &Path, commit_sha: &str) -> Result<Option<Str
     }
 }
 
+/// Create a worktree from a GitHub PR.
+///
+/// This fetches the PR's head ref and creates a local branch + worktree at that commit.
+/// The branch name will be the PR's head_ref (e.g., "feature-x").
+///
+/// Returns (worktree_path, branch_name, base_branch) where base_branch is the PR's target.
+pub fn create_worktree_from_pr(
+    repo: &Path,
+    pr_number: u64,
+    head_ref: &str,
+    base_ref: &str,
+) -> Result<(PathBuf, String, String), GitError> {
+    // Use the PR's head_ref as the local branch name
+    let branch_name = head_ref.to_string();
+
+    // Check if branch already exists locally
+    if branch_exists(repo, &branch_name)? {
+        return Err(GitError::CommandFailed(format!(
+            "Branch '{}' already exists locally",
+            branch_name
+        )));
+    }
+
+    let worktree_path = worktree_path_for(repo, &branch_name)?;
+
+    // Check if worktree already exists
+    if worktree_path.exists() {
+        return Err(GitError::CommandFailed(format!(
+            "Worktree already exists at {}",
+            worktree_path.display()
+        )));
+    }
+
+    // Ensure parent directory exists
+    if let Some(parent) = worktree_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            GitError::CommandFailed(format!("Failed to create worktree directory: {}", e))
+        })?;
+    }
+
+    // Fetch the PR head ref
+    let pr_ref = format!("refs/pull/{}/head", pr_number);
+    cli::run(repo, &["fetch", "origin", &pr_ref])?;
+
+    // Get the SHA of the fetched PR head
+    let head_sha = cli::run(repo, &["rev-parse", "FETCH_HEAD"])?
+        .trim()
+        .to_string();
+
+    let worktree_str = worktree_path
+        .to_str()
+        .ok_or_else(|| GitError::InvalidPath(worktree_path.display().to_string()))?;
+
+    // Create worktree with new branch at the PR's head commit
+    // git worktree add <path> -b <branch> <commit>
+    cli::run(
+        repo,
+        &[
+            "worktree",
+            "add",
+            worktree_str,
+            "-b",
+            &branch_name,
+            &head_sha,
+        ],
+    )?;
+
+    // The base branch for diffs should be the PR's target (e.g., "origin/main")
+    let base_branch = format!("origin/{}", base_ref);
+
+    Ok((worktree_path, branch_name, base_branch))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

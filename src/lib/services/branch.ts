@@ -111,6 +111,27 @@ export async function createBranch(
 }
 
 /**
+ * Create a new branch from an existing GitHub PR.
+ * Fetches the PR's head ref and creates a local branch + worktree at that commit.
+ * The branch name will be the PR's head_ref (e.g., "feature-x").
+ */
+export async function createBranchFromPr(
+  projectId: string,
+  repoPath: string,
+  prNumber: number,
+  headRef: string,
+  baseRef: string
+): Promise<Branch> {
+  return invoke<Branch>('create_branch_from_pr', {
+    projectId,
+    repoPath,
+    prNumber,
+    headRef,
+    baseRef,
+  });
+}
+
+/**
  * Get a branch by ID.
  */
 export async function getBranch(branchId: string): Promise<Branch | null> {
