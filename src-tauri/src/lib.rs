@@ -927,6 +927,7 @@ async fn send_agent_prompt_streaming(
         internal_id,
         app_handle,
         None, // No buffer callback for legacy path
+        None, // No cancellation handle for legacy path
     )
     .await?;
 
@@ -1525,6 +1526,7 @@ async fn run_artifact_generation(
         &session_id,
         app_handle.clone(),
         None, // No buffer callback for legacy code review sessions
+        None, // No cancellation handle for legacy code review sessions
     )
     .await
     {
@@ -2297,6 +2299,16 @@ async fn is_session_alive(
     // relying on get_session_status which returns Idle for sessions that
     // exist in the store but aren't live.
     Ok(session_manager.is_session_live(&ai_session_id).await)
+}
+
+/// Cancel an active AI session by killing the agent subprocess.
+/// This immediately terminates the running agent process.
+#[tauri::command(rename_all = "camelCase")]
+async fn cancel_ai_session(
+    session_manager: State<'_, Arc<SessionManager>>,
+    ai_session_id: String,
+) -> Result<(), String> {
+    session_manager.cancel_session(&ai_session_id).await
 }
 
 /// Restart a stuck branch session.
@@ -3353,6 +3365,7 @@ pub fn run() {
             cancel_branch_session,
             delete_branch_session_and_commit,
             is_session_alive,
+            cancel_ai_session,
             restart_branch_session,
             recover_orphaned_session,
             get_branch_session_by_ai_session,
