@@ -57,12 +57,10 @@
     currentDir = dir;
   });
 
-  // Focus appropriate input when step or elements change
+  // Focus search input when on repo step
   $effect(() => {
     if (step === 'repo' && inputEl) {
       inputEl.focus();
-    } else if (step === 'config' && subpathInputEl && !saving) {
-      subpathInputEl.focus();
     }
   });
 
@@ -211,8 +209,7 @@
 
   function handleSubpathFocus() {
     subpathInputFocused = true;
-    // Show dropdown if field is empty, otherwise wait for user to type
-    showSubpathDropdown = subpath.trim() === '';
+    // Don't auto-show dropdown on focus - wait for user to type
   }
 
   function handleSubpathBlur() {
@@ -422,7 +419,8 @@
         </div>
 
         <div class="form-group">
-          <label for="project-subpath">Subpath <span class="optional-label">(optional)</span></label>
+          <label for="project-subpath">Subpath <span class="optional-label">(optional)</span></label
+          >
           <div class="subpath-input-container">
             <input
               bind:this={subpathInputEl}
@@ -499,7 +497,8 @@
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    /* Note: no overflow:hidden here - entries-list handles its own scrolling,
+       and config step needs dropdown to overflow */
   }
 
   .modal-header {
@@ -667,9 +666,11 @@
   /* Config step */
   .config-step {
     padding: 16px;
+    padding-bottom: 24px; /* Extra padding to accommodate dropdown overflow */
     display: flex;
     flex-direction: column;
     gap: 16px;
+    overflow: visible;
   }
 
   .repo-info {
