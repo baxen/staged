@@ -232,6 +232,13 @@
   let canRunAi = $derived(files.length > 0 && !loading);
   let hasFileAnnotations = $derived(smartDiffState.results.size > 0);
   let showAnnotations = $derived(smartDiffState.showAnnotations);
+  let analysisErrorMessage = $derived(smartDiffState.analysisError || smartDiffState.aiError || '');
+  let analysisErrorLower = $derived(analysisErrorMessage.toLowerCase());
+  let showCodexSizeHint = $derived(
+    preferences.aiAgent === 'codex' &&
+      analysisErrorLower.includes('codex') &&
+      analysisErrorLower.includes('limit')
+  );
 
   /**
    * Get the primary path for a file summary.
@@ -1460,7 +1467,12 @@
         </h2>
       </header>
       <div class="error-modal-body">
-        <p class="error-message">{smartDiffState.analysisError || smartDiffState.aiError}</p>
+        <p class="error-message">{analysisErrorMessage}</p>
+        {#if showCodexSizeHint}
+          <p class="error-hint">
+            Codex has a 10MB input limit. Try analyzing fewer files or a smaller diff range.
+          </p>
+        {/if}
       </div>
       <footer class="error-modal-footer">
         <button
@@ -2354,6 +2366,13 @@
     line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .error-hint {
+    margin: 12px 0 0;
+    color: var(--text-muted);
+    font-size: var(--size-xs);
+    line-height: 1.4;
   }
 
   .error-modal-footer {

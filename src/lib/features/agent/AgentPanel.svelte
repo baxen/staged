@@ -97,7 +97,7 @@
 
   /** Type guard to validate provider ID */
   function isValidProvider(id: string): id is AcpProvider {
-    return id === 'goose' || id === 'claude';
+    return id === 'goose' || id === 'claude' || id === 'codex';
   }
 
   // Parse markdown response and sanitize to prevent XSS

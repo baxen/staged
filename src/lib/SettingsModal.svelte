@@ -95,6 +95,11 @@
       label: 'Claude Code',
       installUrl: 'https://github.com/zed-industries/claude-code-acp',
     },
+    {
+      id: 'codex',
+      label: 'Codex',
+      installUrl: 'https://github.com/zed-industries/codex-acp',
+    },
   ];
 
   // AI Agent state

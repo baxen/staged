@@ -49,6 +49,7 @@ The user is viewing a diff. Context tags like [Changeset: ...], [Viewing: ...], 
 pub enum AcpAgent {
     Goose(PathBuf),
     Claude(PathBuf),
+    Codex(PathBuf),
 }
 
 impl AcpAgent {
@@ -56,6 +57,7 @@ impl AcpAgent {
         match self {
             AcpAgent::Goose(_) => "goose",
             AcpAgent::Claude(_) => "claude",
+            AcpAgent::Codex(_) => "codex",
         }
     }
 
@@ -63,6 +65,7 @@ impl AcpAgent {
         match self {
             AcpAgent::Goose(p) => p,
             AcpAgent::Claude(p) => p,
+            AcpAgent::Codex(p) => p,
         }
     }
 
@@ -73,6 +76,7 @@ impl AcpAgent {
             // to allow discovering/enabling additional extensions as needed
             AcpAgent::Goose(_) => vec!["acp", "--with-builtin", "developer,extensionmanager"],
             AcpAgent::Claude(_) => vec![], // claude-code-acp runs in ACP mode by default
+            AcpAgent::Codex(_) => vec![],  // codex-acp runs in ACP mode by default
         }
     }
 }
@@ -124,12 +128,35 @@ fn find_via_login_shell(cmd: &str) -> Option<PathBuf> {
     None
 }
 
-/// Verify a command works by running it with --version
+/// Verify a command works by checking if it exists and is executable
 fn verify_command(path: &Path) -> bool {
-    std::process::Command::new(path)
+    // First check if file exists and is executable
+    if !path.exists() {
+        return false;
+    }
+
+    // Try --version first (works for most tools)
+    if let Ok(output) = std::process::Command::new(path)
         .arg("--version")
         .output()
-        .is_ok_and(|output| output.status.success())
+    {
+        if output.status.success() {
+            return true;
+        }
+    }
+
+    // If --version fails, try --help (works for codex-acp)
+    if let Ok(output) = std::process::Command::new(path)
+        .arg("--help")
+        .output()
+    {
+        if output.status.success() {
+            return true;
+        }
+    }
+
+    // If both fail, assume it's not a valid command
+    false
 }
 
 /// Information about an available ACP provider
@@ -157,6 +184,13 @@ pub fn discover_acp_providers() -> Vec<AcpProviderInfo> {
         });
     }
 
+    if find_agent("codex-acp", AcpAgent::Codex).is_some() {
+        providers.push(AcpProviderInfo {
+            id: "codex".to_string(),
+            label: "Codex".to_string(),
+        });
+    }
+
     providers
 }
 
@@ -165,6 +199,7 @@ pub fn find_acp_agent_by_id(provider_id: &str) -> Option<AcpAgent> {
     match provider_id {
         "goose" => find_agent("goose", AcpAgent::Goose),
         "claude" => find_agent("claude-code-acp", AcpAgent::Claude),
+        "codex" => find_agent("codex-acp", AcpAgent::Codex),
         _ => None,
     }
 }

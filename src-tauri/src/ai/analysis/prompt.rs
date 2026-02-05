@@ -12,6 +12,10 @@ pub const LARGE_FILE_THRESHOLD: usize = 1000;
 /// Threshold for total prompt: above this, switch to diff-only mode for all files
 pub const TIER1_MAX_LINES: usize = 10000;
 
+/// Maximum prompt size in bytes for Codex (10MB limit from API)
+/// We use 9MB to leave some buffer for system context
+pub const CODEX_MAX_BYTES: usize = 9 * 1024 * 1024;
+
 /// Strategy used for prompt construction
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PromptStrategy {
@@ -65,7 +69,21 @@ fn count_file_lines(input: &FileAnalysisInput, include_content: bool) -> usize {
 /// Build a prompt with automatic tier selection based on size.
 ///
 /// Returns the prompt string and the strategy that was used.
+///
+/// For Codex, enforces a stricter byte limit (9MB) to avoid API errors.
 pub fn build_prompt_with_strategy(files: &[FileAnalysisInput]) -> (String, PromptStrategy) {
+    build_prompt_with_strategy_for_provider(files, None)
+}
+
+/// Build a prompt with automatic tier selection based on size and provider.
+///
+/// If provider is "codex", uses stricter size limits to avoid API errors.
+pub fn build_prompt_with_strategy_for_provider(
+    files: &[FileAnalysisInput],
+    provider: Option<&str>,
+) -> (String, PromptStrategy) {
+    let is_codex = provider == Some("codex");
+
     // First, try Tier 1 (full context for small files)
     let tier1_lines: usize = files
         .iter()
@@ -79,6 +97,18 @@ pub fn build_prompt_with_strategy(files: &[FileAnalysisInput]) -> (String, Promp
     if tier1_lines <= TIER1_MAX_LINES {
         // Tier 1: diff + after content for small files
         let prompt = build_tier1_prompt(files);
+
+        // For Codex, check byte size and fall back to Tier 2 if too large
+        if is_codex && prompt.len() > CODEX_MAX_BYTES {
+            log::info!(
+                "Prompt too large for Codex ({} bytes, limit {}), using diff-only mode",
+                prompt.len(),
+                CODEX_MAX_BYTES
+            );
+            let prompt = build_tier2_prompt(files);
+            return (prompt, PromptStrategy::DiffOnly);
+        }
+
         return (prompt, PromptStrategy::FullContext);
     }
 
@@ -88,6 +118,7 @@ pub fn build_prompt_with_strategy(files: &[FileAnalysisInput]) -> (String, Promp
         tier1_lines
     );
     let prompt = build_tier2_prompt(files);
+
     (prompt, PromptStrategy::DiffOnly)
 }
 

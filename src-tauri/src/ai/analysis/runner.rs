@@ -5,7 +5,10 @@
 
 use std::path::Path;
 
-use super::prompt::{build_prompt_with_strategy, FileAnalysisInput, LARGE_FILE_THRESHOLD};
+use super::prompt::{
+    build_prompt_with_strategy_for_provider, CODEX_MAX_BYTES, FileAnalysisInput,
+    LARGE_FILE_THRESHOLD,
+};
 use super::types::ChangesetAnalysis;
 use crate::ai::{find_acp_agent, find_acp_agent_by_id, run_acp_prompt, AcpAgent};
 use crate::git::{self, DiffSpec, FileContent};
@@ -170,14 +173,23 @@ pub async fn analyze_diff(
         return Err("No text files to analyze (all binary?)".to_string());
     }
 
-    // Build prompt with automatic tier selection
-    let (prompt, strategy) = build_prompt_with_strategy(&inputs);
+    // Build prompt with automatic tier selection (provider-aware for size limits)
+    let (prompt, strategy) = build_prompt_with_strategy_for_provider(&inputs, provider);
 
     log::info!("=== DIFF ANALYSIS (ACP) ===");
     log::info!("Files: {}", inputs.len());
     log::info!("Strategy: {:?}", strategy);
     log::info!("Using: {}", agent.name());
     log::debug!("Prompt:\n{}", prompt);
+
+    // Codex has strict input size limits (10MB). Fail early if exceeded.
+    if provider == Some("codex") && prompt.len() > CODEX_MAX_BYTES {
+        return Err(format!(
+            "Changeset too large for Codex ({} bytes, limit {}). Try fewer files or a smaller diff range.",
+            prompt.len(),
+            CODEX_MAX_BYTES
+        ));
+    }
 
     // Run the prompt via ACP
     let response = run_acp_prompt(&agent, repo_path, &prompt).await?;
