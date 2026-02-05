@@ -2366,10 +2366,7 @@ fn create_git_project(
                 "A project already exists for {} with subpath '{}'",
                 repo_name, sp
             ),
-            None => format!(
-                "A project already exists for {} with no subpath",
-                repo_name
-            ),
+            None => format!("A project already exists for {} with no subpath", repo_name),
         });
     }
 
