@@ -57,12 +57,10 @@
     currentDir = dir;
   });
 
-  // Focus appropriate input when step or elements change
+  // Focus search input when on repo step
   $effect(() => {
     if (step === 'repo' && inputEl) {
       inputEl.focus();
-    } else if (step === 'config' && subpathInputEl && !saving) {
-      subpathInputEl.focus();
     }
   });
 
@@ -209,15 +207,26 @@
     showSubpathDropdown = true;
   }
 
-  function handleSubpathFocus() {
-    subpathInputFocused = true;
-    // Show dropdown if field is empty, otherwise wait for user to type
-    showSubpathDropdown = subpath.trim() === '';
+  function handleSubpathClick() {
+    // Only open dropdown when clicking directly in the input field
+    showSubpathDropdown = true;
   }
 
-  function handleSubpathBlur() {
+  function handleSubpathFocus() {
+    subpathInputFocused = true;
+    // Don't open dropdown on focus - wait for click or typing
+    // This prevents the dropdown from opening when clicking the label
+  }
+
+  function handleSubpathBlur(e: FocusEvent) {
     subpathInputFocused = false;
-    showSubpathDropdown = false;
+    // Only close if focus is moving outside the dropdown
+    // Check if the related target (where focus is going) is inside the dropdown
+    const relatedTarget = e.relatedTarget as HTMLElement | null;
+    const container = (e.target as HTMLElement)?.closest('.subpath-input-container');
+    if (!relatedTarget || !container?.contains(relatedTarget)) {
+      showSubpathDropdown = false;
+    }
   }
 
   function selectRepo(path: string) {
@@ -323,22 +332,25 @@
     const parts = path.split('/');
     return parts[parts.length - 1] || path;
   }
+
+  function handleBackdropClick(event: MouseEvent) {
+    // Only close if clicking directly on the backdrop, not on children
+    // This prevents accidental closes during text selection
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
 </script>
 
 <div
   class="modal-backdrop"
-  role="presentation"
+  role="dialog"
+  aria-modal="true"
   tabindex="-1"
-  onclick={onClose}
+  onclick={handleBackdropClick}
   onkeydown={handleKeydown}
 >
-  <div
-    class="modal"
-    role="dialog"
-    tabindex="-1"
-    onkeydown={() => {}}
-    onclick={(e) => e.stopPropagation()}
-  >
+  <div class="modal">
     <div class="modal-header">
       {#if step === 'config'}
         <button class="back-button" onclick={goBack}>
@@ -428,40 +440,44 @@
         </div>
 
         <div class="form-group">
-          <label for="project-subpath">Subpath</label>
-          <input
-            bind:this={subpathInputEl}
-            bind:value={subpath}
-            id="project-subpath"
-            type="text"
-            placeholder="e.g., packages/frontend"
-            disabled={saving}
-            autocomplete="off"
-            autocorrect="off"
-            autocapitalize="off"
-            spellcheck="false"
-            onfocus={handleSubpathFocus}
-            onblur={handleSubpathBlur}
-            oninput={handleSubpathInput}
-            onkeydown={handleSubpathKeydown}
-          />
-          {#if showSubpathDropdown && filteredSubpathSuggestions.length > 0}
-            <div class="subpath-suggestions">
-              {#each filteredSubpathSuggestions as entry, index (entry.path)}
-                <button
-                  class="subpath-suggestion"
-                  class:selected={index === subpathSelectedIndex}
-                  onmousedown={(e) => {
-                    e.preventDefault();
-                    selectSubpathSuggestion(entry);
-                  }}
-                >
-                  <Folder size={14} class="suggestion-icon" />
-                  <span class="suggestion-name">{entry.name}</span>
-                </button>
-              {/each}
-            </div>
-          {/if}
+          <label for="project-subpath">Subpath <span class="optional-label">(optional)</span></label
+          >
+          <div class="subpath-input-container">
+            <input
+              bind:this={subpathInputEl}
+              bind:value={subpath}
+              id="project-subpath"
+              type="text"
+              placeholder="e.g., packages/frontend"
+              disabled={saving}
+              autocomplete="off"
+              autocorrect="off"
+              autocapitalize="off"
+              spellcheck="false"
+              onclick={handleSubpathClick}
+              onfocus={handleSubpathFocus}
+              onblur={handleSubpathBlur}
+              oninput={handleSubpathInput}
+              onkeydown={handleSubpathKeydown}
+            />
+            {#if showSubpathDropdown && filteredSubpathSuggestions.length > 0}
+              <div class="subpath-suggestions">
+                {#each filteredSubpathSuggestions as entry, index (entry.path)}
+                  <button
+                    class="subpath-suggestion"
+                    class:selected={index === subpathSelectedIndex}
+                    onmousedown={(e) => {
+                      e.preventDefault();
+                      selectSubpathSuggestion(entry);
+                    }}
+                  >
+                    <Folder size={14} class="suggestion-icon" />
+                    <span class="suggestion-name">{entry.name}</span>
+                  </button>
+                {/each}
+              </div>
+            {/if}
+          </div>
           <span class="help-text">
             For monorepos: subdirectory to use as working directory for AI sessions
           </span>
@@ -503,7 +519,8 @@
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    /* Note: no overflow:hidden here - entries-list handles its own scrolling,
+       and config step needs dropdown to overflow */
   }
 
   .modal-header {
@@ -671,9 +688,11 @@
   /* Config step */
   .config-step {
     padding: 16px;
+    padding-bottom: 24px; /* Extra padding to accommodate dropdown overflow */
     display: flex;
     flex-direction: column;
     gap: 16px;
+    overflow: visible;
   }
 
   .repo-info {
@@ -712,7 +731,17 @@
     color: var(--text-primary);
   }
 
+  .optional-label {
+    font-weight: 400;
+    color: var(--text-faint);
+  }
+
+  .subpath-input-container {
+    position: relative;
+  }
+
   .form-group input {
+    width: 100%;
     padding: 10px 12px;
     background-color: var(--bg-primary);
     border: 1px solid var(--border-muted);
@@ -721,6 +750,7 @@
     color: var(--text-primary);
     outline: none;
     transition: border-color 0.15s;
+    box-sizing: border-box;
   }
 
   .form-group input:focus {
@@ -738,6 +768,12 @@
 
   /* Subpath suggestions dropdown */
   .subpath-suggestions {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 10;
+    margin-top: 4px;
     max-height: 160px;
     overflow-y: auto;
     border: 1px solid var(--border-muted);

@@ -62,7 +62,7 @@
   });
 
   // Group branches by project (including pending ones)
-  // Seed all known projects so empty ones still appear in the list
+  // Empty projects are filtered out at render time
   let branchesByProject = $derived.by(() => {
     const grouped = new Map<
       string,
@@ -261,7 +261,7 @@
     onViewDiff?.(
       branch.projectId,
       branch.worktreePath,
-      DiffSpec.fromRevs(branch.baseBranch, branch.branchName),
+      DiffSpec.mergeBaseDiff(branch.baseBranch, branch.branchName),
       `${branch.baseBranch}..${branch.branchName}`
     );
   }
@@ -344,7 +344,7 @@
     {:else}
       <!-- Branches grouped by project -->
       <div class="projects-list">
-        {#each [...branchesByProject.entries()] as [projectId, { project, branches: projectBranches, pending: projectPending }] (projectId)}
+        {#each [...branchesByProject.entries()].filter(([_, { branches: b, pending: p }]) => b.length > 0 || p.length > 0) as [projectId, { project, branches: projectBranches, pending: projectPending }] (projectId)}
           <div class="project-section">
             <div class="project-header">
               <div class="project-info">

@@ -5,12 +5,16 @@ use git2::{DiffOptions, Repository};
 use std::cell::RefCell;
 use std::path::Path;
 
-/// Resolve a GitRef, converting MergeBase to a concrete SHA.
+/// Resolve a GitRef, converting MergeBase/MergeBaseOf to a concrete SHA.
 fn resolve_ref(repo: &Path, git_ref: &GitRef) -> Result<GitRef, GitError> {
     match git_ref {
         GitRef::MergeBase => {
             let default_branch = refs::detect_default_branch(repo)?;
             let sha = refs::merge_base(repo, &default_branch, "HEAD")?;
+            Ok(GitRef::Rev(sha))
+        }
+        GitRef::MergeBaseOf([base_branch, head_ref]) => {
+            let sha = refs::merge_base(repo, base_branch, head_ref)?;
             Ok(GitRef::Rev(sha))
         }
         other => Ok(other.clone()),
@@ -52,8 +56,9 @@ pub fn get_unified_diff(repo: &Path, spec: &DiffSpec, path: &Path) -> Result<Str
         (GitRef::WorkingTree, _) => Err(GitError::CommandFailed(
             "Cannot use working tree as base".to_string(),
         )),
-        (GitRef::MergeBase, _) | (_, GitRef::MergeBase) => {
-            unreachable!("MergeBase should have been resolved")
+        (GitRef::MergeBase | GitRef::MergeBaseOf(_), _)
+        | (_, GitRef::MergeBase | GitRef::MergeBaseOf(_)) => {
+            unreachable!("MergeBase/MergeBaseOf should have been resolved")
         }
     }
 }
@@ -96,8 +101,9 @@ pub fn list_diff_files(repo: &Path, spec: &DiffSpec) -> Result<Vec<FileDiffSumma
         (GitRef::WorkingTree, _) => Err(GitError::CommandFailed(
             "Cannot use working tree as base".to_string(),
         )),
-        (GitRef::MergeBase, _) | (_, GitRef::MergeBase) => {
-            unreachable!("MergeBase should have been resolved")
+        (GitRef::MergeBase | GitRef::MergeBaseOf(_), _)
+        | (_, GitRef::MergeBase | GitRef::MergeBaseOf(_)) => {
+            unreachable!("MergeBase/MergeBaseOf should have been resolved")
         }
     }
 }
@@ -347,7 +353,7 @@ pub fn get_file_diff(repo_path: &Path, spec: &DiffSpec, path: &Path) -> Result<F
 }
 
 /// Resolve a GitRef to a tree (or None for working tree)
-/// Note: MergeBase should already be resolved before calling this
+/// Note: MergeBase/MergeBaseOf should already be resolved before calling this
 fn resolve_to_tree<'a>(
     repo: &'a Repository,
     git_ref: &GitRef,
@@ -363,8 +369,10 @@ fn resolve_to_tree<'a>(
             })?;
             Ok(Some(tree))
         }
-        GitRef::MergeBase => {
-            unreachable!("MergeBase should have been resolved before calling resolve_to_tree")
+        GitRef::MergeBase | GitRef::MergeBaseOf(_) => {
+            unreachable!(
+                "MergeBase/MergeBaseOf should have been resolved before calling resolve_to_tree"
+            )
         }
     }
 }

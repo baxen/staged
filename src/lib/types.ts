@@ -6,12 +6,14 @@
 export type GitRef =
   | { type: 'WorkingTree' }
   | { type: 'Rev'; value: string }
-  | { type: 'MergeBase' };
+  | { type: 'MergeBase' }
+  | { type: 'MergeBaseOf'; value: [string, string] };
 
 /** Get display string for a GitRef */
 export function gitRefDisplay(ref: GitRef): string {
   if (ref.type === 'WorkingTree') return '@';
   if (ref.type === 'MergeBase') return 'merge-base';
+  if (ref.type === 'MergeBaseOf') return 'merge-base';
   return ref.value;
 }
 
@@ -19,6 +21,7 @@ export function gitRefDisplay(ref: GitRef): string {
 export function gitRefName(ref: GitRef): string {
   if (ref.type === 'WorkingTree') return 'HEAD';
   if (ref.type === 'MergeBase') return 'HEAD'; // For file loading, use HEAD
+  if (ref.type === 'MergeBaseOf') return ref.value[1]; // Use head ref for file loading
   return ref.value;
 }
 
@@ -78,6 +81,14 @@ export const DiffSpec = {
     };
   },
 
+  /** Branch diff using merge-base: merge-base(baseBranch, headRef)..headRef */
+  mergeBaseDiff(baseBranch: string, headRef: string): DiffSpec {
+    return {
+      base: { type: 'MergeBaseOf', value: [baseBranch, headRef] },
+      head: { type: 'Rev', value: headRef },
+    };
+  },
+
   /** Custom range */
   custom(base: GitRef, head: GitRef): DiffSpec {
     return { base, head };
@@ -96,6 +107,7 @@ export const DiffSpec = {
     const formatRef = (ref: GitRef): string => {
       if (ref.type === 'WorkingTree') return '@';
       if (ref.type === 'MergeBase') return 'merge-base';
+      if (ref.type === 'MergeBaseOf') return 'merge-base';
       return ref.value;
     };
     return `${formatRef(spec.base)}..${formatRef(spec.head)}`;
