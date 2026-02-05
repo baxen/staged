@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
-  import { X, Bot, Loader2, AlertCircle } from 'lucide-svelte';
+  import { X, Loader2, AlertCircle } from 'lucide-svelte';
   import { getSession, getSessionStatus } from './services/ai';
   import { toDisplayMessage, type DisplayMessage } from './types/streaming';
   import {
@@ -150,10 +150,9 @@
   >
     <header class="modal-header">
       <div class="header-content">
-        <Bot size={18} />
         <span class="header-title">{title || 'Session'}</span>
         {#if isProcessing}
-          <span class="status-badge processing">
+          <span class="status-badge">
             <Loader2 size={12} class="spinning" />
             Running
           </span>
@@ -177,7 +176,6 @@
         </div>
       {:else if messages.length === 0 && !isProcessing}
         <div class="empty-state">
-          <Bot size={32} />
           <span>No messages yet</span>
         </div>
       {:else}
@@ -229,11 +227,7 @@
     gap: 10px;
     color: var(--text-primary);
     min-width: 0;
-  }
-
-  .header-content :global(svg) {
-    flex-shrink: 0;
-    color: var(--text-muted);
+    flex: 1;
   }
 
   .header-title {
@@ -253,9 +247,6 @@
     font-size: var(--size-xs);
     font-weight: 500;
     flex-shrink: 0;
-  }
-
-  .status-badge.processing {
     background: var(--ui-accent);
     color: var(--bg-deepest);
   }
@@ -284,9 +275,6 @@
     flex: 1;
     overflow-y: auto;
     padding: 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
   }
 
   .loading-state,
@@ -303,10 +291,6 @@
 
   .error-state {
     color: var(--ui-danger);
-  }
-
-  .empty-state :global(svg) {
-    color: var(--text-faint);
   }
 
   :global(.spinning) {

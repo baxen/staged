@@ -897,7 +897,18 @@
 
 <!-- Note viewer modal -->
 {#if showNoteViewer && viewingNote}
-  <NoteViewerModal note={viewingNote} isLive={isNoteGenerating} onClose={closeNoteViewer} />
+  <NoteViewerModal
+    note={viewingNote}
+    isLive={isNoteGenerating}
+    onClose={closeNoteViewer}
+    onViewSession={(sessionId, title) => {
+      closeNoteViewer();
+      // Create a temporary session object to reuse the session viewer
+      viewingSession = { aiSessionId: sessionId, prompt: title } as BranchSession;
+      isViewingLive = false;
+      showSessionViewer = true;
+    }}
+  />
 {/if}
 
 <!-- Continue session modal -->

@@ -3,13 +3,13 @@
 
   Shows the markdown content of a note. For generating notes,
   subscribes to streaming events for real-time updates via the shared store.
+  
+  Session viewing is accessed via a button (consistent with commit sessions).
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { X, FileText, Loader2, AlertCircle, MessageSquare } from 'lucide-svelte';
   import type { BranchNote } from './services/branch';
-  import { getSession, type SessionFull } from './services/ai';
-  import { toDisplayMessage, type DisplayMessage } from './types/streaming';
   import {
     connectToSession,
     disconnectFromSession,
@@ -25,17 +25,11 @@
     /** Whether this is a live generating note */
     isLive?: boolean;
     onClose: () => void;
+    /** Callback to open the session viewer modal */
+    onViewSession?: (sessionId: string, title: string) => void;
   }
 
-  let { note, isLive = false, onClose }: Props = $props();
-
-  // View mode: 'content' shows rendered markdown, 'session' shows the AI conversation
-  let viewMode = $state<'content' | 'session'>('content');
-
-  // Session data (loaded when switching to session view)
-  let session = $state<SessionFull | null>(null);
-  let sessionLoading = $state(false);
-  let sessionError = $state<string | null>(null);
+  let { note, isLive = false, onClose, onViewSession }: Props = $props();
 
   // Streaming store connection
   let streamState = $state<StreamingSessionState | null>(null);
@@ -74,34 +68,10 @@
     }
   });
 
-  async function loadSession() {
-    if (!note.aiSessionId || session) return;
-
-    sessionLoading = true;
-    sessionError = null;
-
-    try {
-      session = await getSession(note.aiSessionId);
-      if (!session) {
-        sessionError = 'Session not found';
-      }
-    } catch (e) {
-      sessionError = e instanceof Error ? e.message : String(e);
-    } finally {
-      sessionLoading = false;
+  function handleViewSession() {
+    if (note.aiSessionId && onViewSession) {
+      onViewSession(note.aiSessionId, note.title);
     }
-  }
-
-  // Convert session messages to DisplayMessage format for StreamingMessages
-  let sessionMessages = $derived<DisplayMessage[]>(session?.messages.map(toDisplayMessage) ?? []);
-
-  function switchToContent() {
-    viewMode = 'content';
-  }
-
-  function switchToSession() {
-    viewMode = 'session';
-    loadSession();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -125,7 +95,7 @@
   >
     <header class="modal-header">
       <div class="header-content">
-        <FileText size={18} />
+        <FileText size={18} class="header-icon" />
         <span class="header-title">{note.title}</span>
         {#if isGenerating}
           <span class="status-badge generating">
@@ -135,27 +105,11 @@
         {/if}
       </div>
       <div class="header-right">
-        {#if hasSession && !isGenerating}
-          <div class="view-toggle">
-            <button
-              class="toggle-btn"
-              class:active={viewMode === 'content'}
-              onclick={switchToContent}
-              title="View content"
-            >
-              <FileText size={14} />
-              <span>Content</span>
-            </button>
-            <button
-              class="toggle-btn"
-              class:active={viewMode === 'session'}
-              onclick={switchToSession}
-              title="View session"
-            >
-              <MessageSquare size={14} />
-              <span>Session</span>
-            </button>
-          </div>
+        {#if hasSession && !isGenerating && onViewSession}
+          <button class="session-btn" onclick={handleViewSession} title="View session">
+            <MessageSquare size={14} />
+            Session
+          </button>
         {/if}
         <button class="close-btn" onclick={onClose}>
           <X size={18} />
@@ -167,19 +121,12 @@
       {#if isGenerating}
         <!-- Live streaming view during generation -->
         <div class="generating-view">
-          <div class="generating-header">
-            <Loader2 size={16} class="spinning" />
-            <span>Generating note...</span>
-          </div>
-
-          <div class="streaming-content">
-            <StreamingMessages
-              messages={[]}
-              streamingSegments={streamState?.streamingSegments ?? []}
-              isActive={true}
-              waitingText="Waiting for AI response..."
-            />
-          </div>
+          <StreamingMessages
+            messages={[]}
+            streamingSegments={streamState?.streamingSegments ?? []}
+            isActive={true}
+            waitingText="Generating note..."
+          />
         </div>
       {:else if isError}
         <div class="error-content">
@@ -188,23 +135,6 @@
             <span>Generation Failed</span>
           </div>
           <p class="error-message">{note.errorMessage || 'An unknown error occurred'}</p>
-        </div>
-      {:else if viewMode === 'session'}
-        <!-- Session view -->
-        <div class="session-view">
-          {#if sessionLoading}
-            <div class="session-loading">
-              <Loader2 size={24} class="spinning" />
-              <span>Loading session...</span>
-            </div>
-          {:else if sessionError}
-            <div class="session-error">
-              <AlertCircle size={24} />
-              <span>{sessionError}</span>
-            </div>
-          {:else if session}
-            <StreamingMessages messages={sessionMessages} streamingSegments={[]} isActive={false} />
-          {/if}
         </div>
       {:else}
         <!-- Content view (rendered markdown) -->
@@ -258,9 +188,10 @@
     gap: 10px;
     color: var(--text-primary);
     min-width: 0;
+    flex: 1;
   }
 
-  .header-content :global(svg) {
+  :global(.header-icon) {
     flex-shrink: 0;
     color: var(--text-accent);
   }
@@ -292,39 +223,27 @@
   .header-right {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
 
-  .view-toggle {
-    display: flex;
-    background: var(--bg-elevated);
-    border-radius: 6px;
-    padding: 2px;
-    gap: 2px;
-  }
-
-  .toggle-btn {
+  .session-btn {
     display: flex;
     align-items: center;
     gap: 6px;
     padding: 6px 10px;
     background: transparent;
-    border: none;
-    border-radius: 4px;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
     color: var(--text-muted);
     font-size: var(--size-xs);
     cursor: pointer;
     transition: all 0.15s ease;
   }
 
-  .toggle-btn:hover {
-    color: var(--text-primary);
-  }
-
-  .toggle-btn.active {
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+  .session-btn:hover {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background: var(--bg-hover);
   }
 
   .close-btn {
@@ -357,26 +276,6 @@
   .generating-view {
     display: flex;
     flex-direction: column;
-    height: 100%;
-  }
-
-  .generating-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding-bottom: 16px;
-    margin-bottom: 16px;
-    border-bottom: 1px solid var(--border-subtle);
-    color: var(--text-accent);
-    font-size: var(--size-sm);
-    font-weight: 500;
-  }
-
-  .streaming-content {
-    flex: 1;
-    overflow: auto;
-    display: flex;
-    flex-direction: column;
     gap: 16px;
   }
 
@@ -405,26 +304,6 @@
     margin: 0;
     text-align: center;
     max-width: 400px;
-  }
-
-  /* Session view */
-  .session-view {
-    height: 100%;
-  }
-
-  .session-loading,
-  .session-error {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    gap: 12px;
-    color: var(--text-muted);
-  }
-
-  .session-error {
-    color: var(--ui-danger);
   }
 
   /* Markdown content */
