@@ -1,5 +1,6 @@
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
+  import { GitPullRequest, Loader2 } from 'lucide-svelte';
   import {
     getPrForBranch,
     pushBranch,
@@ -147,77 +148,86 @@
 <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
 <div class="modal-backdrop" on:click={handleBackdropClick}>
   <div class="modal">
-    <div class="modal-header">
-      <h2>{existingPr ? 'Update Pull Request' : 'Create Pull Request'}</h2>
-      <button class="close-btn" on:click={() => dispatch('close')}>×</button>
-    </div>
-
     {#if isLoading}
-      <div class="loading">Checking for existing PR...</div>
+      <div class="modal-content">
+        <div class="icon-wrapper">
+          <Loader2 size={24} class="spinner" />
+        </div>
+        <div class="text-content">
+          <h2>Checking for existing PR...</h2>
+        </div>
+      </div>
     {:else}
       <form on:submit|preventDefault={handleSubmit}>
-        {#if existingPr}
-          <div class="existing-pr-banner">
-            <span class="pr-icon">⤴</span>
-            <span>
-              PR #{existingPr.number} already exists for this branch.
-              <button type="button" class="link-btn" on:click={viewExistingPr}>
-                View on GitHub
-              </button>
-            </span>
+        <div class="modal-content">
+          <div class="icon-wrapper">
+            <GitPullRequest size={24} />
           </div>
-        {/if}
+          <div class="text-content">
+            <h2>{existingPr ? 'Update Pull Request' : 'Create Pull Request'}</h2>
+            <p class="branch-info">
+              {branch.branchName} → {branch.baseBranch}
+              {#if commits.length > 0}
+                <span class="commit-count">
+                  · {commits.length} commit{commits.length !== 1 ? 's' : ''}
+                </span>
+              {/if}
+            </p>
 
-        <div class="form-group">
-          <label for="pr-title">Title</label>
-          <input
-            id="pr-title"
-            type="text"
-            bind:value={title}
-            placeholder="PR title"
-            disabled={isPushing || isCreating}
-          />
-        </div>
+            {#if existingPr}
+              <div class="existing-pr-banner">
+                PR #{existingPr.number} already exists.
+                <button type="button" class="link-btn" on:click={viewExistingPr}>
+                  View on GitHub
+                </button>
+              </div>
+            {/if}
 
-        <div class="form-group">
-          <label for="pr-body">Description</label>
-          <textarea
-            id="pr-body"
-            bind:value={body}
-            placeholder="Describe your changes..."
-            rows="8"
-            disabled={isPushing || isCreating}
-          ></textarea>
-        </div>
+            <div class="form-group">
+              <label for="pr-title">Title</label>
+              <input
+                id="pr-title"
+                type="text"
+                bind:value={title}
+                placeholder="PR title"
+                disabled={isPushing || isCreating}
+              />
+            </div>
 
-        {#if !existingPr}
-          <div class="form-group checkbox-group">
-            <label>
-              <input type="checkbox" bind:checked={isDraft} disabled={isPushing || isCreating} />
-              Create as draft
-            </label>
+            <div class="form-group">
+              <label for="pr-body">Description</label>
+              <textarea
+                id="pr-body"
+                bind:value={body}
+                placeholder="Describe your changes..."
+                rows="6"
+                disabled={isPushing || isCreating}
+              ></textarea>
+            </div>
+
+            {#if !existingPr}
+              <div class="form-group checkbox-group">
+                <label>
+                  <input
+                    type="checkbox"
+                    bind:checked={isDraft}
+                    disabled={isPushing || isCreating}
+                  />
+                  Create as draft
+                </label>
+              </div>
+            {/if}
+
+            {#if error}
+              <div class="error">{error}</div>
+            {/if}
           </div>
-        {/if}
-
-        <div class="form-info">
-          <span class="branch-info">
-            {branch.branchName} → {branch.baseBranch}
-          </span>
-          {#if commits.length > 0}
-            <span class="commit-count">
-              {commits.length} commit{commits.length !== 1 ? 's' : ''}
-            </span>
-          {/if}
         </div>
-
-        {#if error}
-          <div class="error">{error}</div>
-        {/if}
 
         <div class="modal-actions">
           <button
             type="button"
-            class="cancel-btn"
+            class="btn btn-secondary"
             on:click={() => dispatch('close')}
             disabled={isPushing || isCreating}
           >
@@ -225,7 +235,7 @@
           </button>
           <button
             type="submit"
-            class="submit-btn"
+            class="btn btn-primary"
             disabled={isPushing || isCreating || !title.trim()}
           >
             {#if isPushing}
@@ -246,7 +256,7 @@
   .modal-backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--shadow-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -254,76 +264,69 @@
   }
 
   .modal {
-    background: var(--bg-primary);
-    border: 1px solid var(--border-primary);
-    border-radius: 8px;
-    width: 90%;
-    max-width: 560px;
+    background: var(--bg-chrome);
+    border-radius: 12px;
+    box-shadow: var(--shadow-elevated);
+    width: 480px;
+    max-width: 90vw;
     max-height: 90vh;
-    overflow-y: auto;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
   }
 
-  .modal-header {
+  .modal-content {
+    display: flex;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .icon-wrapper {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--border-primary);
+    justify-content: center;
+    background: var(--bg-hover);
+    border-radius: 10px;
+    color: var(--ui-accent);
   }
 
-  .modal-header h2 {
-    margin: 0;
-    font-size: 16px;
+  .text-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .text-content h2 {
+    margin: 0 0 4px 0;
+    font-size: var(--size-base);
     font-weight: 600;
     color: var(--text-primary);
   }
 
-  .close-btn {
-    background: none;
-    border: none;
-    font-size: 24px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    padding: 0;
-    line-height: 1;
+  .branch-info {
+    margin: 0 0 16px 0;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
   }
 
-  .close-btn:hover {
-    color: var(--text-primary);
-  }
-
-  .loading {
-    padding: 40px 20px;
-    text-align: center;
-    color: var(--text-secondary);
-  }
-
-  form {
-    padding: 20px;
+  .commit-count {
+    color: var(--text-faint);
   }
 
   .existing-pr-banner {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
+    padding: 10px 12px;
+    background: var(--bg-hover);
     border-radius: 6px;
     margin-bottom: 16px;
-    font-size: 13px;
-    color: var(--text-secondary);
-  }
-
-  .pr-icon {
-    font-size: 16px;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
   }
 
   .link-btn {
     background: none;
     border: none;
-    color: var(--accent-primary);
+    color: var(--ui-accent);
     cursor: pointer;
     padding: 0;
     font-size: inherit;
@@ -331,30 +334,30 @@
   }
 
   .link-btn:hover {
-    color: var(--accent-secondary);
+    color: var(--ui-accent-hover);
   }
 
   .form-group {
-    margin-bottom: 16px;
+    margin-bottom: 12px;
   }
 
   .form-group label {
     display: block;
-    margin-bottom: 6px;
-    font-size: 13px;
+    margin-bottom: 4px;
+    font-size: var(--size-sm);
     font-weight: 500;
-    color: var(--text-secondary);
+    color: var(--text-muted);
   }
 
   .form-group input[type='text'],
   .form-group textarea {
     width: 100%;
-    padding: 10px 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
+    padding: 8px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-subtle);
     border-radius: 6px;
     color: var(--text-primary);
-    font-size: 14px;
+    font-size: var(--size-sm);
     font-family: inherit;
     box-sizing: border-box;
   }
@@ -362,12 +365,12 @@
   .form-group input[type='text']:focus,
   .form-group textarea:focus {
     outline: none;
-    border-color: var(--accent-primary);
+    border-color: var(--ui-accent);
   }
 
   .form-group textarea {
     resize: vertical;
-    min-height: 120px;
+    min-height: 100px;
   }
 
   .checkbox-group label {
@@ -375,87 +378,79 @@
     align-items: center;
     gap: 8px;
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--size-sm);
     color: var(--text-primary);
   }
 
   .checkbox-group input[type='checkbox'] {
-    width: 16px;
-    height: 16px;
+    width: 14px;
+    height: 14px;
     cursor: pointer;
   }
 
-  .form-info {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 12px;
-    background: var(--bg-secondary);
-    border-radius: 6px;
-    margin-bottom: 16px;
-    font-size: 12px;
-    color: var(--text-secondary);
-  }
-
-  .branch-info {
-    font-family: var(--font-mono);
-  }
-
-  .commit-count {
-    color: var(--text-tertiary);
-  }
-
   .error {
-    padding: 12px;
-    background: rgba(255, 100, 100, 0.1);
-    border: 1px solid rgba(255, 100, 100, 0.3);
+    padding: 10px 12px;
+    background: var(--ui-danger-bg);
     border-radius: 6px;
-    color: #ff6464;
-    font-size: 13px;
-    margin-bottom: 16px;
+    color: var(--ui-danger);
+    font-size: var(--size-sm);
+    margin-top: 12px;
   }
 
   .modal-actions {
     display: flex;
-    gap: 12px;
     justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
   }
 
-  .cancel-btn,
-  .submit-btn {
-    padding: 10px 20px;
+  .btn {
+    padding: 8px 16px;
+    border: none;
     border-radius: 6px;
-    font-size: 14px;
+    font-size: var(--size-sm);
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition:
+      background-color 0.1s,
+      opacity 0.1s;
   }
 
-  .cancel-btn {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-primary);
-    color: var(--text-secondary);
+  .btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
-  .cancel-btn:hover:not(:disabled) {
-    background: var(--bg-tertiary);
+  .btn-secondary {
+    background: var(--bg-hover);
     color: var(--text-primary);
   }
 
-  .submit-btn {
-    background: var(--accent-primary);
-    border: 1px solid var(--accent-primary);
-    color: white;
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--border-subtle);
   }
 
-  .submit-btn:hover:not(:disabled) {
-    background: var(--accent-secondary);
-    border-color: var(--accent-secondary);
+  .btn-primary {
+    background: var(--ui-accent);
+    color: var(--bg-primary);
   }
 
-  .submit-btn:disabled,
-  .cancel-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+  .btn-primary:hover:not(:disabled) {
+    background: var(--ui-accent-hover);
+  }
+
+  :global(.spinner) {
+    animation: spin 1s linear infinite;
+  }
+
+  @keyframes spin {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

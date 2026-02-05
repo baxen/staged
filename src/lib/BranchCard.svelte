@@ -766,39 +766,42 @@
   </div>
 
   <div class="card-footer">
-    <button
-      class="pr-button"
-      onclick={() => (showCreatePrModal = true)}
-      disabled={commits.length === 0}
-      title={commits.length === 0
-        ? 'No commits to create PR from'
-        : 'Create or update pull request'}
-    >
-      <GitPullRequest size={14} />
-      PR
-    </button>
-    <div class="new-dropdown-container">
-      <button
-        class="new-button"
-        onclick={toggleDropdown}
-        disabled={!!runningSession || !!generatingNote}
-      >
-        <Plus size={14} />
-        New
-        <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
-      </button>
-      {#if showNewDropdown}
-        <div class="dropdown-menu">
-          <button class="dropdown-item" onclick={handleNewCommit}>
-            <GitCommit size={14} />
-            New Commit
-          </button>
-          <button class="dropdown-item" onclick={handleNewNote}>
-            <FileText size={14} />
-            New Note
-          </button>
-        </div>
+    <div class="footer-left">
+      {#if commits.length > 0}
+        <button
+          class="pr-button"
+          onclick={() => (showCreatePrModal = true)}
+          title="Create or update pull request"
+        >
+          <GitPullRequest size={14} />
+          PR
+        </button>
       {/if}
+    </div>
+    <div class="footer-right">
+      <div class="new-dropdown-container">
+        <button
+          class="new-button"
+          onclick={toggleDropdown}
+          disabled={!!runningSession || !!generatingNote}
+        >
+          <Plus size={14} />
+          New
+          <ChevronDown size={12} class={showNewDropdown ? 'chevron open' : 'chevron'} />
+        </button>
+        {#if showNewDropdown}
+          <div class="dropdown-menu">
+            <button class="dropdown-item" onclick={handleNewCommit}>
+              <GitCommit size={14} />
+              New Commit
+            </button>
+            <button class="dropdown-item" onclick={handleNewNote}>
+              <FileText size={14} />
+              New Note
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 </div>
@@ -1340,10 +1343,20 @@
   /* Footer */
   .card-footer {
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
+    justify-content: space-between;
+    align-items: center;
     padding: 12px 16px;
     border-top: 1px solid var(--border-subtle);
+  }
+
+  .footer-left {
+    display: flex;
+    gap: 8px;
+  }
+
+  .footer-right {
+    display: flex;
+    gap: 8px;
   }
 
   .pr-button {
@@ -1364,11 +1377,6 @@
     border-color: var(--ui-accent);
     color: var(--ui-accent);
     background-color: var(--bg-hover);
-  }
-
-  .pr-button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .new-dropdown-container {
