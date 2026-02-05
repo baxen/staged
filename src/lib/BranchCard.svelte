@@ -1163,7 +1163,7 @@
 
   .timeline-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 10px;
     padding: 6px 8px;
     margin: 0 -8px;
