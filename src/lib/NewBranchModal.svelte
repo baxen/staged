@@ -3,9 +3,8 @@
 
   Two-step flow:
   1. Pick a repository (with search)
-  2. Choose mode: new branch OR from existing PR
-  3a. For new branch: Enter branch title (auto-generates sanitized branch name)
-  3b. For PR: Select from open PRs
+  2. Enter branch title (auto-generates sanitized branch name)
+     - Option to switch to "From Pull Request" mode
 
   The branch is created with an isolated worktree, defaulting to the
   repository's default branch (e.g., origin/main) as the base.
@@ -54,7 +53,7 @@
     $props();
 
   // State
-  type Step = 'repo' | 'mode' | 'name' | 'pr';
+  type Step = 'repo' | 'name' | 'pr';
   let step = $state<Step>('repo');
   let selectedRepo = $state<string | null>(null);
   let branchTitle = $state('');
@@ -150,7 +149,7 @@
     homeDir = dir;
     currentDir = dir;
 
-    // If initialRepoPath is provided, skip to mode step
+    // If initialRepoPath is provided, skip to name step
     if (initialRepoPath) {
       await selectRepo(initialRepoPath);
     }
@@ -248,25 +247,21 @@
       availableBranches = [];
     }
 
-    step = 'mode';
+    step = 'name';
   }
 
-  async function selectMode(mode: 'new' | 'pr') {
-    if (mode === 'new') {
-      step = 'name';
-    } else {
-      step = 'pr';
-      loadingPRs = true;
-      prSearchQuery = '';
-      prSelectedIndex = 0;
-      try {
-        pullRequests = await listPullRequests(selectedRepo!);
-      } catch (e) {
-        console.error('Failed to load PRs:', e);
-        pullRequests = [];
-      } finally {
-        loadingPRs = false;
-      }
+  async function switchToPRMode() {
+    step = 'pr';
+    loadingPRs = true;
+    prSearchQuery = '';
+    prSelectedIndex = 0;
+    try {
+      pullRequests = await listPullRequests(selectedRepo!);
+    } catch (e) {
+      console.error('Failed to load PRs:', e);
+      pullRequests = [];
+    } finally {
+      loadingPRs = false;
     }
   }
 
@@ -326,16 +321,18 @@
       showBasePicker = false;
       baseSearchQuery = '';
       baseSelectedIndex = 0;
-    } else if (step === 'name' || step === 'pr') {
-      step = 'mode';
-      branchTitle = '';
+    } else if (step === 'pr') {
+      // Go back from PR to name step
+      step = 'name';
       prSearchQuery = '';
       prSelectedIndex = 0;
-    } else if (step === 'mode') {
+    } else if (step === 'name') {
+      // Go back from name to repo selection
       step = 'repo';
       selectedRepo = null;
       detectedDefaultBranch = null;
       selectedBaseBranch = null;
+      branchTitle = '';
     }
   }
 
@@ -477,7 +474,7 @@
     onclick={(e) => e.stopPropagation()}
   >
     <div class="modal-header">
-      {#if step === 'mode' || step === 'name' || step === 'pr'}
+      {#if step === 'name' || step === 'pr'}
         <button class="back-button" onclick={goBack}>
           <ArrowLeft size={16} />
         </button>
@@ -485,8 +482,6 @@
       <h2>
         {#if step === 'repo'}
           Select Repository
-        {:else if step === 'mode'}
-          New Branch
         {:else if step === 'pr'}
           Select Pull Request
         {:else}
@@ -554,34 +549,6 @@
             </button>
           {/each}
         {/if}
-      </div>
-    {:else if step === 'mode'}
-      <!-- Mode selection -->
-      <div class="mode-step">
-        <div class="repo-info">
-          <GitBranch size={14} />
-          <span>{repoName(selectedRepo ?? '')}</span>
-        </div>
-        <div class="mode-options">
-          <button class="mode-option" onclick={() => selectMode('new')}>
-            <GitBranch size={20} class="mode-icon" />
-            <div class="mode-content">
-              <span class="mode-title">New Branch</span>
-              <span class="mode-desc"
-                >Create a fresh branch from {formatBranchName(effectiveBaseBranch)}</span
-              >
-            </div>
-            <ChevronRight size={16} class="mode-chevron" />
-          </button>
-          <button class="mode-option" onclick={() => selectMode('pr')}>
-            <GitPullRequest size={20} class="mode-icon pr-icon" />
-            <div class="mode-content">
-              <span class="mode-title">From Pull Request</span>
-              <span class="mode-desc">Check out an existing PR to review or continue work</span>
-            </div>
-            <ChevronRight size={16} class="mode-chevron" />
-          </button>
-        </div>
       </div>
     {:else if step === 'pr'}
       <!-- PR selection -->
@@ -703,10 +670,16 @@
           </div>
 
           <div class="actions">
-            <button class="cancel-button" onclick={goBack}>Cancel</button>
-            <button class="create-button" onclick={handleCreate} disabled={!branchName}>
-              Create Branch
+            <button class="pr-link" onclick={switchToPRMode}>
+              <GitPullRequest size={14} />
+              <span>From Pull Request</span>
             </button>
+            <div class="actions-right">
+              <button class="cancel-button" onclick={goBack}>Cancel</button>
+              <button class="create-button" onclick={handleCreate} disabled={!branchName}>
+                Create Branch
+              </button>
+            </div>
           </div>
         {/if}
       </div>
@@ -1094,9 +1067,38 @@
 
   .actions {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
+    align-items: center;
     gap: 8px;
     margin-top: 8px;
+  }
+
+  .actions-right {
+    display: flex;
+    gap: 8px;
+  }
+
+  .pr-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: transparent;
+    border: none;
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .pr-link:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
+  }
+
+  .pr-link :global(svg) {
+    color: var(--status-added);
   }
 
   .cancel-button {
@@ -1151,91 +1153,6 @@
     to {
       transform: rotate(360deg);
     }
-  }
-
-  /* Mode selection step */
-  .mode-step {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .repo-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
-    background-color: var(--bg-hover);
-    border-radius: 6px;
-    font-size: var(--size-sm);
-    color: var(--text-primary);
-  }
-
-  .repo-info :global(svg) {
-    color: var(--text-faint);
-    flex-shrink: 0;
-  }
-
-  .mode-options {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .mode-option {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    width: 100%;
-    padding: 14px 16px;
-    background: transparent;
-    border: 1px solid var(--border-muted);
-    border-radius: 8px;
-    text-align: left;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .mode-option:hover {
-    background-color: var(--bg-hover);
-    border-color: var(--border-emphasis);
-  }
-
-  :global(.mode-icon) {
-    color: var(--text-muted);
-    flex-shrink: 0;
-  }
-
-  :global(.pr-icon) {
-    color: var(--status-added);
-  }
-
-  .mode-content {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .mode-title {
-    font-size: var(--size-sm);
-    font-weight: 500;
-    color: var(--text-primary);
-  }
-
-  .mode-desc {
-    font-size: var(--size-xs);
-    color: var(--text-muted);
-  }
-
-  :global(.mode-chevron) {
-    color: var(--text-faint);
-    flex-shrink: 0;
-  }
-
-  .mode-option:hover :global(.mode-chevron) {
-    color: var(--text-muted);
   }
 
   /* PR list */
