@@ -1237,6 +1237,7 @@
   .timeline-line {
     flex: 1;
     width: 2px;
+    min-height: 8px;
     background-color: var(--border-subtle);
   }
 
