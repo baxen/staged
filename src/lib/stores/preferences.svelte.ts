@@ -111,6 +111,8 @@ export const preferences = $state({
   features: { ...DEFAULT_FEATURES } as Record<string, boolean>,
   /** Selected AI agent (null if not yet chosen) */
   aiAgent: null as string | null,
+  /** Whether all preferences have been loaded from storage */
+  loaded: false,
 });
 
 // =============================================================================
@@ -153,6 +155,31 @@ function applyAdaptiveTheme() {
  */
 export async function initPreferences(): Promise<void> {
   await initPersistentStore();
+}
+
+/**
+ * Load all preferences from storage.
+ * Sets preferences.loaded = true when complete.
+ * Returns { viewMode, hasAgent } for App.svelte to use.
+ */
+export async function loadAllPreferences(): Promise<{ viewMode: ViewMode; hasAgent: boolean }> {
+  // Load all preferences in parallel
+  await Promise.all([
+    loadSavedSize(),
+    loadSavedSidebarPosition(),
+    loadSavedSidebarWidth(),
+    loadSavedFeatures(),
+    loadSavedSyntaxTheme(),
+  ]);
+
+  // Load view mode and AI agent (these return values we need)
+  const viewMode = await loadSavedViewMode();
+  const hasAgent = await loadSavedAiAgent();
+
+  // Mark preferences as fully loaded
+  preferences.loaded = true;
+
+  return { viewMode, hasAgent };
 }
 
 // =============================================================================
