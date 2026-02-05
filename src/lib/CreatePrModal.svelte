@@ -41,8 +41,10 @@
     await checkExistingPr();
 
     if (!existingPr) {
-      // Try AI generation first, fall back to defaults
-      await generateDescription();
+      // Populate with simple defaults immediately
+      populateDefaults();
+      // Start AI generation in background (don't await)
+      generateDescription();
     }
   });
 
@@ -67,7 +69,6 @@
 
   async function generateDescription() {
     isGenerating = true;
-    error = null;
 
     try {
       // Use worktreePath for git operations - that's where the branch's commits live
@@ -79,9 +80,8 @@
       title = result.title;
       body = result.body;
     } catch (e) {
-      // AI generation failed, fall back to defaults
+      // AI generation failed, keep the simple defaults
       console.warn('AI PR description generation failed:', e);
-      populateDefaults();
     } finally {
       isGenerating = false;
     }
@@ -182,16 +182,6 @@
           <h2>Checking for existing PR...</h2>
         </div>
       </div>
-    {:else if isGenerating}
-      <div class="modal-content">
-        <div class="icon-wrapper generating">
-          <Sparkles size={24} />
-        </div>
-        <div class="text-content">
-          <h2>Generating PR description...</h2>
-          <p class="generating-hint">AI is analyzing your commits and changes</p>
-        </div>
-      </div>
     {:else}
       <form on:submit|preventDefault={handleSubmit}>
         <div class="modal-content">
@@ -215,6 +205,13 @@
                 <button type="button" class="link-btn" on:click={viewExistingPr}>
                   View on GitHub
                 </button>
+              </div>
+            {/if}
+
+            {#if isGenerating}
+              <div class="generating-banner">
+                <Sparkles size={14} class="generating-icon" />
+                <span>AI is generating a description...</span>
               </div>
             {/if}
 
@@ -323,16 +320,6 @@
     color: var(--ui-accent);
   }
 
-  .icon-wrapper.generating {
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  .generating-hint {
-    margin: 0;
-    font-size: var(--size-sm);
-    color: var(--text-muted);
-  }
-
   @keyframes pulse {
     0%,
     100% {
@@ -373,6 +360,23 @@
     margin-bottom: 16px;
     font-size: var(--size-sm);
     color: var(--text-muted);
+  }
+
+  .generating-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-hover);
+    border-radius: 6px;
+    margin-bottom: 16px;
+    font-size: var(--size-sm);
+    color: var(--text-muted);
+  }
+
+  :global(.generating-icon) {
+    color: var(--ui-accent);
+    animation: pulse 2s ease-in-out infinite;
   }
 
   .link-btn {
