@@ -207,15 +207,26 @@
     showSubpathDropdown = true;
   }
 
-  function handleSubpathFocus() {
-    subpathInputFocused = true;
-    // Show dropdown immediately on focus to display available directories
+  function handleSubpathClick() {
+    // Only open dropdown when clicking directly in the input field
     showSubpathDropdown = true;
   }
 
-  function handleSubpathBlur() {
+  function handleSubpathFocus() {
+    subpathInputFocused = true;
+    // Don't open dropdown on focus - wait for click or typing
+    // This prevents the dropdown from opening when clicking the label
+  }
+
+  function handleSubpathBlur(e: FocusEvent) {
     subpathInputFocused = false;
-    showSubpathDropdown = false;
+    // Only close if focus is moving outside the dropdown
+    // Check if the related target (where focus is going) is inside the dropdown
+    const relatedTarget = e.relatedTarget as HTMLElement | null;
+    const container = (e.target as HTMLElement)?.closest('.subpath-input-container');
+    if (!relatedTarget || !container?.contains(relatedTarget)) {
+      showSubpathDropdown = false;
+    }
   }
 
   function selectRepo(path: string) {
@@ -321,16 +332,25 @@
     const parts = path.split('/');
     return parts[parts.length - 1] || path;
   }
+
+  function handleBackdropClick(event: MouseEvent) {
+    // Only close if clicking directly on the backdrop, not on children
+    // This prevents accidental closes during text selection
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  }
 </script>
 
-<div class="modal-backdrop" role="button" tabindex="-1" onclick={onClose} onkeydown={handleKeydown}>
-  <div
-    class="modal"
-    role="dialog"
-    tabindex="-1"
-    onkeydown={() => {}}
-    onclick={(e) => e.stopPropagation()}
-  >
+<div
+  class="modal-backdrop"
+  role="dialog"
+  aria-modal="true"
+  tabindex="-1"
+  onclick={handleBackdropClick}
+  onkeydown={handleKeydown}
+>
+  <div class="modal">
     <div class="modal-header">
       {#if step === 'config'}
         <button class="back-button" onclick={goBack}>
@@ -434,6 +454,7 @@
               autocorrect="off"
               autocapitalize="off"
               spellcheck="false"
+              onclick={handleSubpathClick}
               onfocus={handleSubpathFocus}
               onblur={handleSubpathBlur}
               oninput={handleSubpathInput}
