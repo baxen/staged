@@ -2238,25 +2238,37 @@ use store::GitProject;
 fn create_git_project(
     state: State<'_, Arc<Store>>,
     repo_path: String,
-    name: String,
     subpath: Option<String>,
 ) -> Result<GitProject, String> {
-    // Check if project already exists for this repo
-    if let Some(existing) = state
-        .get_git_project_by_repo(&repo_path)
+    // Normalize subpath: empty string becomes None
+    let subpath = subpath.filter(|s| !s.is_empty());
+
+    // Check if project already exists for this repo+subpath
+    if state
+        .get_git_project_by_repo_and_subpath(&repo_path, subpath.as_deref())
         .map_err(|e| e.to_string())?
+        .is_some()
     {
-        return Err(format!(
-            "Project already exists for this repository: {}",
-            existing.name
-        ));
+        let repo_name = std::path::Path::new(&repo_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(&repo_path);
+
+        return Err(match &subpath {
+            Some(sp) => format!(
+                "A project already exists for {} with subpath '{}'",
+                repo_name, sp
+            ),
+            None => format!(
+                "A project already exists for {} with no subpath",
+                repo_name
+            ),
+        });
     }
 
-    let mut project = GitProject::new(&repo_path, &name);
+    let mut project = GitProject::new(&repo_path);
     if let Some(sp) = subpath {
-        if !sp.is_empty() {
-            project = project.with_subpath(sp);
-        }
+        project = project.with_subpath(sp);
     }
 
     state
@@ -2293,18 +2305,15 @@ fn list_git_projects(state: State<'_, Arc<Store>>) -> Result<Vec<GitProject>, St
     state.list_git_projects().map_err(|e| e.to_string())
 }
 
-/// Update a git project's name and/or subpath.
+/// Update a git project's subpath.
 #[tauri::command(rename_all = "camelCase")]
 fn update_git_project(
     state: State<'_, Arc<Store>>,
     project_id: String,
-    name: Option<String>,
-    subpath: Option<Option<String>>,
+    subpath: Option<String>,
 ) -> Result<(), String> {
-    // Convert Option<Option<String>> to Option<Option<&str>> for the store method
-    let subpath_ref = subpath.as_ref().map(|opt| opt.as_deref());
     state
-        .update_git_project(&project_id, name.as_deref(), subpath_ref)
+        .update_git_project(&project_id, subpath.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -2318,7 +2327,7 @@ fn delete_git_project(state: State<'_, Arc<Store>>, project_id: String) -> Resul
 }
 
 /// Get or create a git project for a repo_path.
-/// If no project exists, creates one with the repo folder name as the project name.
+/// If no project exists, creates one for the given repo.
 #[tauri::command(rename_all = "camelCase")]
 fn get_or_create_git_project(
     state: State<'_, Arc<Store>>,
@@ -2332,14 +2341,7 @@ fn get_or_create_git_project(
         return Ok(existing);
     }
 
-    // Create a new project with the repo folder name
-    let name = Path::new(&repo_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("Unknown")
-        .to_string();
-
-    let project = GitProject::new(&repo_path, &name);
+    let project = GitProject::new(&repo_path);
     state
         .create_git_project(&project)
         .map_err(|e| e.to_string())?;

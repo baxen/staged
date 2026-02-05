@@ -17,8 +17,6 @@
     GitBranch,
     Loader2,
     X,
-    Settings,
-    ChevronDown,
   } from 'lucide-svelte';
   import type { Branch, GitProject } from './services/branch';
   import * as branchService from './services/branch';
@@ -27,7 +25,6 @@
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal, { type PendingBranch } from './NewBranchModal.svelte';
   import NewProjectModal from './NewProjectModal.svelte';
-  import ProjectSettingsModal from './ProjectSettingsModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
 
@@ -62,7 +59,6 @@
   let showNewBranchModal = $state(false);
   let newBranchForProject = $state<GitProject | null>(null);
   let branchToDelete = $state<Branch | null>(null);
-  let projectToEdit = $state<GitProject | null>(null);
   let showNewProjectModal = $state(false);
 
   // Expose the add project trigger to parent (top bar "Add Project" button)
@@ -80,26 +76,32 @@
       { project: GitProject; branches: Branch[]; pending: PendingBranch[] }
     >();
 
-    // Seed every project (even those with no branches yet)
-    const projectByRepo = new Map<string, GitProject>();
+    // Seed every project and index by repo (multiple projects can share a repo)
+    const projectsByRepo = new Map<string, GitProject[]>();
     for (const project of projects) {
-      projectByRepo.set(project.repoPath, project);
+      const list = projectsByRepo.get(project.repoPath) || [];
+      list.push(project);
+      projectsByRepo.set(project.repoPath, list);
       grouped.set(project.id, { project, branches: [], pending: [] });
     }
 
-    // Add real branches
+    // Add real branches to every project that shares the same repo
     for (const branch of branches) {
-      const project = projectByRepo.get(branch.repoPath);
-      if (project) {
-        grouped.get(project.id)!.branches.push(branch);
+      const repoProjects = projectsByRepo.get(branch.repoPath);
+      if (repoProjects) {
+        for (const project of repoProjects) {
+          grouped.get(project.id)!.branches.push(branch);
+        }
       }
     }
 
-    // Add pending branches
+    // Add pending branches to every project that shares the same repo
     for (const pending of pendingBranches) {
-      const project = projectByRepo.get(pending.repoPath);
-      if (project) {
-        grouped.get(project.id)!.pending.push(pending);
+      const repoProjects = projectsByRepo.get(pending.repoPath);
+      if (repoProjects) {
+        for (const project of repoProjects) {
+          grouped.get(project.id)!.pending.push(pending);
+        }
       }
     }
 
@@ -112,6 +114,11 @@
   // Generate a unique key for a pending branch
   function pendingKey(pending: PendingBranch): string {
     return `${pending.repoPath}:${pending.branchName}`;
+  }
+
+  function projectDisplayName(project: GitProject): string {
+    const repoName = project.repoPath.split('/').pop() || project.repoPath;
+    return project.subpath ? `${repoName}/${project.subpath}` : repoName;
   }
 
   // Load branches and projects on mount and set up session status listener
@@ -293,19 +300,9 @@
     );
   }
 
-  function handleEditProject(project: GitProject) {
-    projectToEdit = project;
-  }
-
   function handleNewProjectCreated(project: GitProject) {
     projects = [...projects, project];
     showNewProjectModal = false;
-  }
-
-  async function handleProjectUpdated(updated: GitProject) {
-    // Update the project in our list
-    projects = projects.map((p) => (p.id === updated.id ? updated : p));
-    projectToEdit = null;
   }
 
   // Keyboard shortcuts
@@ -333,9 +330,6 @@
         e.preventDefault();
         showNewBranchModal = false;
         newBranchForProject = null;
-      } else if (projectToEdit) {
-        e.preventDefault();
-        projectToEdit = null;
       }
       return;
     }
@@ -380,19 +374,7 @@
             <div class="project-header">
               <div class="project-info">
                 <Folder size={14} class="project-icon" />
-                <span class="project-name">{project.name}</span>
-                {#if project.subpath}
-                  <span class="project-subpath">/{project.subpath}</span>
-                {/if}
-              </div>
-              <div class="project-actions">
-                <button
-                  class="project-action-button"
-                  onclick={() => handleEditProject(project)}
-                  title="Project settings"
-                >
-                  <Settings size={14} />
-                </button>
+                <span class="project-name">{projectDisplayName(project)}</span>
               </div>
             </div>
             <div class="branches-list">
@@ -518,15 +500,6 @@
   />
 {/if}
 
-<!-- Project settings modal -->
-{#if projectToEdit}
-  <ProjectSettingsModal
-    project={projectToEdit}
-    onSave={handleProjectUpdated}
-    onClose={() => (projectToEdit = null)}
-  />
-{/if}
-
 <!-- Delete confirmation dialog -->
 {#if branchToDelete}
   <ConfirmDialog
@@ -632,7 +605,6 @@
   .project-header {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     padding: 0 4px;
   }
 
@@ -650,38 +622,6 @@
   .project-name {
     font-size: var(--size-md);
     font-weight: 500;
-    color: var(--text-primary);
-  }
-
-  .project-subpath {
-    font-size: var(--size-sm);
-    color: var(--text-muted);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-  }
-
-  .project-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .project-action-button {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 6px;
-    color: var(--text-faint);
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .project-action-button:hover {
-    background-color: var(--bg-hover);
     color: var(--text-primary);
   }
 

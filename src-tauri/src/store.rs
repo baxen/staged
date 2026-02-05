@@ -156,8 +156,6 @@ impl Project {
 #[serde(rename_all = "camelCase")]
 pub struct GitProject {
     pub id: String,
-    /// Display name (defaults to repo folder name)
-    pub name: String,
     /// Path to the git repository
     pub repo_path: String,
     /// Optional subpath within the repo (for monorepos)
@@ -167,11 +165,10 @@ pub struct GitProject {
 }
 
 impl GitProject {
-    pub fn new(repo_path: impl Into<String>, name: impl Into<String>) -> Self {
+    pub fn new(repo_path: impl Into<String>) -> Self {
         let now = now_timestamp();
         Self {
             id: uuid::Uuid::new_v4().to_string(),
-            name: name.into(),
             repo_path: repo_path.into(),
             subpath: None,
             created_at: now,
@@ -188,11 +185,10 @@ impl GitProject {
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         Ok(Self {
             id: row.get(0)?,
-            name: row.get(1)?,
-            repo_path: row.get(2)?,
-            subpath: row.get(3)?,
-            created_at: row.get(4)?,
-            updated_at: row.get(5)?,
+            repo_path: row.get(1)?,
+            subpath: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
         })
     }
 
@@ -1714,10 +1710,9 @@ impl Store {
         let conn = self.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO git_projects (id, name, repo_path, subpath, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, '', ?2, ?3, ?4, ?5)",
             params![
                 &project.id,
-                &project.name,
                 &project.repo_path,
                 &project.subpath,
                 project.created_at,
@@ -1731,7 +1726,7 @@ impl Store {
     pub fn get_git_project(&self, id: &str) -> Result<Option<GitProject>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, name, repo_path, subpath, created_at, updated_at
+            "SELECT id, repo_path, subpath, created_at, updated_at
              FROM git_projects WHERE id = ?1",
             params![id],
             GitProject::from_row,
@@ -1744,7 +1739,7 @@ impl Store {
     pub fn get_git_project_by_repo(&self, repo_path: &str) -> Result<Option<GitProject>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, name, repo_path, subpath, created_at, updated_at
+            "SELECT id, repo_path, subpath, created_at, updated_at
              FROM git_projects WHERE repo_path = ?1",
             params![repo_path],
             GitProject::from_row,
@@ -1753,11 +1748,43 @@ impl Store {
         .map_err(Into::into)
     }
 
+    /// Get a git project by repo_path and subpath (exact match, NULL-safe)
+    pub fn get_git_project_by_repo_and_subpath(
+        &self,
+        repo_path: &str,
+        subpath: Option<&str>,
+    ) -> Result<Option<GitProject>> {
+        let conn = self.conn.lock().unwrap();
+
+        // Use explicit NULL check or equality depending on subpath value
+        // This avoids potential issues with the IS operator and bound parameters
+        let result = match subpath {
+            None => {
+                conn.query_row(
+                    "SELECT id, repo_path, subpath, created_at, updated_at
+                     FROM git_projects WHERE repo_path = ?1 AND subpath IS NULL",
+                    params![repo_path],
+                    GitProject::from_row,
+                )
+            }
+            Some(sp) => {
+                conn.query_row(
+                    "SELECT id, repo_path, subpath, created_at, updated_at
+                     FROM git_projects WHERE repo_path = ?1 AND subpath = ?2",
+                    params![repo_path, sp],
+                    GitProject::from_row,
+                )
+            }
+        };
+
+        result.optional().map_err(Into::into)
+    }
+
     /// List all git projects, ordered by most recently updated
     pub fn list_git_projects(&self) -> Result<Vec<GitProject>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, name, repo_path, subpath, created_at, updated_at
+            "SELECT id, repo_path, subpath, created_at, updated_at
              FROM git_projects ORDER BY updated_at DESC",
         )?;
         let projects = stmt
@@ -1766,39 +1793,18 @@ impl Store {
         Ok(projects)
     }
 
-    /// Update a git project's name and/or subpath
+    /// Update a git project's subpath
     pub fn update_git_project(
         &self,
         id: &str,
-        name: Option<&str>,
-        subpath: Option<Option<&str>>,
+        subpath: Option<&str>,
     ) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         let now = now_timestamp();
-
-        match (name, subpath) {
-            (Some(name), Some(subpath)) => {
-                conn.execute(
-                    "UPDATE git_projects SET name = ?1, subpath = ?2, updated_at = ?3 WHERE id = ?4",
-                    params![name, subpath, now, id],
-                )?;
-            }
-            (Some(name), None) => {
-                conn.execute(
-                    "UPDATE git_projects SET name = ?1, updated_at = ?2 WHERE id = ?3",
-                    params![name, now, id],
-                )?;
-            }
-            (None, Some(subpath)) => {
-                conn.execute(
-                    "UPDATE git_projects SET subpath = ?1, updated_at = ?2 WHERE id = ?3",
-                    params![subpath, now, id],
-                )?;
-            }
-            (None, None) => {
-                return Ok(());
-            }
-        }
+        conn.execute(
+            "UPDATE git_projects SET subpath = ?1, updated_at = ?2 WHERE id = ?3",
+            params![subpath, now, id],
+        )?;
         Ok(())
     }
 

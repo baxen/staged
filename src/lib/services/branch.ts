@@ -7,8 +7,6 @@ import { invoke } from '@tauri-apps/api/core';
 /** A git project that groups branches together with settings */
 export interface GitProject {
   id: string;
-  /** Display name (defaults to repo folder name) */
-  name: string;
   /** Path to the git repository */
   repoPath: string;
   /** Optional subpath within the repo (for monorepos) */
@@ -417,10 +415,9 @@ export async function openInApp(path: string, appId: string): Promise<void> {
  */
 export async function createGitProject(
   repoPath: string,
-  name: string,
   subpath?: string
 ): Promise<GitProject> {
-  return invoke<GitProject>('create_git_project', { repoPath, name, subpath });
+  return invoke<GitProject>('create_git_project', { repoPath, subpath });
 }
 
 /**
@@ -445,15 +442,14 @@ export async function listGitProjects(): Promise<GitProject[]> {
 }
 
 /**
- * Update a git project's name and/or subpath.
+ * Update a git project's subpath.
  * Pass null for subpath to clear it.
  */
 export async function updateGitProject(
   projectId: string,
-  name?: string,
-  subpath?: string | null
+  subpath: string | null
 ): Promise<void> {
-  return invoke<void>('update_git_project', { projectId, name, subpath });
+  return invoke<void>('update_git_project', { projectId, subpath });
 }
 
 /**

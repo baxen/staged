@@ -23,7 +23,6 @@
   type Step = 'repo' | 'config';
   let step = $state<Step>('repo');
   let selectedRepo = $state<string | null>(null);
-  let projectName = $state('');
   let subpath = $state('');
   let saving = $state(false);
   let error = $state<string | null>(null);
@@ -40,7 +39,7 @@
   let searchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let inputEl: HTMLInputElement | null = $state(null);
-  let nameInputEl: HTMLInputElement | null = $state(null);
+  let subpathInputEl: HTMLInputElement | null = $state(null);
 
   // Subpath suggestions
   let subpathInputFocused = $state(false);
@@ -49,7 +48,6 @@
   let subpathSearchTimeout: ReturnType<typeof setTimeout> | null = null;
 
   let isSearching = $derived(query.length >= 2);
-  let isValid = $derived(projectName.trim().length > 0);
 
   // Initialize
   onMount(async () => {
@@ -62,9 +60,8 @@
   $effect(() => {
     if (step === 'repo' && inputEl) {
       inputEl.focus();
-    } else if (step === 'config' && nameInputEl && !saving) {
-      nameInputEl.focus();
-      nameInputEl.select();
+    } else if (step === 'config' && subpathInputEl && !saving) {
+      subpathInputEl.focus();
     }
   });
 
@@ -202,9 +199,6 @@
 
   function selectRepo(path: string) {
     selectedRepo = path;
-    // Default name to the repo folder name
-    const parts = path.split('/');
-    projectName = parts[parts.length - 1] || path;
     step = 'config';
   }
 
@@ -221,7 +215,6 @@
     if (step === 'config') {
       step = 'repo';
       selectedRepo = null;
-      projectName = '';
       subpath = '';
       error = null;
     }
@@ -243,7 +236,7 @@
   }
 
   async function handleCreate() {
-    if (!selectedRepo || !projectName.trim() || saving) return;
+    if (!selectedRepo || saving) return;
 
     saving = true;
     error = null;
@@ -252,12 +245,23 @@
       const normalizedSubpath = subpath.trim().replace(/^\/+|\/+$/g, '') || undefined;
       const project = await branchService.createGitProject(
         selectedRepo,
-        projectName.trim(),
         normalizedSubpath
       );
       onCreated(project);
     } catch (e) {
-      error = e instanceof Error ? e.message : String(e);
+      // Extract error message from various error formats
+      let errorMessage: string;
+      if (typeof e === 'string') {
+        errorMessage = e;
+      } else if (e instanceof Error) {
+        errorMessage = e.message;
+      } else if (e && typeof e === 'object' && 'message' in e) {
+        errorMessage = String((e as any).message);
+      } else {
+        errorMessage = String(e);
+      }
+
+      error = errorMessage;
       saving = false;
     }
   }
@@ -337,6 +341,10 @@
           type="text"
           placeholder="Search repositories..."
           class="search-input"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
         />
         {#if searching}
           <Loader2 size={16} class="spinner" />
@@ -394,21 +402,9 @@
         </div>
 
         <div class="form-group">
-          <label for="project-name">Name</label>
-          <input
-            bind:this={nameInputEl}
-            bind:value={projectName}
-            id="project-name"
-            type="text"
-            placeholder="Project name"
-            disabled={saving}
-            autocomplete="off"
-          />
-        </div>
-
-        <div class="form-group">
           <label for="project-subpath">Subpath</label>
           <input
+            bind:this={subpathInputEl}
             bind:value={subpath}
             id="project-subpath"
             type="text"
@@ -450,7 +446,7 @@
 
         <div class="actions">
           <button class="cancel-button" onclick={goBack} disabled={saving}>Cancel</button>
-          <button class="create-button" onclick={handleCreate} disabled={!isValid || saving}>
+          <button class="create-button" onclick={handleCreate} disabled={saving}>
             {saving ? 'Creating...' : 'Create Project'}
           </button>
         </div>
