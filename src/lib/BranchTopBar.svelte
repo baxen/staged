@@ -5,12 +5,18 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Settings2, Keyboard, Palette } from 'lucide-svelte';
+  import { Settings2, Keyboard, Palette, Plus } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
   import SettingsModal from './SettingsModal.svelte';
   import { registerShortcut } from './services/keyboard';
+
+  interface Props {
+    onNewBranch?: () => void;
+  }
+
+  let { onNewBranch }: Props = $props();
 
   function startDrag(e: PointerEvent) {
     if (e.button !== 0) return;
@@ -62,6 +68,14 @@
 
 <div class="top-bar drag-region" onpointerdown={startDrag}>
   <div class="traffic-light-spacer drag-region" data-tauri-drag-region></div>
+
+  <!-- New branch button -->
+  {#if onNewBranch}
+    <button class="new-branch-btn" onclick={onNewBranch} title="New Branch (⌘N)">
+      <Plus size={14} />
+      New Branch
+    </button>
+  {/if}
 
   <!-- Spacer pushes action buttons to the right -->
   <div class="drag-spacer drag-region" data-tauri-drag-region></div>
@@ -129,8 +143,29 @@
   }
 
   /* Make interactive elements non-draggable */
-  .icon-btn {
+  .icon-btn,
+  .new-branch-btn {
     -webkit-app-region: no-drag;
+  }
+
+  .new-branch-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 10px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .new-branch-btn:hover {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
   }
 
   /* Action buttons */
