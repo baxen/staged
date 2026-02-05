@@ -5,7 +5,7 @@
   The review is stored as a BranchNote with a special title prefix.
 -->
 <script lang="ts">
-  import { X, Search, Loader2 } from 'lucide-svelte';
+  import { X, FileSearch, Loader2 } from 'lucide-svelte';
   import type { Branch } from './services/branch';
   import * as branchService from './services/branch';
   import AgentSelector from './AgentSelector.svelte';
@@ -94,7 +94,7 @@ At the end, provide an overall assessment:
   >
     <header class="modal-header">
       <div class="header-content">
-        <Search size={18} />
+        <FileSearch size={18} />
         <span class="header-title">Code Review</span>
       </div>
       <button class="close-btn" onclick={onClose}>

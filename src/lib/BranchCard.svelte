@@ -16,6 +16,7 @@
     Play,
     MessageSquare,
     FileText,
+    FileSearch,
     GitCommit,
     ChevronDown,
     ChevronsUpDown,
@@ -23,7 +24,6 @@
     ExternalLink,
     AlertCircle,
     GitPullRequest,
-    Search,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -752,7 +752,11 @@
             >
               <div class="timeline-marker">
                 <div class="timeline-icon note-icon">
-                  <FileText size={12} />
+                  {#if item.note.title.startsWith('📝 Code Review')}
+                    <FileSearch size={12} />
+                  {:else}
+                    <FileText size={12} />
+                  {/if}
                 </div>
                 {#if index < timeline.length - 1}
                   <div class="timeline-line"></div>
@@ -872,7 +876,7 @@
               New Note
             </button>
             <button class="dropdown-item" onclick={handleNewReview}>
-              <Search size={14} />
+              <FileSearch size={14} />
               Code Review
             </button>
           </div>
