@@ -136,20 +136,14 @@ fn verify_command(path: &Path) -> bool {
     }
 
     // Try --version first (works for most tools)
-    if let Ok(output) = std::process::Command::new(path)
-        .arg("--version")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new(path).arg("--version").output() {
         if output.status.success() {
             return true;
         }
     }
 
     // If --version fails, try --help (works for codex-acp)
-    if let Ok(output) = std::process::Command::new(path)
-        .arg("--help")
-        .output()
-    {
+    if let Ok(output) = std::process::Command::new(path).arg("--help").output() {
         if output.status.success() {
             return true;
         }

@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use super::prompt::{
-    build_prompt_with_strategy_for_provider, CODEX_MAX_BYTES, FileAnalysisInput,
+    build_prompt_with_strategy_for_provider, FileAnalysisInput, CODEX_MAX_BYTES,
     LARGE_FILE_THRESHOLD,
 };
 use super::types::ChangesetAnalysis;
