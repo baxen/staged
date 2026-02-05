@@ -564,15 +564,11 @@
               onclick={() => handleViewNote(item.note, true)}
             >
               <div class="timeline-marker">
-                {#if index > 0}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === 0}></div>
                 <div class="timeline-icon note-icon">
                   <Loader2 size={12} class="spinner" />
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
               </div>
               <div class="timeline-content">
                 <span class="timeline-title skeleton-title">{item.note.title}</span>
@@ -589,15 +585,11 @@
             {#if isRunningSessionAlive}
               <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
                 <div class="timeline-marker">
-                  {#if index > 0}
-                    <div class="timeline-line"></div>
-                  {/if}
+                  <div class="timeline-line" class:invisible={index === 0}></div>
                   <div class="timeline-icon commit-icon">
                     <Loader2 size={12} class="spinner" />
                   </div>
-                  {#if index < timeline.length - 1}
-                    <div class="timeline-line"></div>
-                  {/if}
+                  <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
                 </div>
                 <div class="timeline-content">
                   <span class="timeline-title skeleton-title">{item.session.prompt}</span>
@@ -613,18 +605,14 @@
               <!-- Stuck session - show recovery options -->
               <div class="timeline-row skeleton-row stuck-session-row">
                 <div class="timeline-marker">
-                  {#if index > 0}
-                    <div class="timeline-line"></div>
-                  {/if}
+                  <div class="timeline-line" class:invisible={index === 0}></div>
                   <div
                     class="timeline-icon stuck-icon"
                     title="Session was interrupted before completing"
                   >
                     <AlertCircle size={12} />
                   </div>
-                  {#if index < timeline.length - 1}
-                    <div class="timeline-line"></div>
-                  {/if}
+                  <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
                 </div>
                 <div class="timeline-content">
                   <span class="timeline-title skeleton-title">{item.session.prompt}</span>
@@ -656,22 +644,17 @@
           {:else if item.type === 'commit'}
             <div class="timeline-row commit-row" class:is-head={item.isHead}>
               <div class="timeline-marker">
-                {#if index > 0}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === 0}></div>
                 <div class="timeline-icon commit-icon">
                   <GitCommit size={12} />
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
               </div>
               <div class="timeline-content">
                 <span class="timeline-title">{item.commit.subject}</span>
               </div>
               <div class="timeline-actions-wrapper">
                 <span class="timeline-time fade-on-hover">{formatRelativeTime(item.commit.timestamp)}</span>
-                <span class="commit-sha">{item.commit.shortSha}</span>
                 <div class="timeline-actions">
                 {#if confirmingDeleteCommitSha === item.commit.sha}
                   <div class="delete-confirm">
@@ -733,9 +716,7 @@
             <!-- Note row - similar to commit row with separate action buttons -->
             <div class="timeline-row note-row">
               <div class="timeline-marker">
-                {#if index > 0}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === 0}></div>
                 <div class="timeline-icon note-icon">
                   {#if item.note.title.startsWith('Code Review')}
                     <FileSearch size={12} />
@@ -743,9 +724,7 @@
                     <FileText size={12} />
                   {/if}
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
               </div>
               <div class="timeline-content">
                 <span class="timeline-title">{item.note.title}</span>
@@ -1242,6 +1221,10 @@
     width: 2px;
     min-height: 8px;
     background-color: var(--border-subtle);
+  }
+
+  .timeline-line.invisible {
+    opacity: 0;
   }
 
   .timeline-icon {
