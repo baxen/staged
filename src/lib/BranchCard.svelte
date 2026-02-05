@@ -793,7 +793,7 @@
                     <FileText size={12} />
                   </button>
                   <button
-                    class="action-btn action-btn-icon action-btn-hover"
+                    class="action-btn action-btn-icon action-btn-hover note-delete"
                     onclick={(e) => {
                       e.stopPropagation();
                       confirmingDeleteNoteId = item.note.id;
@@ -1363,7 +1363,8 @@
     color: white;
   }
 
-  .commit-delete:hover {
+  .commit-delete:hover,
+  .note-delete:hover {
     border-color: var(--ui-danger) !important;
     color: var(--ui-danger) !important;
   }
