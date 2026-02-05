@@ -82,17 +82,36 @@ pub fn create_worktree(
 /// Remove a worktree.
 ///
 /// Removes both the worktree directory and the git worktree reference.
-/// If the worktree directory was already deleted from disk, prunes the
-/// stale administrative files instead.
+/// Handles various edge cases:
+/// - Normal case: directory exists and git knows about it
+/// - Directory deleted: just prune stale git references
+/// - Git references deleted: just remove the orphaned directory
 pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> Result<(), GitError> {
     if worktree_path.exists() {
-        // Worktree exists on disk - remove it normally
+        // Worktree directory exists on disk - try to remove it normally
         let worktree_str = worktree_path
             .to_str()
             .ok_or_else(|| GitError::InvalidPath(worktree_path.display().to_string()))?;
 
-        // Remove the worktree: git worktree remove <path> --force
-        cli::run(repo, &["worktree", "remove", worktree_str, "--force"])?;
+        // Try: git worktree remove <path> --force
+        let result = cli::run(repo, &["worktree", "remove", worktree_str, "--force"]);
+
+        if let Err(e) = result {
+            // If git doesn't recognize it as a worktree (admin files already deleted),
+            // just remove the directory manually
+            if e.to_string().contains("is not a working tree") {
+                std::fs::remove_dir_all(worktree_path).map_err(|io_err| {
+                    GitError::CommandFailed(format!(
+                        "Failed to remove orphaned worktree directory: {}",
+                        io_err
+                    ))
+                })?;
+                // Prune any remaining stale references
+                cli::run(repo, &["worktree", "prune"])?;
+            } else {
+                return Err(e);
+            }
+        }
     } else {
         // Worktree was already deleted from disk - prune stale references
         cli::run(repo, &["worktree", "prune"])?;
