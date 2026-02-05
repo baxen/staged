@@ -341,13 +341,15 @@ export interface StartBranchNoteResponse {
  * @param branchId - The branch to create the note on
  * @param title - The title for the note
  * @param description - What the note should cover (user's description)
+ * @param agentId - Optional AI agent/provider to use (e.g., "goose", "claude")
  */
 export async function startBranchNote(
   branchId: string,
   title: string,
-  description: string
+  description: string,
+  agentId?: string
 ): Promise<StartBranchNoteResponse> {
-  return invoke<StartBranchNoteResponse>('start_branch_note', { branchId, title, description });
+  return invoke<StartBranchNoteResponse>('start_branch_note', { branchId, title, description, agentId });
 }
 
 /**
