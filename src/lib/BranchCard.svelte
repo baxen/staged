@@ -24,6 +24,7 @@
     ExternalLink,
     AlertCircle,
     GitPullRequest,
+    Copy,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -440,6 +441,15 @@
     }
   }
 
+  async function handleCopyPath() {
+    showOpenInDropdown = false;
+    try {
+      await branchService.copyPathToClipboard(branch.worktreePath);
+    } catch (e) {
+      console.error('Failed to copy path:', e);
+    }
+  }
+
   function toggleOpenInDropdown(e: MouseEvent) {
     e.stopPropagation();
     showOpenInDropdown = !showOpenInDropdown;
@@ -539,6 +549,11 @@
                   {app.name}
                 </button>
               {/each}
+              <div class="open-in-divider"></div>
+              <button class="open-in-item" onclick={handleCopyPath}>
+                <Copy size={14} />
+                Copy Path
+              </button>
             </div>
           {/if}
         </div>
@@ -1088,6 +1103,16 @@
 
   .open-in-item:hover {
     background-color: var(--bg-hover);
+  }
+
+  .open-in-divider {
+    height: 1px;
+    background-color: var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  .open-in-item :global(svg) {
+    color: var(--text-muted);
   }
 
   /* More menu */

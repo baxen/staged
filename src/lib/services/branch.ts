@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { writeText } from '@tauri-apps/plugin-clipboard-manager';
 
 // =============================================================================
 // Types
@@ -468,6 +469,13 @@ export async function getAvailableOpeners(): Promise<OpenerApp[]> {
  */
 export async function openInApp(path: string, appId: string): Promise<void> {
   return invoke<void>('open_in_app', { path, appId });
+}
+
+/**
+ * Copy a path to the clipboard.
+ */
+export async function copyPathToClipboard(path: string): Promise<void> {
+  await writeText(path);
 }
 
 // =============================================================================
