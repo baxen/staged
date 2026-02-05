@@ -7,6 +7,7 @@ import type {
   DiffSpec,
   SmartDiffAnnotation,
   Comment,
+  ImageAttachment,
 } from '../types';
 
 // =============================================================================
@@ -180,8 +181,12 @@ export async function getSessionStatus(sessionId: string): Promise<SessionStatus
  * Send a prompt to a session.
  * Streams response via events, persists on completion.
  */
-export async function sendPrompt(sessionId: string, prompt: string): Promise<void> {
-  return invoke<void>('send_prompt', { sessionId, prompt });
+export async function sendPrompt(
+  sessionId: string,
+  prompt: string,
+  images?: ImageAttachment[]
+): Promise<void> {
+  return invoke<void>('send_prompt', { sessionId, prompt, images: images ?? null });
 }
 
 /**

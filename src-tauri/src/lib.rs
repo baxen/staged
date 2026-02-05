@@ -841,6 +841,16 @@ async fn analyze_diff(
     ai::analysis::analyze_diff(&path, &spec, provider.as_deref()).await
 }
 
+/// An image attachment for AI prompts
+#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAttachment {
+    /// Base64-encoded image data
+    pub data: String,
+    /// MIME type (e.g., "image/png", "image/jpeg")
+    pub mime_type: String,
+}
+
 /// Response from send_agent_prompt including session ID for continuity.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -894,6 +904,8 @@ async fn send_agent_prompt(
 /// - "session-complete": Finalized transcript when done
 /// - "session-error": Error information if the session fails
 ///
+/// Supports optional image attachments for multimodal prompts.
+///
 /// Returns the same response as send_agent_prompt for compatibility.
 #[tauri::command(rename_all = "camelCase")]
 async fn send_agent_prompt_streaming(
@@ -902,6 +914,7 @@ async fn send_agent_prompt_streaming(
     prompt: String,
     session_id: Option<String>,
     provider: Option<String>,
+    images: Option<Vec<ImageAttachment>>,
 ) -> Result<AgentPromptResponse, String> {
     let agent = if let Some(provider_id) = provider {
         ai::find_acp_agent_by_id(&provider_id).ok_or_else(|| {
@@ -919,10 +932,11 @@ async fn send_agent_prompt_streaming(
 
     // Legacy path: no internal session ID, use ACP session ID or "legacy" as fallback
     let internal_id = session_id.as_deref().unwrap_or("legacy");
-    let result = ai::run_acp_prompt_streaming(
+    let result = ai::run_acp_prompt_streaming_with_images(
         &agent,
         &path,
         &prompt,
+        images.as_deref(),
         session_id.as_deref(),
         internal_id,
         app_handle,
@@ -981,8 +995,9 @@ async fn send_prompt(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
     prompt: String,
+    images: Option<Vec<ImageAttachment>>,
 ) -> Result<(), String> {
-    state.send_prompt(&session_id, prompt).await
+    state.send_prompt(&session_id, prompt, images).await
 }
 
 /// Update session title.
@@ -1965,7 +1980,7 @@ async fn start_branch_session(
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt)
+        .send_prompt(&ai_session_id, full_prompt, None)
         .await
     {
         // Clean up on failure
@@ -2357,7 +2372,7 @@ async fn restart_branch_session(
 
     // Send the prompt to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt)
+        .send_prompt(&ai_session_id, full_prompt, None)
         .await
     {
         // Clean up on failure
@@ -2585,7 +2600,7 @@ async fn start_branch_note(
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt)
+        .send_prompt(&ai_session_id, full_prompt, None)
         .await
     {
         // Clean up on failure
