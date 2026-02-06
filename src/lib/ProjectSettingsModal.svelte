@@ -624,10 +624,10 @@
     align-items: center;
     font-size: 10px;
     padding: 3px 8px;
-    background: var(--ui-accent);
-    color: var(--bg-primary);
+    background: var(--bg-hover);
+    color: var(--text-secondary);
     border-radius: 4px;
-    font-weight: 500;
+    font-weight: 400;
     white-space: nowrap;
   }
 
