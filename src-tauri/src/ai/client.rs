@@ -293,7 +293,24 @@ struct StreamingAcpClient {
     tool_call_indices: Mutex<HashMap<String, usize>>,
     /// Whether to suppress emitting events (used during session load replay)
     suppress_emit: Mutex<bool>,
-    /// Optional callback for buffer updates (called whenever segments change)
+    /// Optional callback for buffer updates (called whenever segments change during streaming).
+    ///
+    /// This callback allows the SessionManager to maintain an in-memory buffer of streaming
+    /// segments before they are persisted to the database. It enables the UI to show immediate
+    /// progress when opening a session viewer during active streaming.
+    ///
+    /// The callback is invoked asynchronously in a spawned task to:
+    /// - Prevent blocking the streaming process
+    /// - Isolate potential panics or errors in the callback
+    ///
+    /// Thread-safety notes:
+    /// - The callback is Arc<dyn Fn + Send + Sync> so it can be called from async contexts
+    /// - The callback should NOT acquire locks that the calling code might hold (risk of deadlock)
+    /// - The callback should be fast and non-blocking (it runs in a spawned task but still)
+    ///
+    /// When to use:
+    /// - Set this callback when streaming to a session that might be viewed live (e.g., SessionManager)
+    /// - Leave as None for fire-and-forget prompts or internal operations (e.g., legacy paths)
     buffer_update_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
 }
 
@@ -387,7 +404,11 @@ impl StreamingAcpClient {
     async fn notify_buffer_update(&self) {
         if let Some(ref callback) = self.buffer_update_callback {
             let segments = self.get_segments().await;
-            callback(segments);
+            let callback = Arc::clone(callback);
+            // Spawn task to prevent blocking and isolate potential panics/errors
+            tokio::spawn(async move {
+                callback(segments);
+            });
         }
     }
 }

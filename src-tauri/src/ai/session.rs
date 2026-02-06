@@ -302,20 +302,15 @@ impl SessionManager {
                     session.acp_session_id = Some(acp_result.session_id.clone());
                     session.status = SessionStatus::Idle;
 
-                    // Buffer the streaming segments before persisting
-                    {
-                        let mut buffer = streaming_buffer.write().await;
-                        buffer.insert(session_id_owned.clone(), acp_result.segments.clone());
-                    }
-
                     // Persist the assistant response
                     if let Err(e) = persist_assistant_turn(&store, &session_id_owned, &acp_result) {
                         log::error!("Failed to persist assistant turn: {}", e);
-                    } else {
-                        // Clear buffer after successful persistence
-                        let mut buffer = streaming_buffer.write().await;
-                        buffer.remove(&session_id_owned);
                     }
+
+                    // Clear buffer after persistence attempt (success or failure)
+                    // The callback has been updating the buffer during streaming
+                    let mut buffer = streaming_buffer.write().await;
+                    buffer.remove(&session_id_owned);
 
                     // Auto-generate title from first user message if not set
                     if let Err(e) = maybe_set_title(&store, &session_id_owned, &prompt) {
@@ -350,22 +345,16 @@ impl SessionManager {
         let _ = self.app_handle.emit("session-status", &event);
     }
 
-    /// Add streaming segments to the buffer for a session
-    pub async fn buffer_streaming_segments(&self, session_id: &str, segments: &[ContentSegment]) {
-        let mut buffer = self.streaming_buffer.write().await;
-        buffer.insert(session_id.to_string(), segments.to_vec());
-    }
-
-    /// Get buffered streaming segments for a session
+    /// Get buffered streaming segments for a session (before DB persistence).
+    ///
+    /// Returns:
+    /// - Some(segments): Session is actively streaming, these are the latest segments
+    /// - None: No buffered segments (either already persisted or never started)
+    ///
+    /// Note: If None, check the database - segments may have already been persisted.
     pub async fn get_buffered_segments(&self, session_id: &str) -> Option<Vec<ContentSegment>> {
         let buffer = self.streaming_buffer.read().await;
         buffer.get(session_id).cloned()
-    }
-
-    /// Clear buffered segments for a session (called after DB persistence)
-    pub async fn clear_buffered_segments(&self, session_id: &str) {
-        let mut buffer = self.streaming_buffer.write().await;
-        buffer.remove(session_id);
     }
 }
 

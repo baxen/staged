@@ -110,13 +110,20 @@
           }),
         };
 
-        // Dedupe: if the last DB message is assistant and matches buffered, use DB version
+        // Dedupe: if the last DB message is assistant AND recent (within last 5 seconds),
+        // assume it's the persisted version of the buffered segments
         const lastDbMessage = dbMessages[dbMessages.length - 1];
-        if (lastDbMessage && lastDbMessage.role === 'assistant') {
-          // DB has the persisted version, use it (buffered is stale)
+        const lastDbRawMessage = sessionData.messages[sessionData.messages.length - 1];
+        const isRecentAssistant =
+          lastDbMessage?.role === 'assistant' &&
+          lastDbRawMessage &&
+          (Date.now() - lastDbRawMessage.createdAt) < 5000;
+
+        if (isRecentAssistant) {
+          // DB has the persisted version (it's recent), use it (buffered is stale)
           messages = dbMessages;
         } else {
-          // No assistant message in DB yet, use buffered
+          // No recent assistant message in DB, use buffered
           messages = [...dbMessages, bufferedMessage];
         }
       } else {
