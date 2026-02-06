@@ -3090,7 +3090,7 @@ fn get_running_branch_actions(
 fn get_action_output_buffer(
     runner: State<'_, Arc<actions::ActionRunner>>,
     execution_id: String,
-) -> Result<Vec<actions::OutputChunk>, String> {
+) -> Result<Vec<actions::runner::OutputChunk>, String> {
     runner
         .get_buffered_output(&execution_id)
         .ok_or_else(|| format!("No output buffer found for execution: {}", execution_id))
