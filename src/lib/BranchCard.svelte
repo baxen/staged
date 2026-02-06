@@ -1585,8 +1585,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    height: 26px;
-    padding: 0 12px;
+    padding: 4px 12px;
     background: var(--ui-accent);
     border: 1px solid var(--ui-accent);
     border-radius: 6px;
