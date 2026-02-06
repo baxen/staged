@@ -245,6 +245,52 @@ impl ArtifactData {
     }
 }
 
+/// The type of a project action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionType {
+    Prerun,
+    Run,
+    Format,
+    Check,
+}
+
+impl ActionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ActionType::Prerun => "prerun",
+            ActionType::Run => "run",
+            ActionType::Format => "format",
+            ActionType::Check => "check",
+        }
+    }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "prerun" => Some(ActionType::Prerun),
+            "run" => Some(ActionType::Run),
+            "format" => Some(ActionType::Format),
+            "check" => Some(ActionType::Check),
+            _ => None,
+        }
+    }
+}
+
+/// A configurable action that can be run on a project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectAction {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub command: String,
+    pub action_type: ActionType,
+    pub sort_order: i32,
+    pub auto_commit: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 /// The persistent output of AI work.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -786,6 +832,21 @@ impl Store {
             );
 
             CREATE INDEX IF NOT EXISTS idx_git_projects_repo ON git_projects(repo_path);
+
+            CREATE TABLE IF NOT EXISTS project_actions (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES git_projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                auto_commit INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_actions_project ON project_actions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_actions_type ON project_actions(project_id, action_type);
             "#,
         )?;
 
