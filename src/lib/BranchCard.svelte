@@ -221,7 +221,11 @@
 
   // Action output modal state
   let showActionOutput = $state(false);
-  let viewingActionExecution = $state<{ executionId: string; actionName: string } | null>(null);
+  let viewingActionExecution = $state<{
+    executionId: string;
+    actionId: string;
+    actionName: string;
+  } | null>(null);
 
   // Event listeners
   let unlistenActionStatus: UnlistenFn | null = null;
@@ -277,9 +281,7 @@
             runningActions[existingIndex].status = payload.status as any;
             // Remove after a short delay
             setTimeout(() => {
-              runningActions = runningActions.filter(
-                (a) => a.executionId !== payload.executionId
-              );
+              runningActions = runningActions.filter((a) => a.executionId !== payload.executionId);
             }, 2000);
           }
         }
@@ -620,6 +622,7 @@
       // Optionally show the output modal immediately
       viewingActionExecution = {
         executionId,
+        actionId: action.id,
         actionName: action.name,
       };
       showActionOutput = true;
@@ -632,6 +635,7 @@
   function handleShowActionOutput(execution: RunningAction) {
     viewingActionExecution = {
       executionId: execution.executionId,
+      actionId: execution.actionId,
       actionName: execution.actionName,
     };
     showActionOutput = true;
@@ -711,13 +715,7 @@
         </button>
         {#if showMoreMenu}
           <div class="more-menu">
-            <button class="more-menu-item" onclick={handleViewDiff}>
-              <FileDiff size={14} />
-              View Diff
-            </button>
-
             {#if projectActions.length > 0}
-              <div class="menu-separator"></div>
               {#each projectActions as action (action.id)}
                 <button class="more-menu-item action-item" onclick={() => handleRunAction(action)}>
                   {#if action.actionType === 'format'}
@@ -732,7 +730,13 @@
                   {action.name}
                 </button>
               {/each}
+              <div class="menu-separator"></div>
             {/if}
+
+            <button class="more-menu-item" onclick={handleViewDiff}>
+              <FileDiff size={14} />
+              View Diff
+            </button>
 
             <div class="menu-separator"></div>
             <button class="more-menu-item danger" onclick={handleDeleteFromMenu}>
@@ -1241,6 +1245,7 @@
 {#if showActionOutput && viewingActionExecution}
   <ActionOutputModal
     executionId={viewingActionExecution.executionId}
+    actionId={viewingActionExecution.actionId}
     actionName={viewingActionExecution.actionName}
     branchId={branch.id}
     onClose={() => {

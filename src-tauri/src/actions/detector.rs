@@ -32,15 +32,23 @@ IMPORTANT: Return your response as valid JSON ONLY. Do not include any explanato
 The response must be a JSON array of action objects. Each action object must have these fields:
 - name: string (concise action name, e.g., "Test", "Lint", "Format")
 - command: string (exact shell command to run, e.g., "npm test", "just build")
-- actionType: string (one of: "prerun", "run", "format", "check")
+- actionType: string (one of: "prerun", "run", "format", "check", "test", "cleanUp")
 - autoCommit: boolean (true if action modifies files and should auto-commit)
 - source: string (which file this was detected from, e.g., "package.json", "justfile")
 
 Action type guidelines:
 - "prerun": Commands that should run automatically on worktree creation (like "npm install", "yarn", "pnpm install")
 - "format": Commands that auto-fix code (like "prettier --write", "cargo fmt", "ruff format")
-- "check": Commands that validate without modifying (like "npm test", "cargo test", "eslint")
+- "check": Commands that validate without modifying (like "eslint", "cargo clippy", "mypy")
+- "test": Commands that run tests (like "npm test", "cargo test", "pytest")
+- "cleanUp": Commands that clean up build artifacts (like "npm run clean", "cargo clean", "rm -rf dist")
 - "run": Other commands (like "npm build", "cargo build")
+
+IMPORTANT: Only suggest actions suitable for development environments. Skip:
+- Deploy/production commands (like "deploy", "publish", "release")
+- CI/CD specific commands
+- Docker/container deployment commands
+- Cloud infrastructure commands
 
 Project directory contents:
 {file_list}

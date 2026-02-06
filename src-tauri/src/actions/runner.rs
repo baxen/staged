@@ -1,11 +1,11 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
 use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
-use std::io::{BufRead, BufReader};
 use std::thread;
+use tauri::{AppHandle, Emitter};
 
 use crate::store::Store;
 
@@ -212,10 +212,7 @@ impl ActionRunner {
 
             // If auto_commit is enabled and action succeeded, commit changes
             if auto_commit && success {
-                if let Err(e) = Self::auto_commit_changes(
-                    &worktree_path_clone,
-                    &action_name,
-                ) {
+                if let Err(e) = Self::auto_commit_changes(&worktree_path_clone, &action_name) {
                     eprintln!("Failed to auto-commit changes: {}", e);
                 } else {
                     // Emit event to notify frontend of the commit

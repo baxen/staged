@@ -13,6 +13,8 @@
   interface Props {
     /** The action execution ID */
     executionId: string;
+    /** The action definition ID */
+    actionId: string;
     /** The action name to display */
     actionName: string;
     /** The branch ID this action is running on */
@@ -20,7 +22,7 @@
     onClose: () => void;
   }
 
-  let { executionId, actionName, branchId, onClose }: Props = $props();
+  let { executionId, actionId, actionName, branchId, onClose }: Props = $props();
 
   // ==========================================================================
   // State
@@ -75,7 +77,11 @@
         startedAt = payload.startedAt;
         completedAt = payload.completedAt;
 
-        if (payload.status === 'completed' || payload.status === 'failed' || payload.status === 'stopped') {
+        if (
+          payload.status === 'completed' ||
+          payload.status === 'failed' ||
+          payload.status === 'stopped'
+        ) {
           isRunning = false;
           exitCode = payload.exitCode;
         }
@@ -105,7 +111,7 @@
     try {
       const newExecutionId = await invoke<string>('restart_branch_action', {
         branchId,
-        actionId: executionId, // Note: We'd need to pass the actual action_id
+        actionId,
       });
 
       // Reset state for new execution

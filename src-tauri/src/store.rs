@@ -253,6 +253,8 @@ pub enum ActionType {
     Run,
     Format,
     Check,
+    CleanUp,
+    Test,
 }
 
 impl ActionType {
@@ -262,6 +264,8 @@ impl ActionType {
             ActionType::Run => "run",
             ActionType::Format => "format",
             ActionType::Check => "check",
+            ActionType::CleanUp => "cleanUp",
+            ActionType::Test => "test",
         }
     }
 
@@ -271,6 +275,8 @@ impl ActionType {
             "run" => Some(ActionType::Run),
             "format" => Some(ActionType::Format),
             "check" => Some(ActionType::Check),
+            "cleanUp" => Some(ActionType::CleanUp),
+            "test" => Some(ActionType::Test),
             _ => None,
         }
     }
@@ -321,8 +327,13 @@ impl ProjectAction {
     /// Create a ProjectAction from a database row.
     fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
         let action_type_str: String = row.get(4)?;
-        let action_type = ActionType::from_str(&action_type_str)
-            .ok_or_else(|| rusqlite::Error::InvalidColumnType(4, "action_type".to_string(), rusqlite::types::Type::Text))?;
+        let action_type = ActionType::from_str(&action_type_str).ok_or_else(|| {
+            rusqlite::Error::InvalidColumnType(
+                4,
+                "action_type".to_string(),
+                rusqlite::types::Type::Text,
+            )
+        })?;
 
         Ok(Self {
             id: row.get(0)?,
@@ -2123,7 +2134,10 @@ impl Store {
              FROM project_actions WHERE project_id = ?1 AND action_type = ?2 ORDER BY sort_order ASC",
         )?;
         let actions = stmt
-            .query_map(params![project_id, action_type.as_str()], ProjectAction::from_row)?
+            .query_map(
+                params![project_id, action_type.as_str()],
+                ProjectAction::from_row,
+            )?
             .collect::<std::result::Result<Vec<_>, _>>()?;
         Ok(actions)
     }

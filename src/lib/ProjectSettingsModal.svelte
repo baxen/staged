@@ -19,6 +19,8 @@
     Loader2,
     Save,
     Pencil,
+    FlaskConical,
+    Broom,
   } from 'lucide-svelte';
   import type { GitProject, ProjectAction, ActionType, SuggestedAction } from './services/branch';
   import * as branchService from './services/branch';
@@ -75,8 +77,8 @@
       const suggested = await branchService.detectProjectActions(project.id);
 
       // Add suggested actions that don't already exist
-      const existingCommands = new Set(actions.map(a => a.command));
-      let nextSortOrder = Math.max(...actions.map(a => a.sortOrder), 0) + 1;
+      const existingCommands = new Set(actions.map((a) => a.command));
+      let nextSortOrder = Math.max(...actions.map((a) => a.sortOrder), 0) + 1;
 
       for (const suggestion of suggested) {
         if (!existingCommands.has(suggestion.command)) {
@@ -128,7 +130,7 @@
     try {
       if (!editingAction?.id) {
         // Adding new action
-        const nextSortOrder = Math.max(...actions.map(a => a.sortOrder), 0) + 1;
+        const nextSortOrder = Math.max(...actions.map((a) => a.sortOrder), 0) + 1;
         const newAction = await branchService.createProjectAction(
           project.id,
           editForm.name,
@@ -148,9 +150,15 @@
           editingAction.sortOrder,
           editForm.autoCommit
         );
-        actions = actions.map(a =>
+        actions = actions.map((a) =>
           a.id === editingAction.id
-            ? { ...a, name: editForm.name, command: editForm.command, actionType: editForm.actionType, autoCommit: editForm.autoCommit }
+            ? {
+                ...a,
+                name: editForm.name,
+                command: editForm.command,
+                actionType: editForm.actionType,
+                autoCommit: editForm.autoCommit,
+              }
             : a
         );
       }
@@ -163,7 +171,7 @@
   async function deleteAction(actionId: string) {
     try {
       await branchService.deleteProjectAction(actionId);
-      actions = actions.filter(a => a.id !== actionId);
+      actions = actions.filter((a) => a.id !== actionId);
     } catch (e) {
       console.error('Failed to delete action:', e);
     }
@@ -185,19 +193,35 @@
 
   function getActionIcon(actionType: ActionType) {
     switch (actionType) {
-      case 'prerun': return Zap;
-      case 'format': return Wand;
-      case 'check': return CheckCircle;
-      case 'run': return Play;
+      case 'prerun':
+        return Zap;
+      case 'format':
+        return Wand;
+      case 'check':
+        return CheckCircle;
+      case 'test':
+        return FlaskConical;
+      case 'cleanUp':
+        return Broom;
+      case 'run':
+        return Play;
     }
   }
 
   function getActionTypeColor(actionType: ActionType): string {
     switch (actionType) {
-      case 'prerun': return 'var(--color-warning)';
-      case 'format': return 'var(--color-info)';
-      case 'check': return 'var(--color-success)';
-      case 'run': return 'var(--color-primary)';
+      case 'prerun':
+        return 'var(--color-warning)';
+      case 'format':
+        return 'var(--color-info)';
+      case 'check':
+        return 'var(--color-success)';
+      case 'test':
+        return 'var(--status-added)';
+      case 'cleanUp':
+        return 'var(--text-muted)';
+      case 'run':
+        return 'var(--color-primary)';
     }
   }
 
@@ -207,6 +231,8 @@
       prerun: [],
       format: [],
       check: [],
+      test: [],
+      cleanUp: [],
       run: [],
     };
     for (const action of actions) {
@@ -285,7 +311,9 @@
           <div class="setting-row">
             <div class="setting-info">
               <div class="setting-label">Subpath</div>
-              <div class="setting-description">Optional path within the repository (for monorepos)</div>
+              <div class="setting-description">
+                Optional path within the repository (for monorepos)
+              </div>
             </div>
             <input
               type="text"
@@ -342,25 +370,26 @@
                   <option value="run">Run - Manual execution</option>
                   <option value="format">Format - Auto-fix issues</option>
                   <option value="check">Check - Validation only</option>
+                  <option value="test">Test - Run tests</option>
+                  <option value="cleanUp">Clean Up - Remove build artifacts</option>
                   <option value="prerun">Prerun - Auto-run on branch creation</option>
                 </select>
               </div>
 
               <div class="form-group checkbox-group">
                 <label>
-                  <input
-                    type="checkbox"
-                    bind:checked={editForm.autoCommit}
-                  />
+                  <input type="checkbox" bind:checked={editForm.autoCommit} />
                   Auto-commit changes after successful execution
                 </label>
               </div>
 
               <div class="button-row">
-                <button class="secondary-btn" onclick={cancelEdit}>
-                  Cancel
-                </button>
-                <button class="primary-btn" onclick={saveAction} disabled={!editForm.name || !editForm.command}>
+                <button class="secondary-btn" onclick={cancelEdit}> Cancel </button>
+                <button
+                  class="primary-btn"
+                  onclick={saveAction}
+                  disabled={!editForm.name || !editForm.command}
+                >
                   <Save size={14} />
                   Save
                 </button>
@@ -386,20 +415,25 @@
             {#if loadingActions}
               <div class="loading-state">
                 <Loader2 size={24} class="spinner" />
-                Loading actions...
+                <span>Loading actions...</span>
               </div>
             {:else if actions.length === 0}
               <div class="empty-state">
                 <Play size={32} />
                 <p>No actions configured</p>
-                <p class="empty-hint">Click "Detect Actions" to find common scripts, or add one manually</p>
+                <p class="empty-hint">
+                  Click "Detect Actions" to find common scripts, or add one manually
+                </p>
               </div>
             {:else}
               <div class="actions-list">
                 {#each Object.entries(groupedActions) as [type, typeActions]}
                   {#if typeActions.length > 0}
                     <div class="action-group">
-                      <div class="group-header" style="color: {getActionTypeColor(type as ActionType)}">
+                      <div
+                        class="group-header"
+                        style="color: {getActionTypeColor(type as ActionType)}"
+                      >
                         <svelte:component this={getActionIcon(type as ActionType)} size={14} />
                         {type.charAt(0).toUpperCase() + type.slice(1)}
                       </div>
@@ -407,9 +441,9 @@
                         <div class="action-item">
                           <div class="action-info">
                             <div class="action-name">{action.name}</div>
-                            <div class="action-command">{action.command}</div>
+                            <code class="action-command">{action.command}</code>
                             {#if action.autoCommit}
-                              <div class="action-badge">Auto-commit</div>
+                              <div class="action-badge">Commits to git</div>
                             {/if}
                           </div>
                           <div class="action-controls">
@@ -678,6 +712,7 @@
     padding: 60px 20px;
     color: var(--text-secondary);
     text-align: center;
+    gap: 12px;
   }
 
   .empty-state {
@@ -745,12 +780,17 @@
   }
 
   .action-command {
+    display: block;
     font-size: 12px;
     color: var(--text-secondary);
     font-family: var(--font-mono);
+    background: var(--bg-hover);
+    padding: 4px 8px;
+    border-radius: 4px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    margin-top: 4px;
   }
 
   .action-badge {
@@ -815,7 +855,7 @@
     margin-bottom: 6px;
   }
 
-  .form-group input[type="text"],
+  .form-group input[type='text'],
   .form-group select {
     width: 100%;
     padding: 8px 12px;
@@ -826,7 +866,7 @@
     font-size: 13px;
   }
 
-  .form-group input[type="text"]:focus,
+  .form-group input[type='text']:focus,
   .form-group select:focus {
     outline: none;
     border-color: var(--color-primary);
@@ -839,7 +879,7 @@
     cursor: pointer;
   }
 
-  .checkbox-group input[type="checkbox"] {
+  .checkbox-group input[type='checkbox'] {
     cursor: pointer;
   }
 
@@ -848,7 +888,11 @@
   }
 
   @keyframes spin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
   }
 </style>

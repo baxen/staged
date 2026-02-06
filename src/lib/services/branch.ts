@@ -17,7 +17,7 @@ export interface GitProject {
 }
 
 /** Type of a project action */
-export type ActionType = 'prerun' | 'run' | 'format' | 'check';
+export type ActionType = 'prerun' | 'run' | 'format' | 'check' | 'test' | 'cleanUp';
 
 /** A configurable action that can be run on a project */
 export interface ProjectAction {
