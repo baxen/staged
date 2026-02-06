@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Plus, Sparkles, Folder, GitBranch, Loader2, X, Trash2 } from 'lucide-svelte';
+  import { Plus, Sparkles, Folder, GitBranch, Loader2, X, Trash2, Settings } from 'lucide-svelte';
   import type { Branch, GitProject } from './services/branch';
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
@@ -18,6 +18,7 @@
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal, { type PendingBranch } from './NewBranchModal.svelte';
   import NewProjectModal from './NewProjectModal.svelte';
+  import ProjectSettingsModal from './ProjectSettingsModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
 
@@ -53,6 +54,8 @@
   let newBranchForProject = $state<GitProject | null>(null);
   let branchToDelete = $state<Branch | null>(null);
   let showNewProjectModal = $state(false);
+  let showProjectSettings = $state(false);
+  let projectToEdit = $state<GitProject | null>(null);
 
   // Scroll position tracking
   let contentElement: HTMLDivElement | null = null;
@@ -393,15 +396,27 @@
                 <Folder size={14} class="project-icon" />
                 <span class="project-name">{projectDisplayName(project)}</span>
               </div>
-              {#if isEmpty}
+              <div class="project-controls">
                 <button
-                  class="delete-project-button"
-                  onclick={() => (projectToDelete = project)}
-                  title="Remove project"
+                  class="project-settings-button"
+                  onclick={() => {
+                    projectToEdit = project;
+                    showProjectSettings = true;
+                  }}
+                  title="Project settings"
                 >
-                  <Trash2 size={14} />
+                  <Settings size={14} />
                 </button>
-              {/if}
+                {#if isEmpty}
+                  <button
+                    class="delete-project-button"
+                    onclick={() => (projectToDelete = project)}
+                    title="Remove project"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                {/if}
+              </div>
             </div>
             <div class="branches-list">
               {#each projectBranches as branch (branch.id)}
@@ -508,6 +523,20 @@
   <NewProjectModal
     onCreated={handleNewProjectCreated}
     onClose={() => (showNewProjectModal = false)}
+  />
+{/if}
+
+<!-- Project settings modal -->
+{#if showProjectSettings && projectToEdit}
+  <ProjectSettingsModal
+    project={projectToEdit}
+    onClose={() => {
+      showProjectSettings = false;
+      projectToEdit = null;
+    }}
+    onUpdated={(updatedProject) => {
+      projects = projects.map(p => p.id === updatedProject.id ? updatedProject : p);
+    }}
   />
 {/if}
 
@@ -653,6 +682,12 @@
     gap: 8px;
   }
 
+  .project-controls {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
   :global(.project-icon) {
     color: var(--text-faint);
     flex-shrink: 0;
@@ -664,6 +699,7 @@
     color: var(--text-primary);
   }
 
+  .project-settings-button,
   .delete-project-button {
     display: flex;
     align-items: center;
@@ -677,6 +713,11 @@
     color: var(--text-faint);
     cursor: pointer;
     transition: all 0.15s ease;
+  }
+
+  .project-settings-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .delete-project-button:hover {
