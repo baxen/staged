@@ -243,12 +243,19 @@
     }
 
     // Load project actions
+    console.log('[BranchCard] Branch:', { id: branch.id, name: branch.branchName, projectId: branch.projectId });
     if (branch.projectId) {
       try {
         projectActions = await branchService.listProjectActions(branch.projectId);
+        console.log('[BranchCard] Loaded', projectActions.length, 'actions for project', branch.projectId);
+        if (projectActions.length === 0) {
+          console.warn('[BranchCard] No actions found for project:', branch.projectId);
+        }
       } catch (e) {
-        console.error('Failed to load project actions:', e);
+        console.error('[BranchCard] Failed to load project actions:', e);
       }
+    } else {
+      console.error('[BranchCard] Branch has no projectId!', branch);
     }
 
     // Listen for action status events
@@ -317,16 +324,18 @@
   async function loadData() {
     loading = true;
     try {
-      const [commitsResult, sessionResult, notesResult, generatingNoteResult] = await Promise.all([
+      const [commitsResult, sessionResult, notesResult, generatingNoteResult, actionsResult] = await Promise.all([
         branchService.getBranchCommits(branch.id),
         branchService.getRunningSession(branch.id),
         branchService.listBranchNotes(branch.id),
         branchService.getGeneratingNote(branch.id),
+        branch.projectId ? branchService.listProjectActions(branch.projectId) : Promise.resolve([]),
       ]);
       commits = commitsResult;
       runningSession = sessionResult;
       notes = notesResult;
       generatingNote = generatingNoteResult;
+      projectActions = actionsResult;
 
       // Check if running session is actually alive
       if (sessionResult?.aiSessionId) {

@@ -533,6 +533,8 @@
     onClose={() => {
       showProjectSettings = false;
       projectToEdit = null;
+      // Refresh all branch cards to reload actions
+      refreshKey++;
     }}
     onUpdated={(updatedProject) => {
       projects = projects.map((p) => (p.id === updatedProject.id ? updatedProject : p));

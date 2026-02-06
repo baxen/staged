@@ -62,10 +62,12 @@
 
   async function loadActions() {
     loadingActions = true;
+    console.log('[ProjectSettings] Loading actions for project:', project.id);
     try {
       actions = await branchService.listProjectActions(project.id);
+      console.log('[ProjectSettings] Loaded', actions.length, 'actions');
     } catch (e) {
-      console.error('Failed to load actions:', e);
+      console.error('[ProjectSettings] Failed to load actions:', e);
     } finally {
       loadingActions = false;
     }
@@ -131,6 +133,7 @@
       if (!editingAction?.id) {
         // Adding new action
         const nextSortOrder = Math.max(...actions.map((a) => a.sortOrder), 0) + 1;
+        console.log('[ProjectSettings] Creating action for project:', project.id);
         const newAction = await branchService.createProjectAction(
           project.id,
           editForm.name,
@@ -139,6 +142,7 @@
           nextSortOrder,
           editForm.autoCommit
         );
+        console.log('[ProjectSettings] Created action:', newAction.id, 'for project:', newAction.projectId);
         actions = [...actions, newAction];
       } else {
         // Updating existing action
