@@ -79,7 +79,7 @@ impl CancellationHandle {
         // Kill the subprocess if we have a PID
         let pid = self.pid.load(Ordering::SeqCst);
         if pid != 0 {
-            log::info!("Killing agent subprocess with PID {}", pid);
+            log::info!("Killing agent subprocess with PID {pid}");
             #[cfg(unix)]
             {
                 // Send SIGTERM to the process using the kill command
@@ -367,7 +367,7 @@ impl SessionManager {
 
             // Check if we were cancelled
             if cancellation.is_cancelled() {
-                log::info!("Session {} was cancelled", session_id_owned);
+                log::info!("Session {session_id_owned} was cancelled");
                 session.status = SessionStatus::Cancelled;
                 // Clear buffer on cancellation
                 let mut buffer = streaming_buffer.write().await;
@@ -383,7 +383,7 @@ impl SessionManager {
                         if let Err(e) =
                             persist_assistant_turn(&store, &session_id_owned, &acp_result)
                         {
-                            log::error!("Failed to persist assistant turn: {}", e);
+                            log::error!("Failed to persist assistant turn: {e}");
                         }
 
                         // Clear buffer after persistence attempt (success or failure)
@@ -393,11 +393,11 @@ impl SessionManager {
 
                         // Auto-generate title from first user message if not set
                         if let Err(e) = maybe_set_title(&store, &session_id_owned, &prompt) {
-                            log::warn!("Failed to set session title: {}", e);
+                            log::warn!("Failed to set session title: {e}");
                         }
                     }
                     Err(e) => {
-                        log::error!("Session {} prompt failed: {}", session_id_owned, e);
+                        log::error!("Session {session_id_owned} prompt failed: {e}");
                         session.status = SessionStatus::Error { message: e };
                         // Clear buffer on error too
                         let mut buffer = streaming_buffer.write().await;
@@ -422,7 +422,7 @@ impl SessionManager {
         let sessions = self.sessions.read().await;
         let session_arc = sessions
             .get(session_id)
-            .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+            .ok_or_else(|| format!("Session '{session_id}' not found"))?;
 
         let session = session_arc.read().await;
 
@@ -431,7 +431,7 @@ impl SessionManager {
         }
 
         if let Some(ref cancellation) = session.cancellation {
-            log::info!("Cancelling session {}", session_id);
+            log::info!("Cancelling session {session_id}");
             cancellation.cancel();
             Ok(())
         } else {

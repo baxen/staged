@@ -599,6 +599,7 @@ use super::session::CancellationHandle;
 ///
 /// If `cancellation` is provided, the PID of the spawned agent process will be
 /// registered with it, allowing external cancellation via process kill.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_acp_prompt_streaming(
     agent: &AcpAgent,
     working_dir: &Path,
@@ -707,7 +708,7 @@ async fn run_acp_session_inner(
     // Register the PID with the cancellation handle so it can be killed externally
     if let Some(ref cancel) = cancellation {
         if let Some(pid) = child.id() {
-            log::debug!("Registering agent PID {} for cancellation", pid);
+            log::debug!("Registering agent PID {pid} for cancellation");
             cancel.set_pid(pid);
         }
     }
