@@ -24,6 +24,7 @@
     ExternalLink,
     AlertCircle,
     GitPullRequest,
+    X,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -490,29 +491,25 @@
     return baseBranch.replace(/^origin\//, '');
   }
 
-  // Handle cancelling an active session
+  // Handle cancelling an active session (just stops the AI, doesn't delete the record)
   async function handleCancelSession() {
     if (!runningSession?.aiSessionId) return;
     try {
       await branchService.cancelAiSession(runningSession.aiSessionId);
-      // Also delete the branch session record
-      await branchService.cancelBranchSession(runningSession.id);
-      runningSession = null;
-      await loadData();
+      // Don't delete the branch session record - let the status event handler
+      // in BranchHome recover it when the 'cancelled' status is emitted
     } catch (e) {
       console.error('Failed to cancel session:', e);
     }
   }
 
-  // Handle cancelling a generating note
+  // Handle cancelling a generating note (just stops the AI, doesn't delete the record)
   async function handleCancelNote() {
     if (!generatingNote?.aiSessionId) return;
     try {
       await branchService.cancelAiSession(generatingNote.aiSessionId);
-      // Also delete the branch note record
-      await branchService.deleteBranchNote(generatingNote.id);
-      generatingNote = null;
-      await loadData();
+      // Don't delete the branch note record - let the status event handler
+      // in BranchHome recover it when the 'cancelled' status is emitted
     } catch (e) {
       console.error('Failed to cancel note:', e);
     }
@@ -649,9 +646,9 @@
                     e.stopPropagation();
                     handleCancelNote();
                   }}
-                  title="Cancel note generation"
+                  title="Stop note generation"
                 >
-                  <Trash2 size={12} />
+                  <X size={12} />
                 </button>
               </div>
             </div>
@@ -688,9 +685,9 @@
                       e.stopPropagation();
                       handleCancelSession();
                     }}
-                    title="Cancel session"
+                    title="Stop session"
                   >
-                    <Trash2 size={12} />
+                    <X size={12} />
                   </button>
                 </div>
               </div>

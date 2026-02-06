@@ -142,12 +142,12 @@
 
   /**
    * Handle AI session status changes.
-   * When an AI session transitions to 'idle', look up the corresponding branch session
+   * When an AI session transitions to 'idle' or 'cancelled', look up the corresponding branch session
    * or note and mark it as completed.
    */
   async function handleSessionStatus(event: SessionStatusEvent) {
-    // Only care about transitions to idle (session complete)
-    if (event.status.status !== 'idle') {
+    // Only care about transitions to idle or cancelled (session complete or stopped)
+    if (event.status.status !== 'idle' && event.status.status !== 'cancelled') {
       return;
     }
 

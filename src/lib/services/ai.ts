@@ -61,7 +61,8 @@ export function parseAssistantContent(content: string): ContentSegment[] {
 export type SessionStatus =
   | { status: 'idle' }
   | { status: 'processing' }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string }
+  | { status: 'cancelled' };
 
 /** Session status event payload */
 export interface SessionStatusEvent {

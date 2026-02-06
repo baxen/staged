@@ -388,6 +388,8 @@ pub enum BranchSessionStatus {
     Completed,
     /// Session encountered an error
     Error,
+    /// Session was cancelled by the user
+    Cancelled,
 }
 
 impl BranchSessionStatus {
@@ -396,6 +398,7 @@ impl BranchSessionStatus {
             BranchSessionStatus::Running => "running",
             BranchSessionStatus::Completed => "completed",
             BranchSessionStatus::Error => "error",
+            BranchSessionStatus::Cancelled => "cancelled",
         }
     }
 
@@ -403,6 +406,7 @@ impl BranchSessionStatus {
         match s {
             "running" => BranchSessionStatus::Running,
             "error" => BranchSessionStatus::Error,
+            "cancelled" => BranchSessionStatus::Cancelled,
             _ => BranchSessionStatus::Completed,
         }
     }
