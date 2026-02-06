@@ -41,8 +41,8 @@
   interface Props {
     /** If provided, skip repo selection and go straight to name input */
     initialRepoPath?: string;
-    /** The project this branch will belong to (required) */
-    projectId: string;
+    /** The project this branch will belong to */
+    projectId?: string;
     onCreating: (pending: PendingBranch) => void;
     onCreated: (branch: Branch) => void;
     onCreateFailed: (pending: PendingBranch, error: string) => void;
@@ -270,9 +270,12 @@
     creatingFromPR = true;
 
     try {
+      const effectiveProjectId =
+        projectId || (await branchService.getOrCreateGitProject(selectedRepo)).id;
+
       const baseBranch = `origin/${pr.base_ref}`;
       const pending: PendingBranch = {
-        projectId,
+        projectId: effectiveProjectId,
         repoPath: selectedRepo,
         branchName: pr.head_ref,
         baseBranch,
@@ -281,17 +284,25 @@
       onCreating(pending);
 
       const branch = await branchService.createBranchFromPr(
-        projectId,
+        effectiveProjectId,
         selectedRepo,
         pr.number,
         pr.head_ref,
         pr.base_ref
       );
       onCreated(branch);
+
+      // Trigger prerun actions after a small delay to ensure BranchCard is mounted and listening
+      setTimeout(() => {
+        branchService.runPrerunActions(branch.id).catch((e) => {
+          console.error('Failed to run prerun actions:', e);
+        });
+      }, 100);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
+      const effectiveProjectId = projectId || '';
       const pending: PendingBranch = {
-        projectId,
+        projectId: effectiveProjectId,
         repoPath: selectedRepo,
         branchName: pr.head_ref,
         baseBranch: `origin/${pr.base_ref}`,
@@ -364,8 +375,12 @@
     if (!selectedRepo || !branchName.trim()) return;
 
     try {
+      // If no project ID was provided, get or create one for this repo
+      const effectiveProjectId =
+        projectId || (await branchService.getOrCreateGitProject(selectedRepo)).id;
+
       const pending: PendingBranch = {
-        projectId,
+        projectId: effectiveProjectId,
         repoPath: selectedRepo,
         branchName: branchName.trim(),
         baseBranch: effectiveBaseBranch,
@@ -376,16 +391,25 @@
 
       // Pass selected base branch or undefined to use detected default
       const branch = await branchService.createBranch(
-        projectId,
+        effectiveProjectId,
         selectedRepo,
         branchName.trim(),
         selectedBaseBranch ?? undefined
       );
       onCreated(branch);
+
+      // Trigger prerun actions after a small delay to ensure BranchCard is mounted and listening
+      setTimeout(() => {
+        branchService.runPrerunActions(branch.id).catch((e) => {
+          console.error('Failed to run prerun actions:', e);
+        });
+      }, 100);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
+      // Need to create pending for error case too
+      const effectiveProjectId = projectId || '';
       const pending: PendingBranch = {
-        projectId,
+        projectId: effectiveProjectId,
         repoPath: selectedRepo,
         branchName: branchName.trim(),
         baseBranch: effectiveBaseBranch,

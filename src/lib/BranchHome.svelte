@@ -10,7 +10,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { Plus, Sparkles, Folder, GitBranch, Loader2, X, Trash2 } from 'lucide-svelte';
+  import { Plus, Sparkles, Folder, GitBranch, Loader2, X, Trash2, Settings } from 'lucide-svelte';
   import type { Branch, GitProject } from './services/branch';
   import * as branchService from './services/branch';
   import { listenToSessionStatus, type SessionStatusEvent } from './services/ai';
@@ -18,9 +18,9 @@
   import BranchCard from './BranchCard.svelte';
   import NewBranchModal, { type PendingBranch } from './NewBranchModal.svelte';
   import NewProjectModal from './NewProjectModal.svelte';
+  import ProjectSettingsModal from './ProjectSettingsModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
-  import { windowState, closeTab } from './stores/tabState.svelte';
 
   interface Props {
     onViewDiff?: (projectId: string, repoPath: string, spec: DiffSpec, label: string) => void;
@@ -35,6 +35,7 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let refreshKey = $state(0);
+  let detectingProjectIds = $state<Set<string>>(new Set());
 
   // Pending branches (being created asynchronously)
   let pendingBranches = $state<PendingBranch[]>([]);
@@ -54,6 +55,8 @@
   let newBranchForProject = $state<GitProject | null>(null);
   let branchToDelete = $state<Branch | null>(null);
   let showNewProjectModal = $state(false);
+  let showProjectSettings = $state(false);
+  let projectToEdit = $state<GitProject | null>(null);
 
   // Scroll position tracking
   let contentElement: HTMLDivElement | null = null;
@@ -189,8 +192,8 @@
     }
   }
 
-  function handleNewBranch(project: GitProject) {
-    newBranchForProject = project;
+  function handleNewBranch(project?: GitProject) {
+    newBranchForProject = project || null;
     showNewBranchModal = true;
   }
 
@@ -256,7 +259,6 @@
     if (!branchToDelete) return;
 
     const id = branchToDelete.id;
-    const worktreePath = branchToDelete.worktreePath;
     // Close dialog and show spinner immediately
     branchToDelete = null;
     deletingBranchIds = new Set(deletingBranchIds).add(id);
@@ -268,12 +270,6 @@
       const newDeleting = new Set(deletingBranchIds);
       newDeleting.delete(id);
       deletingBranchIds = newDeleting;
-
-      // Close any tabs that were viewing this branch's worktree
-      const tabsToClose = windowState.tabs.filter((tab) => tab.repoPath === worktreePath);
-      for (const tab of tabsToClose) {
-        closeTab(tab.id);
-      }
     } catch (e) {
       // Failure: remove spinner, show error card
       const newDeleting = new Set(deletingBranchIds);
@@ -289,9 +285,37 @@
     deleteErrors = newErrors;
   }
 
+  function handleViewDiff(branch: Branch) {
+    onViewDiff?.(
+      branch.projectId,
+      branch.worktreePath,
+      DiffSpec.mergeBaseDiff(branch.baseBranch, branch.branchName),
+      `${branch.baseBranch}..${branch.branchName}`
+    );
+  }
+
+  function handleViewCommitDiff(branch: Branch, commitSha: string) {
+    onViewDiff?.(
+      branch.projectId,
+      branch.worktreePath,
+      DiffSpec.fromRevs(`${commitSha}~1`, commitSha),
+      commitSha.slice(0, 7)
+    );
+  }
+
   function handleNewProjectCreated(project: GitProject) {
     projects = [...projects, project];
     showNewProjectModal = false;
+  }
+
+  function handleProjectDetecting(projectId: string, isDetecting: boolean) {
+    if (isDetecting) {
+      detectingProjectIds = new Set(detectingProjectIds).add(projectId);
+    } else {
+      const newSet = new Set(detectingProjectIds);
+      newSet.delete(projectId);
+      detectingProjectIds = newSet;
+    }
   }
 
   async function confirmDeleteProject() {
@@ -317,13 +341,10 @@
       return;
     }
 
-    // Cmd+N - New branch (requires at least one project)
+    // Cmd+N - New branch
     if (e.metaKey && e.key === 'n') {
       e.preventDefault();
-      if (projects.length > 0) {
-        // Open new branch modal for the first project
-        handleNewBranch(projects[0]);
-      }
+      handleNewBranch();
       return;
     }
 
@@ -368,12 +389,12 @@
       <div class="empty-state">
         <Sparkles size={48} strokeWidth={1} />
         <h2>Welcome to Staged</h2>
-        <p>Add a project to start working</p>
-        <button class="create-button" onclick={() => (showNewProjectModal = true)}>
+        <p>Create a branch to start working</p>
+        <button class="create-button" onclick={() => handleNewBranch()}>
           <Plus size={16} />
-          Add Project
+          New Branch
         </button>
-        <span class="shortcut-hint">or press ⌘P</span>
+        <span class="shortcut-hint">or press ⌘N</span>
       </div>
     {:else}
       <!-- Branches grouped by project -->
@@ -386,15 +407,33 @@
                 <Folder size={14} class="project-icon" />
                 <span class="project-name">{projectDisplayName(project)}</span>
               </div>
-              {#if isEmpty}
+              <div class="project-controls">
+                {#if detectingProjectIds.has(project.id)}
+                  <div class="detecting-status">
+                    <Loader2 size={14} class="spinner" />
+                    <span>Detecting actions</span>
+                  </div>
+                {/if}
                 <button
-                  class="delete-project-button"
-                  onclick={() => (projectToDelete = project)}
-                  title="Remove project"
+                  class="project-settings-button"
+                  onclick={() => {
+                    projectToEdit = project;
+                    showProjectSettings = true;
+                  }}
+                  title="Project settings"
                 >
-                  <Trash2 size={14} />
+                  <Settings size={14} />
                 </button>
-              {/if}
+                {#if isEmpty}
+                  <button
+                    class="delete-project-button"
+                    onclick={() => (projectToDelete = project)}
+                    title="Remove project"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                {/if}
+              </div>
             </div>
             <div class="branches-list">
               {#each projectBranches as branch (branch.id)}
@@ -436,31 +475,12 @@
                     </div>
                   </div>
                 {:else}
-                  {@const branchId = branch.id}
-                  {@const projectId = branch.projectId}
-                  {@const worktreePath = branch.worktreePath}
-                  {@const baseBranch = branch.baseBranch}
-                  {@const branchName = branch.branchName}
                   <BranchCard
                     {branch}
                     {refreshKey}
-                    onViewDiff={() => {
-                      onViewDiff?.(
-                        projectId,
-                        worktreePath,
-                        DiffSpec.mergeBaseDiff(baseBranch, branchName),
-                        `${baseBranch}..${branchName}`
-                      );
-                    }}
-                    onViewCommitDiff={(sha) => {
-                      onViewDiff?.(
-                        projectId,
-                        worktreePath,
-                        DiffSpec.fromRevs(`${sha}~1`, sha),
-                        sha.slice(0, 7)
-                      );
-                    }}
-                    onDelete={() => handleDeleteBranch(branchId)}
+                    onViewDiff={() => handleViewDiff(branch)}
+                    onViewCommitDiff={(sha) => handleViewCommitDiff(branch, sha)}
+                    onDelete={() => handleDeleteBranch(branch.id)}
                   />
                 {/if}
               {/each}
@@ -520,14 +540,31 @@
   <NewProjectModal
     onCreated={handleNewProjectCreated}
     onClose={() => (showNewProjectModal = false)}
+    onDetecting={handleProjectDetecting}
+  />
+{/if}
+
+<!-- Project settings modal -->
+{#if showProjectSettings && projectToEdit}
+  <ProjectSettingsModal
+    project={projectToEdit}
+    onClose={() => {
+      showProjectSettings = false;
+      projectToEdit = null;
+      // Refresh all branch cards to reload actions
+      refreshKey++;
+    }}
+    onUpdated={(updatedProject) => {
+      projects = projects.map((p) => (p.id === updatedProject.id ? updatedProject : p));
+    }}
   />
 {/if}
 
 <!-- New branch modal -->
-{#if showNewBranchModal && newBranchForProject}
+{#if showNewBranchModal}
   <NewBranchModal
-    initialRepoPath={newBranchForProject.repoPath}
-    projectId={newBranchForProject.id}
+    initialRepoPath={newBranchForProject?.repoPath}
+    projectId={newBranchForProject?.id}
     onCreating={handleBranchCreating}
     onCreated={handleBranchCreated}
     onCreateFailed={handleBranchCreateFailed}
@@ -665,6 +702,27 @@
     gap: 8px;
   }
 
+  .project-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .detecting-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: var(--size-xs);
+    color: var(--text-muted);
+    padding: 4px 8px;
+    background-color: var(--bg-hover);
+    border-radius: 4px;
+  }
+
+  .detecting-status :global(.spinner) {
+    flex-shrink: 0;
+  }
+
   :global(.project-icon) {
     color: var(--text-faint);
     flex-shrink: 0;
@@ -676,6 +734,7 @@
     color: var(--text-primary);
   }
 
+  .project-settings-button,
   .delete-project-button {
     display: flex;
     align-items: center;
@@ -689,6 +748,11 @@
     color: var(--text-faint);
     cursor: pointer;
     transition: all 0.15s ease;
+  }
+
+  .project-settings-button:hover {
+    background-color: var(--bg-hover);
+    color: var(--text-primary);
   }
 
   .delete-project-button:hover {

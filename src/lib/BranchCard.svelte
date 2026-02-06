@@ -26,6 +26,13 @@
     GitPullRequest,
     RefreshCw,
     X,
+    Wand,
+    CheckCircle,
+    StopCircle,
+    Zap,
+    FlaskConical,
+    BrushCleaning,
+    Hammer,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -34,8 +41,12 @@
     BranchNote,
     OpenerApp,
     PullRequestInfo,
+    ProjectAction,
+    ActionType,
   } from './services/branch';
   import * as branchService from './services/branch';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import ActionOutputModal from './ActionOutputModal.svelte';
   import SessionViewerModal from './SessionViewerModal.svelte';
   import NoteViewerModal from './NoteViewerModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
@@ -178,6 +189,8 @@
   // Dropdown state
   let showNewDropdown = $state(false);
   let showMoreMenu = $state(false);
+  let expandedSubmenu = $state<ActionType | null>(null);
+  let submenuCloseTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
 
   // Open in... button state
   let openerApps = $state<OpenerApp[]>([]);
@@ -203,9 +216,135 @@
   let syncingFromPr = $state(false);
   let showPullConfirm = $state(false);
 
+  // Actions state
+  let projectActions = $state<ProjectAction[]>([]);
+
+  // Group actions by type
+  let groupedActions = $derived.by(() => {
+    const groups: Record<ActionType, ProjectAction[]> = {
+      prerun: [],
+      run: [],
+      build: [],
+      format: [],
+      check: [],
+      test: [],
+      cleanUp: [],
+    };
+    for (const action of projectActions) {
+      groups[action.actionType].push(action);
+    }
+    return groups;
+  });
+
+  // Helper function to get icon for action type
+  function getActionIcon(actionType: ActionType) {
+    switch (actionType) {
+      case 'prerun':
+        return Zap;
+      case 'run':
+        return Play;
+      case 'build':
+        return Hammer;
+      case 'format':
+        return Wand;
+      case 'check':
+        return CheckCircle;
+      case 'test':
+        return FlaskConical;
+      case 'cleanUp':
+        return BrushCleaning;
+    }
+  }
+
+  // Helper function to get label for action type
+  function getActionTypeLabel(actionType: ActionType): string {
+    switch (actionType) {
+      case 'prerun':
+        return 'Prerun';
+      case 'run':
+        return 'Run';
+      case 'build':
+        return 'Build';
+      case 'format':
+        return 'Format';
+      case 'check':
+        return 'Check';
+      case 'test':
+        return 'Test';
+      case 'cleanUp':
+        return 'Clean Up';
+    }
+  }
+
+  // Get the primary run action (first run action)
+  let primaryRunAction = $derived.by(() => {
+    return groupedActions.run[0] ?? null;
+  });
+
+  // Get remaining run actions (excluding the primary one)
+  let remainingRunActions = $derived.by(() => {
+    return groupedActions.run.slice(1);
+  });
+
+  // Track the primary action's execution status
+  let primaryActionExecution = $derived.by(() => {
+    if (!primaryRunAction) return null;
+    return runningActions.find((a) => a.actionId === primaryRunAction.id) ?? null;
+  });
+
+  // Filter running actions to exclude the primary action
+  let secondaryRunningActions = $derived.by(() => {
+    if (!primaryRunAction) return runningActions;
+    return runningActions.filter((a) => a.actionId !== primaryRunAction.id);
+  });
+
+  // Submenu handlers with delay to prevent flashing
+  function handleSubmenuEnter(type: ActionType) {
+    if (submenuCloseTimeout) {
+      clearTimeout(submenuCloseTimeout);
+      submenuCloseTimeout = null;
+    }
+    expandedSubmenu = type;
+  }
+
+  function handleSubmenuLeave() {
+    submenuCloseTimeout = setTimeout(() => {
+      expandedSubmenu = null;
+      submenuCloseTimeout = null;
+    }, 100);
+  }
+
+  type RunningAction = {
+    executionId: string;
+    actionId: string;
+    actionName: string;
+    status: 'running' | 'completed' | 'failed' | 'stopped';
+    exitCode?: number | null;
+    startedAt?: number;
+    completedAt?: number | null;
+    fading?: boolean;
+  };
+  let runningActions = $state<RunningAction[]>([]);
+
+  // Action output modal state
+  let showActionOutput = $state(false);
+  let viewingActionExecution = $state<{
+    executionId: string;
+    actionId: string;
+    actionName: string;
+    status?: 'running' | 'completed' | 'failed' | 'stopped';
+    exitCode?: number | null;
+    startedAt?: number;
+    completedAt?: number | null;
+  } | null>(null);
+
+  // Event listeners
+  let unlistenActionStatus: UnlistenFn | null = null;
+  let unlistenActionAutoCommit: UnlistenFn | null = null;
+
   // Load commits and running session on mount
-  onMount(async () => {
-    await loadData();
+  onMount(() => {
+    loadData();
     // Load available openers (shared across all cards via cache)
     if (!openersLoaded) {
       branchService.getAvailableOpeners().then((apps) => {
@@ -213,6 +352,106 @@
         openersLoaded = true;
       });
     }
+
+    // Load project actions
+    if (branch.projectId) {
+      branchService
+        .listProjectActions(branch.projectId)
+        .then((actions) => {
+          projectActions = actions;
+        })
+        .catch((e) => {
+          console.error('Failed to load project actions:', e);
+        });
+    }
+
+    // Listen for action status events
+    listen('action_status', (event: any) => {
+      const payload = event.payload as {
+        executionId: string;
+        branchId: string;
+        actionId: string;
+        actionName: string;
+        status: string;
+        exitCode: number | null;
+        startedAt: number;
+        completedAt: number | null;
+      };
+
+      if (payload.branchId === branch.id) {
+        const existingIndex = runningActions.findIndex(
+          (a) => a.executionId === payload.executionId
+        );
+
+        if (payload.status === 'running') {
+          if (existingIndex === -1) {
+            runningActions.push({
+              executionId: payload.executionId,
+              actionId: payload.actionId,
+              actionName: payload.actionName,
+              status: 'running',
+              startedAt: payload.startedAt,
+            });
+          }
+        } else {
+          // Action completed/failed/stopped - update status
+          if (existingIndex !== -1) {
+            runningActions[existingIndex].status = payload.status as any;
+            runningActions[existingIndex].exitCode = payload.exitCode;
+            runningActions[existingIndex].completedAt = payload.completedAt;
+            // Auto-remove successful completions (with fade for secondary, instant for primary)
+            if (payload.status === 'completed') {
+              const action = runningActions[existingIndex];
+              const isPrimaryAction = primaryRunAction && action.actionId === primaryRunAction.id;
+
+              setTimeout(
+                () => {
+                  const foundAction = runningActions.find(
+                    (a) => a.executionId === payload.executionId
+                  );
+                  if (foundAction && !isPrimaryAction) {
+                    // Secondary actions fade out
+                    foundAction.fading = true;
+                  }
+                  // Remove after animation completes (or immediately for primary)
+                  setTimeout(
+                    () => {
+                      runningActions = runningActions.filter(
+                        (a) => a.executionId !== payload.executionId
+                      );
+                    },
+                    isPrimaryAction ? 0 : 300
+                  ); // Match CSS transition duration for secondary
+                },
+                isPrimaryAction ? 1000 : 2000
+              ); // Shorter display time for primary action
+            }
+          }
+        }
+      }
+    }).then((unlisten) => {
+      unlistenActionStatus = unlisten;
+    });
+
+    // Listen for auto-commit events
+    listen('action_auto_commit', async (event: any) => {
+      const payload = event.payload as {
+        branchId: string;
+        actionName: string;
+      };
+
+      if (payload.branchId === branch.id) {
+        // Refresh commits to show the new commit
+        await loadData();
+      }
+    }).then((unlisten) => {
+      unlistenActionAutoCommit = unlisten;
+    });
+
+    return () => {
+      if (unlistenActionStatus) unlistenActionStatus();
+      if (unlistenActionAutoCommit) unlistenActionAutoCommit();
+    };
   });
 
   // Reload when refreshKey changes
@@ -225,16 +464,21 @@
   async function loadData() {
     loading = true;
     try {
-      const [commitsResult, sessionResult, notesResult, generatingNoteResult] = await Promise.all([
-        branchService.getBranchCommits(branch.id),
-        branchService.getRunningSession(branch.id),
-        branchService.listBranchNotes(branch.id),
-        branchService.getGeneratingNote(branch.id),
-      ]);
+      const [commitsResult, sessionResult, notesResult, generatingNoteResult, actionsResult] =
+        await Promise.all([
+          branchService.getBranchCommits(branch.id),
+          branchService.getRunningSession(branch.id),
+          branchService.listBranchNotes(branch.id),
+          branchService.getGeneratingNote(branch.id),
+          branch.projectId
+            ? branchService.listProjectActions(branch.projectId)
+            : Promise.resolve([]),
+        ]);
       commits = commitsResult;
       runningSession = sessionResult;
       notes = notesResult;
       generatingNote = generatingNoteResult;
+      projectActions = actionsResult;
 
       // Check if running session is actually alive
       if (sessionResult?.aiSessionId) {
@@ -521,6 +765,32 @@
     }
   }
 
+  // Handle running an action
+  async function handleRunAction(action: ProjectAction) {
+    showMoreMenu = false;
+    try {
+      await branchService.runBranchAction(branch.id, action.id);
+      // The running action will be added via the event listener
+      // Don't auto-show output modal - user can click to view
+    } catch (e) {
+      console.error('Failed to run action:', e);
+    }
+  }
+
+  // Handle showing action output
+  function handleShowActionOutput(execution: RunningAction) {
+    viewingActionExecution = {
+      executionId: execution.executionId,
+      actionId: execution.actionId,
+      actionName: execution.actionName,
+      status: execution.status,
+      exitCode: execution.exitCode ?? null,
+      startedAt: execution.startedAt,
+      completedAt: execution.completedAt,
+    };
+    showActionOutput = true;
+  }
+
   // Handle discarding a stuck session
   async function handleDiscardSession() {
     if (!runningSession) return;
@@ -589,23 +859,56 @@
       </button>
     </div>
     <div class="header-actions">
-      <div class="more-menu-container">
-        <button class="more-button" onclick={toggleMoreMenu} title="More options">
-          <MoreVertical size={16} />
-        </button>
-        {#if showMoreMenu}
-          <div class="more-menu">
-            <button class="more-menu-item" onclick={handleViewDiff}>
-              <FileDiff size={14} />
-              View Diff
-            </button>
-            <button class="more-menu-item danger" onclick={handleDeleteFromMenu}>
-              <Trash2 size={14} />
-              Delete
-            </button>
-          </div>
-        {/if}
-      </div>
+      <!-- Running actions (excluding primary action) -->
+      {#each secondaryRunningActions as execution (execution.executionId)}
+        <div class="running-action-container" class:fading={execution.fading}>
+          <button
+            class="running-action-button"
+            class:completed={execution.status === 'completed'}
+            class:failed={execution.status === 'failed'}
+            onclick={() => handleShowActionOutput(execution)}
+            title="View output"
+          >
+            {#if execution.status === 'running'}
+              <Loader2 size={12} class="spinner" />
+            {:else if execution.status === 'completed'}
+              <CheckCircle size={12} />
+            {:else if execution.status === 'failed'}
+              <AlertCircle size={12} />
+            {:else}
+              <StopCircle size={12} />
+            {/if}
+            {execution.actionName}
+          </button>
+        </div>
+      {/each}
+      <!-- Primary run action button -->
+      {#if primaryRunAction}
+        <div class="primary-action-container">
+          <button
+            class="primary-action-button"
+            class:running={primaryActionExecution?.status === 'running'}
+            class:completed={primaryActionExecution?.status === 'completed'}
+            class:failed={primaryActionExecution?.status === 'failed'}
+            onclick={() =>
+              primaryActionExecution
+                ? handleShowActionOutput(primaryActionExecution)
+                : handleRunAction(primaryRunAction)}
+            title={primaryActionExecution ? 'View output' : `Run ${primaryRunAction.name}`}
+          >
+            {#if primaryActionExecution?.status === 'running'}
+              <Loader2 size={13} class="spinner" />
+            {:else if primaryActionExecution?.status === 'completed'}
+              <CheckCircle size={13} />
+            {:else if primaryActionExecution?.status === 'failed'}
+              <AlertCircle size={13} />
+            {:else}
+              <Play size={13} />
+            {/if}
+            {primaryRunAction.name}
+          </button>
+        </div>
+      {/if}
       <!-- Open in... button -->
       {#if openerApps.length > 0}
         <div class="open-in-container">
@@ -624,6 +927,81 @@
           {/if}
         </div>
       {/if}
+      <div class="more-menu-container">
+        <button class="more-button" onclick={toggleMoreMenu} title="More options">
+          <MoreVertical size={16} />
+        </button>
+        {#if showMoreMenu}
+          <div class="more-menu">
+            <!-- View Diff first -->
+            <button class="more-menu-item" onclick={handleViewDiff}>
+              <FileDiff size={14} />
+              View Diff
+            </button>
+
+            <!-- Actions in order: Run, Build, Format, Check, Test, CleanUp, Prerun -->
+            {#if projectActions.length > 0}
+              <div class="menu-separator"></div>
+              {#each ['run', 'build', 'format', 'check', 'test', 'cleanUp', 'prerun'] as type}
+                {@const actions =
+                  type === 'run' ? remainingRunActions : groupedActions[type as ActionType]}
+                {#if actions.length > 0}
+                  {#if actions.length >= 3}
+                    <!-- Submenu for 3+ actions -->
+                    <div class="submenu-container">
+                      <button
+                        class="more-menu-item submenu-trigger"
+                        onmouseenter={() => handleSubmenuEnter(type as ActionType)}
+                        onmouseleave={handleSubmenuLeave}
+                      >
+                        <!-- svelte-ignore svelte_component_deprecated -->
+                        <svelte:component this={getActionIcon(type as ActionType)} size={14} />
+                        {getActionTypeLabel(type as ActionType)}
+                        <ChevronDown size={12} class="submenu-chevron" />
+                      </button>
+                      {#if expandedSubmenu === type}
+                        <div
+                          class="submenu"
+                          role="group"
+                          onmouseenter={() => handleSubmenuEnter(type as ActionType)}
+                          onmouseleave={handleSubmenuLeave}
+                        >
+                          {#each actions as action (action.id)}
+                            {@const Icon = getActionIcon(type as ActionType)}
+                            <button class="more-menu-item" onclick={() => handleRunAction(action)}>
+                              <Icon size={14} />
+                              {action.name}
+                            </button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <!-- Direct items for <3 actions -->
+                    {#each actions as action (action.id)}
+                      {@const Icon = getActionIcon(type as ActionType)}
+                      <button
+                        class="more-menu-item action-item"
+                        onclick={() => handleRunAction(action)}
+                      >
+                        <Icon size={14} />
+                        {action.name}
+                      </button>
+                    {/each}
+                  {/if}
+                {/if}
+              {/each}
+            {/if}
+
+            <!-- Delete last -->
+            <div class="menu-separator"></div>
+            <button class="more-menu-item danger" onclick={handleDeleteFromMenu}>
+              <Trash2 size={14} />
+              Delete
+            </button>
+          </div>
+        {/if}
+      </div>
     </div>
   </div>
 
@@ -1080,6 +1458,24 @@
   />
 {/if}
 
+<!-- Action output modal -->
+{#if showActionOutput && viewingActionExecution}
+  <ActionOutputModal
+    executionId={viewingActionExecution.executionId}
+    actionId={viewingActionExecution.actionId}
+    actionName={viewingActionExecution.actionName}
+    branchId={branch.id}
+    initialStatus={viewingActionExecution.status}
+    initialExitCode={viewingActionExecution.exitCode}
+    initialStartedAt={viewingActionExecution.startedAt}
+    initialCompletedAt={viewingActionExecution.completedAt}
+    onClose={() => {
+      showActionOutput = false;
+      viewingActionExecution = null;
+    }}
+  />
+{/if}
+
 <!-- Note viewer modal -->
 {#if showNoteViewer && viewingNote}
   <NoteViewerModal
@@ -1176,6 +1572,62 @@
     gap: 4px;
   }
 
+  /* Primary action button */
+  .primary-action-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .primary-action-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 12px;
+    background: var(--ui-accent);
+    border: 1px solid var(--ui-accent);
+    border-radius: 6px;
+    color: var(--bg-deepest);
+    font-size: var(--size-xs);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .primary-action-button:hover {
+    opacity: 0.9;
+    transform: translateY(-1px);
+  }
+
+  .primary-action-button:active {
+    transform: translateY(0);
+  }
+
+  .primary-action-button.running {
+    background: var(--bg-elevated);
+    border-color: var(--border-muted);
+    color: var(--text-primary);
+  }
+
+  .primary-action-button.completed {
+    background: var(--ui-success);
+    border-color: var(--ui-success);
+    color: var(--bg-deepest);
+  }
+
+  .primary-action-button.failed {
+    background: var(--ui-danger);
+    border-color: var(--ui-danger);
+    color: var(--bg-deepest);
+  }
+
+  .primary-action-button :global(svg) {
+    flex-shrink: 0;
+    width: 13px;
+    height: 13px;
+  }
+
   /* Open in... button */
   .open-in-container {
     position: relative;
@@ -1269,7 +1721,7 @@
     border: 1px solid var(--border-muted);
     border-radius: 8px;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-    overflow: hidden;
+    overflow: visible;
     z-index: 100;
     min-width: 120px;
   }
@@ -1304,6 +1756,91 @@
 
   .more-menu-item.danger:hover :global(svg) {
     color: var(--ui-danger);
+  }
+
+  .menu-separator {
+    height: 1px;
+    background-color: var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  /* Submenu styles */
+  .submenu-container {
+    position: relative;
+  }
+
+  .submenu-trigger {
+    justify-content: space-between;
+  }
+
+  .submenu-trigger :global(.submenu-chevron) {
+    margin-left: auto;
+    transform: rotate(-90deg);
+  }
+
+  .submenu {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    margin-left: 2px;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    z-index: 101;
+    min-width: 160px;
+  }
+
+  /* Running actions */
+  .running-action-container {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    opacity: 1;
+    transition:
+      opacity 0.3s ease,
+      transform 0.3s ease;
+  }
+
+  .running-action-container.fading {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+
+  .running-action-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .running-action-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-focus);
+  }
+
+  .running-action-button.completed {
+    border-color: var(--ui-success);
+    color: var(--ui-success);
+  }
+
+  .running-action-button.failed {
+    border-color: var(--ui-danger);
+    color: var(--ui-danger);
+  }
+
+  .running-action-button :global(svg) {
+    flex-shrink: 0;
   }
 
   /* Content */
@@ -1792,6 +2329,7 @@
   /* Spinner animations */
   :global(.spinner) {
     animation: spin 1s linear infinite;
+    flex-shrink: 0;
   }
 
   :global(.commit-spinner) {
@@ -1809,6 +2347,12 @@
     to {
       transform: rotate(360deg);
     }
+  }
+
+  /* Ensure all icons in buttons have consistent sizing to prevent wobble */
+  .running-action-button :global(svg),
+  .primary-action-button :global(svg) {
+    display: block;
   }
 
   @keyframes pulse {

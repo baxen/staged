@@ -3,6 +3,7 @@
 //! This module provides the bridge between the frontend and the git/github modules.
 //! Supports CLI arguments: `staged [path]` opens the app with the specified directory.
 
+pub mod actions;
 pub mod ai;
 pub mod git;
 pub mod project;
@@ -841,73 +842,6 @@ async fn analyze_diff(
     ai::analysis::analyze_diff(&path, &spec, provider.as_deref()).await
 }
 
-/// Maximum size for base64-encoded image data (10MB)
-const MAX_IMAGE_SIZE: usize = 10 * 1024 * 1024;
-
-/// Maximum number of images per request
-const MAX_IMAGE_COUNT: usize = 5;
-
-/// Allowed MIME types for image attachments
-const ALLOWED_MIME_TYPES: &[&str] = &[
-    "image/png",
-    "image/jpeg",
-    "image/jpg",
-    "image/gif",
-    "image/webp",
-];
-
-/// An image attachment for AI prompts
-#[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct ImageAttachment {
-    /// Base64-encoded image data
-    pub data: String,
-    /// MIME type (e.g., "image/png", "image/jpeg")
-    pub mime_type: String,
-}
-
-impl ImageAttachment {
-    /// Validates the image attachment for size and format
-    pub fn validate(&self) -> Result<(), String> {
-        if self.data.len() > MAX_IMAGE_SIZE {
-            return Err(format!(
-                "Image too large: {} bytes (max {} bytes)",
-                self.data.len(),
-                MAX_IMAGE_SIZE
-            ));
-        }
-
-        if !ALLOWED_MIME_TYPES.contains(&self.mime_type.as_str()) {
-            return Err(format!(
-                "Unsupported image format: {}. Allowed formats: {}",
-                self.mime_type,
-                ALLOWED_MIME_TYPES.join(", ")
-            ));
-        }
-
-        Ok(())
-    }
-}
-
-/// Validates a collection of image attachments
-fn validate_images(images: &Option<Vec<ImageAttachment>>) -> Result<(), String> {
-    if let Some(imgs) = images {
-        if imgs.len() > MAX_IMAGE_COUNT {
-            return Err(format!(
-                "Too many images: {} (max {})",
-                imgs.len(),
-                MAX_IMAGE_COUNT
-            ));
-        }
-
-        for (i, img) in imgs.iter().enumerate() {
-            img.validate()
-                .map_err(|e| format!("Image {}: {}", i + 1, e))?;
-        }
-    }
-    Ok(())
-}
-
 /// Response from send_agent_prompt including session ID for continuity.
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -961,8 +895,6 @@ async fn send_agent_prompt(
 /// - "session-complete": Finalized transcript when done
 /// - "session-error": Error information if the session fails
 ///
-/// Supports optional image attachments for multimodal prompts.
-///
 /// Returns the same response as send_agent_prompt for compatibility.
 #[tauri::command(rename_all = "camelCase")]
 async fn send_agent_prompt_streaming(
@@ -971,10 +903,7 @@ async fn send_agent_prompt_streaming(
     prompt: String,
     session_id: Option<String>,
     provider: Option<String>,
-    images: Option<Vec<ImageAttachment>>,
 ) -> Result<AgentPromptResponse, String> {
-    validate_images(&images)?;
-
     let agent = if let Some(provider_id) = provider {
         ai::find_acp_agent_by_id(&provider_id).ok_or_else(|| {
             format!(
@@ -991,11 +920,10 @@ async fn send_agent_prompt_streaming(
 
     // Legacy path: no internal session ID, use ACP session ID or "legacy" as fallback
     let internal_id = session_id.as_deref().unwrap_or("legacy");
-    let result = ai::run_acp_prompt_streaming_with_images(
+    let result = ai::run_acp_prompt_streaming(
         &agent,
         &path,
         &prompt,
-        images.as_deref(),
         session_id.as_deref(),
         internal_id,
         app_handle,
@@ -1054,10 +982,8 @@ async fn send_prompt(
     state: State<'_, Arc<SessionManager>>,
     session_id: String,
     prompt: String,
-    images: Option<Vec<ImageAttachment>>,
 ) -> Result<(), String> {
-    validate_images(&images)?;
-    state.send_prompt(&session_id, prompt, images).await
+    state.send_prompt(&session_id, prompt).await
 }
 
 /// Update session title.
@@ -1722,7 +1648,7 @@ async fn create_branch(
     let store = state.inner().clone();
 
     // Run blocking git operations on a separate thread
-    tauri::async_runtime::spawn_blocking(move || {
+    let branch = tauri::async_runtime::spawn_blocking(move || {
         let repo = Path::new(&repo_path);
 
         // Use provided base branch or detect the default
@@ -1761,7 +1687,49 @@ async fn create_branch(
         Ok(branch)
     })
     .await
-    .map_err(|e| format!("Task failed: {e}"))?
+    .map_err(|e| format!("Task failed: {e}"))??;
+
+    Ok(branch)
+}
+
+/// Run prerun actions for a branch.
+/// This is called separately after branch creation so the UI can show running actions.
+#[tauri::command(rename_all = "camelCase")]
+async fn run_prerun_actions(
+    app: tauri::AppHandle,
+    state: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    branch_id: String,
+) -> Result<(), String> {
+    let store = state.inner().clone();
+    let runner = runner.inner().clone();
+
+    // Get the branch
+    let branch = store
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "Branch not found".to_string())?;
+
+    // Get prerun actions for this project
+    let prerun_actions = store
+        .list_project_actions_by_type(&branch.project_id, crate::store::ActionType::Prerun)
+        .map_err(|e| e.to_string())?;
+
+    // Execute each prerun action in order
+    for action in prerun_actions {
+        if let Err(e) = runner.run_action(
+            app.clone(),
+            store.clone(),
+            branch.id.clone(),
+            action.id.clone(),
+            branch.worktree_path.clone(),
+        ) {
+            eprintln!("Failed to run prerun action '{}': {}", action.name, e);
+            // Continue with other actions even if one fails
+        }
+    }
+
+    Ok(())
 }
 
 /// Create a new branch from an existing GitHub PR.
@@ -1780,7 +1748,7 @@ async fn create_branch_from_pr(
     let store = state.inner().clone();
 
     // Run blocking git operations on a separate thread
-    tauri::async_runtime::spawn_blocking(move || {
+    let branch = tauri::async_runtime::spawn_blocking(move || {
         let repo = Path::new(&repo_path);
 
         // Create the worktree from the PR
@@ -1813,7 +1781,9 @@ async fn create_branch_from_pr(
         Ok(branch)
     })
     .await
-    .map_err(|e| format!("Task failed: {e}"))?
+    .map_err(|e| format!("Task failed: {e}"))??;
+
+    Ok(branch)
 }
 
 /// List git branches (local and remote) for base branch selection.
@@ -2002,10 +1972,7 @@ async fn start_branch_session(
     branch_id: String,
     user_prompt: String,
     agent_id: Option<String>,
-    images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchSessionResponse, String> {
-    validate_images(&images)?;
-
     // Get the branch to find the worktree path
     let branch = state
         .get_branch(&branch_id)
@@ -2043,7 +2010,7 @@ async fn start_branch_session(
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt, images)
+        .send_prompt(&ai_session_id, full_prompt)
         .await
     {
         // Clean up on failure
@@ -2399,10 +2366,7 @@ async fn restart_branch_session(
     session_manager: State<'_, Arc<SessionManager>>,
     branch_session_id: String,
     full_prompt: String,
-    images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchSessionResponse, String> {
-    validate_images(&images)?;
-
     // Get the old session to retrieve the branch ID and prompt
     let old_session = state
         .get_branch_session(&branch_session_id)
@@ -2438,7 +2402,7 @@ async fn restart_branch_session(
 
     // Send the prompt to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt, images)
+        .send_prompt(&ai_session_id, full_prompt)
         .await
     {
         // Clean up on failure
@@ -2625,10 +2589,7 @@ async fn start_branch_note(
     title: String,
     description: String,
     agent_id: Option<String>,
-    images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchNoteResponse, String> {
-    validate_images(&images)?;
-
     // Get the branch to find the worktree path
     let branch = state
         .get_branch(&branch_id)
@@ -2669,7 +2630,7 @@ async fn start_branch_note(
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt, images)
+        .send_prompt(&ai_session_id, full_prompt)
         .await
     {
         // Clean up on failure
@@ -2842,25 +2803,6 @@ fn extract_text_from_assistant_content(content: &str) -> String {
 
 use store::GitProject;
 
-/// Canonicalize a repo path to ensure consistent path comparison.
-/// This resolves symlinks and normalizes the path (including case on case-insensitive filesystems).
-/// Returns the original path if canonicalization fails.
-fn canonicalize_repo_path(repo_path: &str) -> String {
-    std::path::Path::new(repo_path)
-        .canonicalize()
-        .ok()
-        .and_then(|p| p.to_str().map(|s| s.to_string()))
-        .unwrap_or_else(|| repo_path.to_string())
-}
-
-/// Clean and normalize a subpath by trimming whitespace and removing leading/trailing slashes.
-/// Returns None for empty strings after cleaning.
-fn clean_subpath(subpath: Option<String>) -> Option<String> {
-    subpath
-        .map(|s| s.trim().trim_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-}
-
 /// Create a new git project.
 /// If a project already exists for the repo_path, returns an error.
 #[tauri::command(rename_all = "camelCase")]
@@ -2869,31 +2811,28 @@ fn create_git_project(
     repo_path: String,
     subpath: Option<String>,
 ) -> Result<GitProject, String> {
-    // Canonicalize the repo path to ensure consistent comparison
-    let canonical_repo_path = canonicalize_repo_path(&repo_path);
-
-    // Clean and normalize the subpath
-    let cleaned_subpath = clean_subpath(subpath);
+    // Normalize subpath: empty string becomes None
+    let subpath = subpath.filter(|s| !s.is_empty());
 
     // Check if project already exists for this repo+subpath
     if state
-        .get_git_project_by_repo_and_subpath(&canonical_repo_path, cleaned_subpath.as_deref())
+        .get_git_project_by_repo_and_subpath(&repo_path, subpath.as_deref())
         .map_err(|e| e.to_string())?
         .is_some()
     {
-        let repo_name = std::path::Path::new(&canonical_repo_path)
+        let repo_name = std::path::Path::new(&repo_path)
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(&canonical_repo_path);
+            .unwrap_or(&repo_path);
 
-        return Err(match &cleaned_subpath {
+        return Err(match &subpath {
             Some(sp) => format!("A project already exists for {repo_name} with subpath '{sp}'"),
             None => format!("A project already exists for {repo_name} with no subpath"),
         });
     }
 
-    let mut project = GitProject::new(&canonical_repo_path);
-    if let Some(sp) = cleaned_subpath {
+    let mut project = GitProject::new(&repo_path);
+    if let Some(sp) = subpath {
         project = project.with_subpath(sp);
     }
 
@@ -2920,10 +2859,8 @@ fn get_git_project_by_repo(
     state: State<'_, Arc<Store>>,
     repo_path: String,
 ) -> Result<Option<GitProject>, String> {
-    // Canonicalize the repo path to ensure consistent lookup
-    let canonical_repo_path = canonicalize_repo_path(&repo_path);
     state
-        .get_git_project_by_repo(&canonical_repo_path)
+        .get_git_project_by_repo(&repo_path)
         .map_err(|e| e.to_string())
 }
 
@@ -2940,10 +2877,8 @@ fn update_git_project(
     project_id: String,
     subpath: Option<String>,
 ) -> Result<(), String> {
-    // Clean and normalize the subpath
-    let cleaned_subpath = clean_subpath(subpath);
     state
-        .update_git_project(&project_id, cleaned_subpath.as_deref())
+        .update_git_project(&project_id, subpath.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -2954,6 +2889,193 @@ fn delete_git_project(state: State<'_, Arc<Store>>, project_id: String) -> Resul
     state
         .delete_git_project(&project_id)
         .map_err(|e| e.to_string())
+}
+
+/// Get or create a git project for a repo_path.
+/// If no project exists, creates one for the given repo.
+#[tauri::command(rename_all = "camelCase")]
+fn get_or_create_git_project(
+    state: State<'_, Arc<Store>>,
+    repo_path: String,
+) -> Result<GitProject, String> {
+    // Check if project already exists
+    if let Some(existing) = state
+        .get_git_project_by_repo(&repo_path)
+        .map_err(|e| e.to_string())?
+    {
+        return Ok(existing);
+    }
+
+    let project = GitProject::new(&repo_path);
+    state
+        .create_git_project(&project)
+        .map_err(|e| e.to_string())?;
+    Ok(project)
+}
+
+// =============================================================================
+// Project Action Commands
+// =============================================================================
+
+/// List all actions for a project
+#[tauri::command(rename_all = "camelCase")]
+fn list_project_actions(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<store::ProjectAction>, String> {
+    state
+        .list_project_actions(&project_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Create a new project action
+#[tauri::command(rename_all = "camelCase")]
+fn create_project_action(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+    name: String,
+    command: String,
+    action_type: String,
+    sort_order: i32,
+    auto_commit: bool,
+) -> Result<store::ProjectAction, String> {
+    let action_type = store::ActionType::parse(&action_type)
+        .ok_or_else(|| format!("Invalid action type: {}", action_type))?;
+
+    let action = store::ProjectAction::new(project_id, name, command, action_type, sort_order)
+        .with_auto_commit(auto_commit);
+
+    state
+        .create_project_action(&action)
+        .map_err(|e| e.to_string())?;
+
+    Ok(action)
+}
+
+/// Update a project action
+#[tauri::command(rename_all = "camelCase")]
+fn update_project_action(
+    state: State<'_, Arc<Store>>,
+    action_id: String,
+    name: String,
+    command: String,
+    action_type: String,
+    sort_order: i32,
+    auto_commit: bool,
+) -> Result<(), String> {
+    let action_type = store::ActionType::parse(&action_type)
+        .ok_or_else(|| format!("Invalid action type: {}", action_type))?;
+
+    // Get existing action
+    let mut action = state
+        .get_project_action(&action_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Action not found: {}", action_id))?;
+
+    // Update fields
+    action.name = name;
+    action.command = command;
+    action.action_type = action_type;
+    action.sort_order = sort_order;
+    action.auto_commit = auto_commit;
+
+    state
+        .update_project_action(&action)
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a project action
+#[tauri::command(rename_all = "camelCase")]
+fn delete_project_action(state: State<'_, Arc<Store>>, action_id: String) -> Result<(), String> {
+    state
+        .delete_project_action(&action_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Reorder project actions
+#[tauri::command(rename_all = "camelCase")]
+fn reorder_project_actions(
+    state: State<'_, Arc<Store>>,
+    action_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .reorder_project_actions(&action_ids)
+        .map_err(|e| e.to_string())
+}
+
+/// Detect actions for a project using AI
+#[tauri::command(rename_all = "camelCase")]
+async fn detect_project_actions(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<actions::SuggestedAction>, String> {
+    // Get the project
+    let project = state
+        .get_git_project(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    // Detect actions using AI
+    let repo_path = std::path::Path::new(&project.repo_path);
+    actions::detect_actions(repo_path, project.subpath.as_deref())
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Run an action on a branch
+#[tauri::command(rename_all = "camelCase")]
+fn run_branch_action(
+    state: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    app: tauri::AppHandle,
+    branch_id: String,
+    action_id: String,
+) -> Result<String, String> {
+    // Get the branch to find its worktree path
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch not found: {}", branch_id))?;
+
+    // Run the action
+    runner
+        .run_action(
+            app,
+            state.inner().clone(),
+            branch_id,
+            action_id,
+            branch.worktree_path,
+        )
+        .map_err(|e| e.to_string())
+}
+
+/// Stop a running action
+#[tauri::command(rename_all = "camelCase")]
+fn stop_branch_action(
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    execution_id: String,
+) -> Result<(), String> {
+    runner.stop_action(&execution_id).map_err(|e| e.to_string())
+}
+
+/// Get all running actions for a branch
+#[tauri::command(rename_all = "camelCase")]
+fn get_running_branch_actions(
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    branch_id: String,
+) -> Result<Vec<actions::ActionStatusEvent>, String> {
+    Ok(runner.get_running_actions(&branch_id))
+}
+
+/// Get buffered output for an execution
+#[tauri::command(rename_all = "camelCase")]
+fn get_action_output_buffer(
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    execution_id: String,
+) -> Result<Vec<actions::runner::OutputChunk>, String> {
+    runner
+        .get_buffered_output(&execution_id)
+        .ok_or_else(|| format!("No output buffer found for execution: {}", execution_id))
 }
 
 // =============================================================================
@@ -3402,8 +3524,13 @@ pub fn run() {
             app.manage(store.clone());
 
             // Initialize the session manager
-            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), store));
+            let session_manager =
+                Arc::new(SessionManager::new(app.handle().clone(), store.clone()));
             app.manage(session_manager);
+
+            // Initialize the action runner
+            let action_runner = Arc::new(actions::ActionRunner::new());
+            app.manage(action_runner);
 
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
@@ -3542,6 +3669,19 @@ pub fn run() {
             list_git_projects,
             update_git_project,
             delete_git_project,
+            get_or_create_git_project,
+            // Project action commands
+            list_project_actions,
+            create_project_action,
+            update_project_action,
+            delete_project_action,
+            reorder_project_actions,
+            detect_project_actions,
+            run_branch_action,
+            run_prerun_actions,
+            stop_branch_action,
+            get_running_branch_actions,
+            get_action_output_buffer,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

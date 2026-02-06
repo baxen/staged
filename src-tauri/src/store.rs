@@ -245,6 +245,114 @@ impl ArtifactData {
     }
 }
 
+/// The type of a project action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ActionType {
+    Prerun,
+    Run,
+    Build,
+    Format,
+    Check,
+    #[serde(rename = "cleanUp")]
+    CleanUp,
+    Test,
+}
+
+impl ActionType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ActionType::Prerun => "prerun",
+            ActionType::Run => "run",
+            ActionType::Build => "build",
+            ActionType::Format => "format",
+            ActionType::Check => "check",
+            ActionType::CleanUp => "cleanUp",
+            ActionType::Test => "test",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "prerun" => Some(ActionType::Prerun),
+            "run" => Some(ActionType::Run),
+            "build" => Some(ActionType::Build),
+            "format" => Some(ActionType::Format),
+            "check" => Some(ActionType::Check),
+            "cleanUp" => Some(ActionType::CleanUp),
+            "test" => Some(ActionType::Test),
+            _ => None,
+        }
+    }
+}
+
+/// A configurable action that can be run on a project.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectAction {
+    pub id: String,
+    pub project_id: String,
+    pub name: String,
+    pub command: String,
+    pub action_type: ActionType,
+    pub sort_order: i32,
+    pub auto_commit: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl ProjectAction {
+    pub fn new(
+        project_id: impl Into<String>,
+        name: impl Into<String>,
+        command: impl Into<String>,
+        action_type: ActionType,
+        sort_order: i32,
+    ) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: project_id.into(),
+            name: name.into(),
+            command: command.into(),
+            action_type,
+            sort_order,
+            auto_commit: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn with_auto_commit(mut self, auto_commit: bool) -> Self {
+        self.auto_commit = auto_commit;
+        self
+    }
+
+    /// Create a ProjectAction from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let action_type_str: String = row.get(4)?;
+        let action_type = ActionType::parse(&action_type_str).ok_or_else(|| {
+            rusqlite::Error::InvalidColumnType(
+                4,
+                "action_type".to_string(),
+                rusqlite::types::Type::Text,
+            )
+        })?;
+
+        Ok(Self {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            name: row.get(2)?,
+            command: row.get(3)?,
+            action_type,
+            sort_order: row.get(5)?,
+            auto_commit: row.get::<_, i32>(6)? != 0,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    }
+}
+
 /// The persistent output of AI work.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -786,6 +894,21 @@ impl Store {
             );
 
             CREATE INDEX IF NOT EXISTS idx_git_projects_repo ON git_projects(repo_path);
+
+            CREATE TABLE IF NOT EXISTS project_actions (
+                id TEXT PRIMARY KEY,
+                project_id TEXT NOT NULL REFERENCES git_projects(id) ON DELETE CASCADE,
+                name TEXT NOT NULL,
+                command TEXT NOT NULL,
+                action_type TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                auto_commit INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_project_actions_project ON project_actions(project_id);
+            CREATE INDEX IF NOT EXISTS idx_project_actions_type ON project_actions(project_id, action_type);
             "#,
         )?;
 
@@ -878,9 +1001,10 @@ impl Store {
 
             for (branch_id, repo_path) in branch_repos {
                 // Check if a project exists for this repo_path
+                // Prefer projects with subpath IS NULL, but accept any project for this repo
                 let project_id: Option<String> = conn
                     .query_row(
-                        "SELECT id FROM git_projects WHERE repo_path = ?1 AND subpath IS NULL LIMIT 1",
+                        "SELECT id FROM git_projects WHERE repo_path = ?1 ORDER BY subpath IS NULL DESC LIMIT 1",
                         params![&repo_path],
                         |row| row.get(0),
                     )
@@ -905,6 +1029,54 @@ impl Store {
                     "UPDATE branches SET project_id = ?1 WHERE id = ?2",
                     params![&project_id, &branch_id],
                 )?;
+            }
+        }
+
+        // Fix branches that might be pointing to auto-created empty projects
+        // when a user-created project with actions exists for the same repo.
+        // This handles the case where the previous migration created projects with empty names
+        // while the user had already created a project with a name/subpath for that repo.
+        {
+            // Find all projects with no name that were auto-created
+            let mut stmt = conn.prepare(
+                "SELECT id, repo_path FROM git_projects WHERE name = '' AND subpath IS NULL",
+            )?;
+            let empty_projects: Vec<(String, String)> = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+
+            for (empty_project_id, repo_path) in empty_projects {
+                // Check if there's a better project for this repo (one with a name or subpath)
+                let better_project_id: Option<String> = conn
+                    .query_row(
+                        "SELECT id FROM git_projects WHERE repo_path = ?1 AND (name != '' OR subpath IS NOT NULL) LIMIT 1",
+                        params![&repo_path],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+
+                if let Some(better_id) = better_project_id {
+                    // Update branches to use the better project
+                    conn.execute(
+                        "UPDATE branches SET project_id = ?1 WHERE project_id = ?2",
+                        params![&better_id, &empty_project_id],
+                    )?;
+
+                    // Delete the empty project if it has no branches
+                    let branch_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM branches WHERE project_id = ?1",
+                        params![&empty_project_id],
+                        |row| row.get(0),
+                    )?;
+
+                    if branch_count == 0 {
+                        conn.execute(
+                            "DELETE FROM git_projects WHERE id = ?1",
+                            params![&empty_project_id],
+                        )?;
+                    }
+                }
             }
         }
 
@@ -1949,6 +2121,121 @@ impl Store {
             "UPDATE git_projects SET updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )?;
+        Ok(())
+    }
+
+    // ================================================================================
+    // Project Actions
+    // ================================================================================
+
+    /// Create a new project action
+    pub fn create_project_action(&self, action: &ProjectAction) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO project_actions (id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &action.id,
+                &action.project_id,
+                &action.name,
+                &action.command,
+                action.action_type.as_str(),
+                action.sort_order,
+                if action.auto_commit { 1 } else { 0 },
+                action.created_at,
+                action.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get a project action by ID
+    pub fn get_project_action(&self, id: &str) -> Result<Option<ProjectAction>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at
+             FROM project_actions WHERE id = ?1",
+            params![id],
+            ProjectAction::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all actions for a project, ordered by sort_order
+    pub fn list_project_actions(&self, project_id: &str) -> Result<Vec<ProjectAction>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at
+             FROM project_actions WHERE project_id = ?1 ORDER BY sort_order ASC",
+        )?;
+        let actions = stmt
+            .query_map(params![project_id], ProjectAction::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(actions)
+    }
+
+    /// List actions for a project filtered by type
+    pub fn list_project_actions_by_type(
+        &self,
+        project_id: &str,
+        action_type: ActionType,
+    ) -> Result<Vec<ProjectAction>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at
+             FROM project_actions WHERE project_id = ?1 AND action_type = ?2 ORDER BY sort_order ASC",
+        )?;
+        let actions = stmt
+            .query_map(
+                params![project_id, action_type.as_str()],
+                ProjectAction::from_row,
+            )?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(actions)
+    }
+
+    /// Update a project action
+    pub fn update_project_action(&self, action: &ProjectAction) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE project_actions
+             SET name = ?1, command = ?2, action_type = ?3, sort_order = ?4, auto_commit = ?5, updated_at = ?6
+             WHERE id = ?7",
+            params![
+                &action.name,
+                &action.command,
+                action.action_type.as_str(),
+                action.sort_order,
+                if action.auto_commit { 1 } else { 0 },
+                now,
+                &action.id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a project action
+    pub fn delete_project_action(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM project_actions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Reorder project actions by updating their sort_order values
+    pub fn reorder_project_actions(&self, action_ids: &[String]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+
+        for (index, action_id) in action_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE project_actions SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+                params![index as i32, now_timestamp(), action_id],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 }
