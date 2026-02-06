@@ -46,7 +46,7 @@ pub fn create_worktree(
     // Ensure parent directory exists
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            GitError::CommandFailed(format!("Failed to create worktree directory: {}", e))
+            GitError::CommandFailed(format!("Failed to create worktree directory: {e}"))
         })?;
     }
 
@@ -114,8 +114,7 @@ pub fn remove_worktree(repo: &Path, worktree_path: &Path) -> Result<(), GitError
             {
                 std::fs::remove_dir_all(worktree_path).map_err(|io_err| {
                     GitError::CommandFailed(format!(
-                        "Failed to remove worktree directory: {}",
-                        io_err
+                        "Failed to remove worktree directory: {io_err}"
                     ))
                 })?;
                 // Prune any remaining stale references
@@ -211,7 +210,7 @@ pub struct CommitInfo {
 pub fn get_commits_since_base(worktree: &Path, base: &str) -> Result<Vec<CommitInfo>, GitError> {
     // Format: sha|short_sha|subject|author|timestamp
     let format = "--format=%H|%h|%s|%an|%ct";
-    let range = format!("{}..HEAD", base);
+    let range = format!("{base}..HEAD");
 
     let output = cli::run(worktree, &["log", format, &range])?;
 
@@ -242,7 +241,7 @@ pub fn branch_exists(repo: &Path, branch_name: &str) -> Result<bool, GitError> {
         &[
             "rev-parse",
             "--verify",
-            &format!("refs/heads/{}", branch_name),
+            &format!("refs/heads/{branch_name}"),
         ],
     );
     Ok(result.is_ok())
@@ -258,7 +257,7 @@ pub fn reset_to_commit(worktree: &Path, commit_sha: &str) -> Result<(), GitError
 /// Get the parent commit SHA of a given commit.
 /// Returns None if the commit has no parent (initial commit).
 pub fn get_parent_commit(worktree: &Path, commit_sha: &str) -> Result<Option<String>, GitError> {
-    let result = cli::run(worktree, &["rev-parse", &format!("{}^", commit_sha)]);
+    let result = cli::run(worktree, &["rev-parse", &format!("{commit_sha}^")]);
     match result {
         Ok(output) => Ok(Some(output.trim().to_string())),
         Err(_) => Ok(None), // No parent (initial commit or invalid)
@@ -283,8 +282,7 @@ pub fn create_worktree_from_pr(
     // Check if branch already exists locally
     if branch_exists(repo, &branch_name)? {
         return Err(GitError::CommandFailed(format!(
-            "Branch '{}' already exists locally",
-            branch_name
+            "Branch '{branch_name}' already exists locally"
         )));
     }
 
@@ -301,12 +299,12 @@ pub fn create_worktree_from_pr(
     // Ensure parent directory exists
     if let Some(parent) = worktree_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| {
-            GitError::CommandFailed(format!("Failed to create worktree directory: {}", e))
+            GitError::CommandFailed(format!("Failed to create worktree directory: {e}"))
         })?;
     }
 
     // Fetch the PR head ref
-    let pr_ref = format!("refs/pull/{}/head", pr_number);
+    let pr_ref = format!("refs/pull/{pr_number}/head");
     cli::run(repo, &["fetch", "origin", &pr_ref])?;
 
     // Get the SHA of the fetched PR head
@@ -333,7 +331,7 @@ pub fn create_worktree_from_pr(
     )?;
 
     // The base branch for diffs should be the PR's target (e.g., "origin/main")
-    let base_branch = format!("origin/{}", base_ref);
+    let base_branch = format!("origin/{base_ref}");
 
     Ok((worktree_path, branch_name, base_branch))
 }

@@ -97,7 +97,7 @@ impl SessionManager {
     ) -> Result<String, String> {
         // Find the agent
         let agent = if let Some(id) = agent_id {
-            client::find_acp_agent_by_id(id).ok_or_else(|| format!("Agent '{}' not found", id))?
+            client::find_acp_agent_by_id(id).ok_or_else(|| format!("Agent '{id}' not found"))?
         } else {
             client::find_acp_agent().ok_or_else(|| "No AI agent found".to_string())?
         };
@@ -120,7 +120,7 @@ impl SessionManager {
 
         self.store
             .create_session(&session)
-            .map_err(|e| format!("Failed to create session: {}", e))?;
+            .map_err(|e| format!("Failed to create session: {e}"))?;
 
         // Create live session
         let live_session = LiveSession {
@@ -134,7 +134,7 @@ impl SessionManager {
         let mut sessions = self.sessions.write().await;
         sessions.insert(session_id.clone(), Arc::new(RwLock::new(live_session)));
 
-        log::info!("Created session: {}", session_id);
+        log::info!("Created session: {session_id}");
         Ok(session_id)
     }
 
@@ -155,8 +155,8 @@ impl SessionManager {
         let session = self
             .store
             .get_session(session_id)
-            .map_err(|e| format!("Failed to load session: {}", e))?
-            .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+            .map_err(|e| format!("Failed to load session: {e}"))?
+            .ok_or_else(|| format!("Session '{session_id}' not found"))?;
 
         let agent = client::find_acp_agent_by_id(&session.agent_id)
             .or_else(client::find_acp_agent)
@@ -204,8 +204,8 @@ impl SessionManager {
         // Not live - check if it exists in store
         self.store
             .get_session(session_id)
-            .map_err(|e| format!("Failed to load session: {}", e))?
-            .ok_or_else(|| format!("Session '{}' not found", session_id))?;
+            .map_err(|e| format!("Failed to load session: {e}"))?
+            .ok_or_else(|| format!("Session '{session_id}' not found"))?;
 
         // Exists but not live = idle
         Ok(SessionStatus::Idle)
@@ -223,7 +223,7 @@ impl SessionManager {
     pub async fn close_live_session(&self, session_id: &str) -> Result<(), String> {
         let mut sessions = self.sessions.write().await;
         sessions.remove(session_id);
-        log::info!("Closed live session: {}", session_id);
+        log::info!("Closed live session: {session_id}");
         Ok(())
     }
 
@@ -254,7 +254,7 @@ impl SessionManager {
         // Store the user message
         self.store
             .add_message(session_id, MessageRole::User, &prompt)
-            .map_err(|e| format!("Failed to store message: {}", e))?;
+            .map_err(|e| format!("Failed to store message: {e}"))?;
 
         // Spawn background task to run the prompt
         let app_handle = self.app_handle.clone();
@@ -285,16 +285,16 @@ impl SessionManager {
 
                     // Persist the assistant response
                     if let Err(e) = persist_assistant_turn(&store, &session_id_owned, &acp_result) {
-                        log::error!("Failed to persist assistant turn: {}", e);
+                        log::error!("Failed to persist assistant turn: {e}");
                     }
 
                     // Auto-generate title from first user message if not set
                     if let Err(e) = maybe_set_title(&store, &session_id_owned, &prompt) {
-                        log::warn!("Failed to set session title: {}", e);
+                        log::warn!("Failed to set session title: {e}");
                     }
                 }
                 Err(e) => {
-                    log::error!("Session {} prompt failed: {}", session_id_owned, e);
+                    log::error!("Session {session_id_owned} prompt failed: {e}");
                     session.status = SessionStatus::Error { message: e };
                 }
             }

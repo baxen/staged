@@ -79,17 +79,17 @@ fn list_directory(path: String) -> Result<Vec<DirEntry>, String> {
     let dir = Path::new(&path);
 
     if !dir.exists() {
-        return Err(format!("Directory does not exist: {}", path));
+        return Err(format!("Directory does not exist: {path}"));
     }
 
     if !dir.is_dir() {
-        return Err(format!("Not a directory: {}", path));
+        return Err(format!("Not a directory: {path}"));
     }
 
     let mut dirs = Vec::new();
     let mut files = Vec::new();
 
-    let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {}", e))?;
+    let entries = std::fs::read_dir(dir).map_err(|e| format!("Failed to read directory: {e}"))?;
 
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().to_string();
@@ -191,7 +191,7 @@ fn search_directories(
     let query_lower = query.to_lowercase();
 
     if !dir.exists() || !dir.is_dir() {
-        return Err(format!("Invalid directory: {}", path));
+        return Err(format!("Invalid directory: {path}"));
     }
 
     let mut results = Vec::new();
@@ -758,9 +758,9 @@ fn parse_pr_description_response(response: &str) -> Result<GeneratedPrDescriptio
     }
 
     let parsed: PrDescriptionJson = serde_json::from_str(json_str).map_err(|e| {
-        log::error!("Failed to parse PR description response: {}", e);
-        log::error!("Response was:\n{}", response);
-        format!("Failed to parse AI response: {}", e)
+        log::error!("Failed to parse PR description response: {e}");
+        log::error!("Response was:\n{response}");
+        format!("Failed to parse AI response: {e}")
     })?;
 
     Ok(GeneratedPrDescription {
@@ -867,8 +867,7 @@ async fn send_agent_prompt(
     let agent = if let Some(provider_id) = provider {
         ai::find_acp_agent_by_id(&provider_id).ok_or_else(|| {
             format!(
-                "Provider '{}' not found. Run discover_acp_providers to see available providers.",
-                provider_id
+                "Provider '{provider_id}' not found. Run discover_acp_providers to see available providers."
             )
         })?
     } else {
@@ -907,8 +906,7 @@ async fn send_agent_prompt_streaming(
     let agent = if let Some(provider_id) = provider {
         ai::find_acp_agent_by_id(&provider_id).ok_or_else(|| {
             format!(
-                "Provider '{}' not found. Run discover_acp_providers to see available providers.",
-                provider_id
+                "Provider '{provider_id}' not found. Run discover_acp_providers to see available providers."
             )
         })?
     } else {
@@ -1451,7 +1449,7 @@ async fn run_artifact_generation(
             let _ = store.update_artifact_status(
                 &artifact.id,
                 ArtifactStatus::Error,
-                Some(&format!("Failed to get working directory: {}", e)),
+                Some(&format!("Failed to get working directory: {e}")),
                 None,
                 None,
             );
@@ -1473,7 +1471,7 @@ async fn run_artifact_generation(
     };
 
     if let Err(e) = store.create_session(&session) {
-        log::error!("Failed to create session for artifact: {}", e);
+        log::error!("Failed to create session for artifact: {e}");
         // Continue without session - artifact will still work, just no session view
     } else {
         // Link session to artifact
@@ -1542,7 +1540,7 @@ async fn run_artifact_generation(
             let _ = store.update_artifact_status(
                 &artifact.id,
                 ArtifactStatus::Error,
-                Some(&format!("AI generation failed: {}", e)),
+                Some(&format!("AI generation failed: {e}")),
                 None,
                 None,
             );
@@ -1650,7 +1648,7 @@ async fn create_branch(
                 // Provide user-friendly error for common case
                 let msg = e.to_string();
                 if msg.contains("already exists") {
-                    format!("Branch '{}' already exists", branch_name)
+                    format!("Branch '{branch_name}' already exists")
                 } else {
                     msg
                 }
@@ -1674,7 +1672,7 @@ async fn create_branch(
         Ok(branch)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| format!("Task failed: {e}"))?
 }
 
 /// Create a new branch from an existing GitHub PR.
@@ -1701,7 +1699,7 @@ async fn create_branch_from_pr(
             git::create_worktree_from_pr(repo, pr_number, &head_ref, &base_ref).map_err(|e| {
                 let msg = e.to_string();
                 if msg.contains("already exists") {
-                    format!("Branch '{}' already exists locally", head_ref)
+                    format!("Branch '{head_ref}' already exists locally")
                 } else {
                     msg
                 }
@@ -1725,7 +1723,7 @@ async fn create_branch_from_pr(
         Ok(branch)
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| format!("Task failed: {e}"))?
 }
 
 /// List git branches (local and remote) for base branch selection.
@@ -1801,7 +1799,7 @@ async fn delete_branch(state: State<'_, Arc<Store>>, branch_id: String) -> Resul
         let branch = store
             .get_branch(&branch_id)
             .map_err(|e| e.to_string())?
-            .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+            .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
         // Remove the worktree (handles both existing and already-deleted directories)
         let repo = Path::new(&branch.repo_path);
@@ -1814,7 +1812,7 @@ async fn delete_branch(state: State<'_, Arc<Store>>, branch_id: String) -> Resul
         Ok(())
     })
     .await
-    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| format!("Task failed: {e}"))?
 }
 
 /// Get commits for a branch since it diverged from base.
@@ -1826,7 +1824,7 @@ fn get_branch_commits(
     let branch = state
         .get_branch(&branch_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+        .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
     let worktree = Path::new(&branch.worktree_path);
     let commits =
@@ -1919,7 +1917,7 @@ async fn start_branch_session(
     let branch = state
         .get_branch(&branch_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+        .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
     // Check if there's already a running session
     if let Some(running) = state
@@ -1941,14 +1939,14 @@ async fn start_branch_session(
     let ai_session_id = session_manager
         .create_session(working_dir, agent_id.as_deref())
         .await
-        .map_err(|e| format!("Failed to create AI session: {}", e))?;
+        .map_err(|e| format!("Failed to create AI session: {e}"))?;
 
     // Create the branch session record with the AI session ID
     // Store the user's original prompt for display purposes
     let branch_session = BranchSession::new_running(&branch_id, &ai_session_id, &user_prompt);
     state
         .create_branch_session(&branch_session)
-        .map_err(|e| format!("Failed to create branch session: {}", e))?;
+        .map_err(|e| format!("Failed to create branch session: {e}"))?;
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
@@ -1957,7 +1955,7 @@ async fn start_branch_session(
     {
         // Clean up on failure
         let _ = state.delete_branch_session(&branch_session.id);
-        return Err(format!("Failed to send prompt: {}", e));
+        return Err(format!("Failed to send prompt: {e}"));
     }
 
     Ok(StartBranchSessionResponse {
@@ -1980,7 +1978,7 @@ fn build_session_prompt(
     let context_block = if context.is_empty() {
         String::new()
     } else {
-        format!("{}\n\n", context)
+        format!("{context}\n\n")
     };
 
     Ok(format!(
@@ -2008,7 +2006,7 @@ fn build_note_prompt(
     let context_block = if context.is_empty() {
         String::new()
     } else {
-        format!("{}\n\n", context)
+        format!("{context}\n\n")
     };
 
     let desc = if description.is_empty() {
@@ -2137,7 +2135,7 @@ fn write_notes_to_temp_internal(
     }
 
     std::fs::create_dir_all(&temp_dir)
-        .map_err(|e| format!("Failed to create temp directory: {}", e))?;
+        .map_err(|e| format!("Failed to create temp directory: {e}"))?;
 
     let mut results = Vec::new();
 
@@ -2162,7 +2160,7 @@ fn write_notes_to_temp_internal(
         let content = format!("# {}\n\n{}\n", note.title, note.content);
 
         std::fs::write(&file_path, &content)
-            .map_err(|e| format!("Failed to write note file: {}", e))?;
+            .map_err(|e| format!("Failed to write note file: {e}"))?;
 
         results.push(NoteFilePath {
             id: note.id.clone(),
@@ -2222,7 +2220,7 @@ fn delete_branch_session_and_commit(
     let session = state
         .get_branch_session(&branch_session_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Session '{}' not found", branch_session_id))?;
+        .ok_or_else(|| format!("Session '{branch_session_id}' not found"))?;
 
     let commit_sha = session
         .commit_sha
@@ -2303,7 +2301,7 @@ async fn restart_branch_session(
     let old_session = state
         .get_branch_session(&branch_session_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Session '{}' not found", branch_session_id))?;
+        .ok_or_else(|| format!("Session '{branch_session_id}' not found"))?;
 
     let branch_id = old_session.branch_id.clone();
     let user_prompt = old_session.prompt.clone();
@@ -2317,20 +2315,20 @@ async fn restart_branch_session(
     let branch = state
         .get_branch(&branch_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+        .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
     // Create a new AI session
     let worktree_path = std::path::PathBuf::from(&branch.worktree_path);
     let ai_session_id = session_manager
         .create_session(worktree_path, None)
         .await
-        .map_err(|e| format!("Failed to create AI session: {}", e))?;
+        .map_err(|e| format!("Failed to create AI session: {e}"))?;
 
     // Create the new branch session record
     let branch_session = BranchSession::new_running(&branch_id, &ai_session_id, &user_prompt);
     state
         .create_branch_session(&branch_session)
-        .map_err(|e| format!("Failed to create branch session: {}", e))?;
+        .map_err(|e| format!("Failed to create branch session: {e}"))?;
 
     // Send the prompt to the AI
     if let Err(e) = session_manager
@@ -2339,7 +2337,7 @@ async fn restart_branch_session(
     {
         // Clean up on failure
         let _ = state.delete_branch_session(&branch_session.id);
-        return Err(format!("Failed to send prompt: {}", e));
+        return Err(format!("Failed to send prompt: {e}"));
     }
 
     Ok(StartBranchSessionResponse {
@@ -2369,7 +2367,7 @@ fn recover_orphaned_session(
     let branch = state
         .get_branch(&branch_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+        .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
     // Get HEAD commit in the worktree
     let worktree_path = std::path::Path::new(&branch.worktree_path);
@@ -2419,7 +2417,7 @@ fn get_branch_head(state: State<'_, Arc<Store>>, branch_id: String) -> Result<St
     let branch = state
         .get_branch(&branch_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+        .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
     let worktree = Path::new(&branch.worktree_path);
     git::get_head_sha(worktree).map_err(|e| e.to_string())
@@ -2461,7 +2459,7 @@ async fn start_branch_note(
     let branch = state
         .get_branch(&branch_id)
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Branch '{}' not found", branch_id))?;
+        .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
     // Check if there's already a generating note
     if let Some(generating) = state
@@ -2482,7 +2480,7 @@ async fn start_branch_note(
     let ai_session_id = session_manager
         .create_session(working_dir, agent_id.as_deref())
         .await
-        .map_err(|e| format!("Failed to create AI session: {}", e))?;
+        .map_err(|e| format!("Failed to create AI session: {e}"))?;
 
     // Create the branch note record (store the user's description as the prompt for display)
     let user_prompt = if description.is_empty() {
@@ -2493,7 +2491,7 @@ async fn start_branch_note(
     let branch_note = BranchNote::new_generating(&branch_id, &ai_session_id, &title, &user_prompt);
     state
         .create_branch_note(&branch_note)
-        .map_err(|e| format!("Failed to create branch note: {}", e))?;
+        .map_err(|e| format!("Failed to create branch note: {e}"))?;
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
@@ -2502,7 +2500,7 @@ async fn start_branch_note(
     {
         // Clean up on failure
         let _ = state.delete_branch_note(&branch_note.id);
-        return Err(format!("Failed to send prompt: {}", e));
+        return Err(format!("Failed to send prompt: {e}"));
     }
 
     Ok(StartBranchNoteResponse {
@@ -2693,11 +2691,8 @@ fn create_git_project(
             .unwrap_or(&repo_path);
 
         return Err(match &subpath {
-            Some(sp) => format!(
-                "A project already exists for {} with subpath '{}'",
-                repo_name, sp
-            ),
-            None => format!("A project already exists for {} with no subpath", repo_name),
+            Some(sp) => format!("A project already exists for {repo_name} with subpath '{sp}'"),
+            None => format!("A project already exists for {repo_name} with no subpath"),
         });
     }
 
@@ -2809,7 +2804,7 @@ fn get_themes_dir() -> Result<String, String> {
 #[tauri::command]
 fn open_themes_dir() -> Result<(), String> {
     let dir = themes::ensure_themes_dir()?;
-    open::that(&dir).map_err(|e| format!("Failed to open themes directory: {}", e))
+    open::that(&dir).map_err(|e| format!("Failed to open themes directory: {e}"))
 }
 
 /// Validate a theme JSON string without installing.
@@ -2835,7 +2830,7 @@ fn read_json_file(path: String) -> Result<String, String> {
         return Err("Only .json files are allowed".to_string());
     }
 
-    std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {}", e))
+    std::fs::read_to_string(path).map_err(|e| format!("Failed to read file: {e}"))
 }
 
 // =============================================================================
@@ -2956,7 +2951,7 @@ fn get_available_openers() -> Vec<OpenerApp> {
 fn open_in_app(path: String, app_id: String) -> Result<(), String> {
     let dir = Path::new(&path);
     if !dir.exists() {
-        return Err(format!("Directory does not exist: {}", path));
+        return Err(format!("Directory does not exist: {path}"));
     }
 
     #[cfg(target_os = "macos")]
@@ -2965,12 +2960,12 @@ fn open_in_app(path: String, app_id: String) -> Result<(), String> {
             .iter()
             .find(|(id, _, _)| *id == app_id)
             .map(|(_, _, bid)| *bid)
-            .ok_or_else(|| format!("Unknown app: {}", app_id))?;
+            .ok_or_else(|| format!("Unknown app: {app_id}"))?;
 
         let output = std::process::Command::new("open")
             .args(["-b", bundle_id, &path])
             .output()
-            .map_err(|e| format!("Failed to launch app: {}", e))?;
+            .map_err(|e| format!("Failed to launch app: {e}"))?;
 
         if output.status.success() {
             Ok(())
@@ -3024,7 +3019,7 @@ fn install_cli_to(install_path: &Path, use_admin: bool) -> Result<String, String
     // Write script to a temp file first
     let temp_path = std::env::temp_dir().join("staged-cli-install");
     std::fs::write(&temp_path, cli_script)
-        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+        .map_err(|e| format!("Failed to write temp file: {e}"))?;
 
     if use_admin {
         #[cfg(target_os = "macos")]
@@ -3040,7 +3035,7 @@ fn install_cli_to(install_path: &Path, use_admin: bool) -> Result<String, String
                 .arg("-e")
                 .arg(&script)
                 .output()
-                .map_err(|e| format!("Failed to run installer: {}", e))?;
+                .map_err(|e| format!("Failed to run installer: {e}"))?;
 
             let _ = std::fs::remove_file(&temp_path);
 
@@ -3051,7 +3046,7 @@ fn install_cli_to(install_path: &Path, use_admin: bool) -> Result<String, String
                 if stderr.contains("User canceled") || stderr.contains("(-128)") {
                     Err("Installation cancelled".to_string())
                 } else {
-                    Err(format!("Installation failed: {}", stderr))
+                    Err(format!("Installation failed: {stderr}"))
                 }
             }
         }
@@ -3067,78 +3062,21 @@ fn install_cli_to(install_path: &Path, use_admin: bool) -> Result<String, String
     } else {
         // Non-admin install: direct copy (for testing or user-writable paths)
         std::fs::copy(&temp_path, install_path)
-            .map_err(|e| format!("Failed to copy CLI script: {}", e))?;
+            .map_err(|e| format!("Failed to copy CLI script: {e}"))?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             let mut perms = std::fs::metadata(install_path)
-                .map_err(|e| format!("Failed to get permissions: {}", e))?
+                .map_err(|e| format!("Failed to get permissions: {e}"))?
                 .permissions();
             perms.set_mode(0o755);
             std::fs::set_permissions(install_path, perms)
-                .map_err(|e| format!("Failed to set permissions: {}", e))?;
+                .map_err(|e| format!("Failed to set permissions: {e}"))?;
         }
 
         let _ = std::fs::remove_file(&temp_path);
         Ok(install_path.display().to_string())
-    }
-}
-
-#[cfg(test)]
-mod install_cli_tests {
-    use super::*;
-    use std::fs;
-    use tempfile::tempdir;
-
-    #[test]
-    fn test_install_cli_writes_executable_script() {
-        let temp_dir = tempdir().unwrap();
-        let install_path = temp_dir.path().join("staged");
-
-        let result = install_cli_to(&install_path, false);
-        assert!(result.is_ok(), "install_cli_to failed: {:?}", result);
-        assert!(install_path.exists(), "CLI script was not created");
-
-        let content = fs::read_to_string(&install_path).unwrap();
-        assert!(content.contains("#!/bin/bash"), "Script missing shebang");
-        assert!(
-            content.contains("staged.app"),
-            "Script missing app reference"
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_install_cli_sets_executable_permission() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let temp_dir = tempdir().unwrap();
-        let install_path = temp_dir.path().join("staged");
-
-        install_cli_to(&install_path, false).unwrap();
-
-        let perms = fs::metadata(&install_path).unwrap().permissions();
-        let mode = perms.mode();
-        assert!(mode & 0o111 != 0, "Script is not executable: {:o}", mode);
-    }
-
-    #[test]
-    fn test_install_cli_returns_install_path() {
-        let temp_dir = tempdir().unwrap();
-        let install_path = temp_dir.path().join("staged");
-
-        let result = install_cli_to(&install_path, false).unwrap();
-        assert_eq!(result, install_path.display().to_string());
-    }
-
-    #[test]
-    fn test_install_cli_fails_on_invalid_path() {
-        let install_path = Path::new("/nonexistent/directory/staged");
-
-        let result = install_cli_to(install_path, false);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to copy"));
     }
 }
 
@@ -3279,10 +3217,10 @@ pub fn run() {
             let app_data_dir = app
                 .path()
                 .app_data_dir()
-                .map_err(|e| format!("Cannot get app data dir: {}", e))?;
+                .map_err(|e| format!("Cannot get app data dir: {e}"))?;
             let db_path = app_data_dir.join("data.db");
             let store =
-                Arc::new(Store::open(db_path).map_err(|e| format!("Failed to open store: {}", e))?);
+                Arc::new(Store::open(db_path).map_err(|e| format!("Failed to open store: {e}"))?);
             app.manage(store.clone());
 
             // Initialize the session manager
@@ -3447,4 +3385,61 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod install_cli_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_install_cli_writes_executable_script() {
+        let temp_dir = tempdir().unwrap();
+        let install_path = temp_dir.path().join("staged");
+
+        let result = install_cli_to(&install_path, false);
+        assert!(result.is_ok(), "install_cli_to failed: {result:?}");
+        assert!(install_path.exists(), "CLI script was not created");
+
+        let content = fs::read_to_string(&install_path).unwrap();
+        assert!(content.contains("#!/bin/bash"), "Script missing shebang");
+        assert!(
+            content.contains("staged.app"),
+            "Script missing app reference"
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn test_install_cli_sets_executable_permission() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp_dir = tempdir().unwrap();
+        let install_path = temp_dir.path().join("staged");
+
+        install_cli_to(&install_path, false).unwrap();
+
+        let perms = fs::metadata(&install_path).unwrap().permissions();
+        let mode = perms.mode();
+        assert!(mode & 0o111 != 0, "Script is not executable: {mode:o}");
+    }
+
+    #[test]
+    fn test_install_cli_returns_install_path() {
+        let temp_dir = tempdir().unwrap();
+        let install_path = temp_dir.path().join("staged");
+
+        let result = install_cli_to(&install_path, false).unwrap();
+        assert_eq!(result, install_path.display().to_string());
+    }
+
+    #[test]
+    fn test_install_cli_fails_on_invalid_path() {
+        let install_path = Path::new("/nonexistent/directory/staged");
+
+        let result = install_cli_to(install_path, false);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to copy"));
+    }
 }

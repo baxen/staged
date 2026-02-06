@@ -158,7 +158,7 @@ pub fn init_store(app_handle: &AppHandle) -> Result<()> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| ReviewError::new(format!("Cannot get app data dir: {}", e)))?;
+        .map_err(|e| ReviewError::new(format!("Cannot get app data dir: {e}")))?;
 
     let db_path = app_data_dir.join("staged.db");
 
@@ -166,7 +166,7 @@ pub fn init_store(app_handle: &AppHandle) -> Result<()> {
     let old_db_path = app_data_dir.join("reviews.db");
     if old_db_path.exists() && !db_path.exists() {
         if let Err(e) = std::fs::rename(&old_db_path, &db_path) {
-            log::warn!("Failed to migrate reviews.db to staged.db: {}", e);
+            log::warn!("Failed to migrate reviews.db to staged.db: {e}");
         }
     }
 
@@ -204,7 +204,7 @@ impl ReviewStore {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| ReviewError(format!("Cannot create directory: {}", e)))?;
+                .map_err(|e| ReviewError(format!("Cannot create directory: {e}")))?;
         }
 
         let conn = Connection::open(&db_path)?;
@@ -305,17 +305,14 @@ impl ReviewStore {
         column_type: &str,
     ) -> Result<()> {
         // Check if column exists by querying table info
-        let mut stmt = conn.prepare(&format!("PRAGMA table_info({})", table))?;
+        let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
         let columns: Vec<String> = stmt
             .query_map([], |row| row.get::<_, String>(1))?
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
         if !columns.contains(&column.to_string()) {
             conn.execute(
-                &format!(
-                    "ALTER TABLE {} ADD COLUMN {} {}",
-                    table, column, column_type
-                ),
+                &format!("ALTER TABLE {table} ADD COLUMN {column} {column_type}"),
                 [],
             )?;
         }
@@ -571,7 +568,7 @@ pub fn export_markdown(review: &Review) -> String {
     all_files.dedup();
 
     for file in all_files {
-        md.push_str(&format!("## {}\n\n", file));
+        md.push_str(&format!("## {file}\n\n"));
 
         if let Some(comments) = comments_by_file.get(file) {
             for comment in comments {

@@ -25,7 +25,14 @@
   let { branch, onClose, onSessionStarted, initialPrompt }: Props = $props();
 
   // State
-  let prompt = $state(initialPrompt || '');
+  let prompt = $state('');
+
+  // Sync initialPrompt to prompt when it changes
+  $effect(() => {
+    if (initialPrompt) {
+      prompt = initialPrompt;
+    }
+  });
   let starting = $state(false);
   let error = $state<string | null>(null);
   let selectedProvider = $state<AcpProvider>((preferences.aiAgent as AcpProvider) || 'goose');

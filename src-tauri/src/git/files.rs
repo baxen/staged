@@ -136,18 +136,17 @@ pub fn get_file_at_ref(repo: &Path, ref_name: &str, path: &str) -> Result<File, 
         let full_path = repo.join(path);
 
         if !full_path.exists() {
-            return Err(GitError::CommandFailed(format!("File not found: {}", path)));
+            return Err(GitError::CommandFailed(format!("File not found: {path}")));
         }
 
         if full_path.is_dir() {
             return Err(GitError::CommandFailed(format!(
-                "Path is a directory: {}",
-                path
+                "Path is a directory: {path}"
             )));
         }
 
         let bytes = std::fs::read(&full_path)
-            .map_err(|e| GitError::CommandFailed(format!("Cannot read file: {}", e)))?;
+            .map_err(|e| GitError::CommandFailed(format!("Cannot read file: {e}")))?;
 
         let content = if is_binary(&bytes) {
             FileContent::Binary
@@ -162,10 +161,10 @@ pub fn get_file_at_ref(repo: &Path, ref_name: &str, path: &str) -> Result<File, 
         })
     } else {
         // Read from git tree: git show <ref>:<path>
-        let spec = format!("{}:{}", ref_name, path);
+        let spec = format!("{ref_name}:{path}");
         let output = cli::run(repo, &["show", &spec]).map_err(|e| match e {
             GitError::CommandFailed(msg) if msg.contains("does not exist") => {
-                GitError::CommandFailed(format!("File not found: {}", path))
+                GitError::CommandFailed(format!("File not found: {path}"))
             }
             other => other,
         })?;

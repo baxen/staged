@@ -47,7 +47,7 @@ fn format_with_line_numbers(content: &str) -> String {
     content
         .lines()
         .enumerate()
-        .map(|(i, line)| format!("{:4} | {}", i, line))
+        .map(|(i, line)| format!("{i:4} | {line}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -113,10 +113,7 @@ pub fn build_prompt_with_strategy_for_provider(
     }
 
     // Tier 2: diff only for all files
-    log::info!(
-        "Changeset too large for full context ({} lines), using diff-only mode",
-        tier1_lines
-    );
+    log::info!("Changeset too large for full context ({tier1_lines} lines), using diff-only mode");
     let prompt = build_tier2_prompt(files);
 
     // Note: For Codex, byte-size validation for Tier 2 happens in runner.rs so
@@ -311,7 +308,7 @@ pub fn build_unified_changeset_prompt(files: &[(&str, &str, &str)]) -> String {
     let mut file_sections = String::new();
 
     for (path, before, after) in files {
-        file_sections.push_str(&format!("\n## File: {}\n\n", path));
+        file_sections.push_str(&format!("\n## File: {path}\n\n"));
 
         if before.is_empty() {
             file_sections.push_str("### BEFORE:\n(new file - no previous content)\n\n");
@@ -384,7 +381,7 @@ mod tests {
     #[test]
     fn test_build_prompt_large_file_excluded() {
         let large_content = (0..1500)
-            .map(|i| format!("line {}", i))
+            .map(|i| format!("line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let files = vec![FileAnalysisInput {
@@ -409,11 +406,11 @@ mod tests {
         let files: Vec<FileAnalysisInput> = (0..50)
             .map(|i| {
                 let content = (0..300)
-                    .map(|j| format!("line {} in file {}", j, i))
+                    .map(|j| format!("line {j} in file {i}"))
                     .collect::<Vec<_>>()
                     .join("\n");
                 FileAnalysisInput {
-                    path: format!("src/file{}.rs", i),
+                    path: format!("src/file{i}.rs"),
                     diff: format!(
                         "@@ -1,100 +1,100 @@\n{}",
                         (0..100).map(|_| "+line").collect::<Vec<_>>().join("\n")

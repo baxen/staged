@@ -197,7 +197,7 @@ impl GitProject {
     pub fn effective_cwd(&self, worktree_path: &str) -> String {
         match &self.subpath {
             Some(subpath) if !subpath.is_empty() => {
-                format!("{}/{}", worktree_path, subpath)
+                format!("{worktree_path}/{subpath}")
             }
             _ => worktree_path.to_string(),
         }
@@ -612,7 +612,7 @@ impl Store {
         // Ensure parent directory exists
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)
-                .map_err(|e| StoreError::new(format!("Cannot create directory: {}", e)))?;
+                .map_err(|e| StoreError::new(format!("Cannot create directory: {e}")))?;
         }
 
         let conn = Connection::open(&db_path)?;
@@ -1908,7 +1908,7 @@ pub fn generate_session_id() -> String {
     let timestamp = now_timestamp();
     static COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let count = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    format!("session_{:x}_{:x}", timestamp, count)
+    format!("session_{timestamp:x}_{count:x}")
 }
 
 // =============================================================================
@@ -1927,7 +1927,7 @@ pub fn init_store(app_handle: &AppHandle) -> Result<()> {
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
-        .map_err(|e| StoreError::new(format!("Cannot get app data dir: {}", e)))?;
+        .map_err(|e| StoreError::new(format!("Cannot get app data dir: {e}")))?;
 
     let db_path = app_data_dir.join("data.db");
 

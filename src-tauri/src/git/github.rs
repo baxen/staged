@@ -140,7 +140,7 @@ fn run_gh(repo: &Path, args: &[&str]) -> Result<String, GitError> {
         .current_dir(repo)
         .args(args)
         .output()
-        .map_err(|e| GitError::CommandFailed(format!("Failed to run gh: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to run gh: {e}")))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -176,7 +176,7 @@ pub fn check_github_auth() -> GitHubAuthStatus {
         Err(e) => {
             return GitHubAuthStatus {
                 authenticated: false,
-                setup_hint: Some(format!("Failed to run gh: {}", e)),
+                setup_hint: Some(format!("Failed to run gh: {e}")),
             }
         }
     };
@@ -274,7 +274,7 @@ pub fn search_pull_requests(repo: &Path, query: &str) -> Result<Vec<PullRequest>
             "list",
             "--state=open",
             "--limit=50",
-            &format!("--search={}", query),
+            &format!("--search={query}"),
             "--json=number,title,author,baseRefName,headRefName,isDraft,updatedAt",
         ],
     )?;
@@ -296,7 +296,7 @@ pub fn fetch_pr(repo: &Path, base_ref: &str, pr_number: u64) -> Result<DiffSpec,
     use super::cli;
 
     // Fetch the PR head ref
-    let pr_ref = format!("refs/pull/{}/head", pr_number);
+    let pr_ref = format!("refs/pull/{pr_number}/head");
     cli::run(repo, &["fetch", "origin", &pr_ref])?;
 
     // Get the SHA of the fetched PR head IMMEDIATELY (before next fetch overwrites FETCH_HEAD)
@@ -305,7 +305,7 @@ pub fn fetch_pr(repo: &Path, base_ref: &str, pr_number: u64) -> Result<DiffSpec,
         .to_string();
 
     // Fetch the base branch
-    let base_remote_ref = format!("origin/{}", base_ref);
+    let base_remote_ref = format!("origin/{base_ref}");
     cli::run(repo, &["fetch", "origin", base_ref])?;
 
     // Compute merge-base between base and PR head
@@ -343,7 +343,7 @@ fn get_github_token() -> Result<String, GitError> {
     let output = Command::new(&gh_path)
         .args(["auth", "token"])
         .output()
-        .map_err(|e| GitError::CommandFailed(format!("Failed to run gh: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to run gh: {e}")))?;
 
     if output.status.success() {
         let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -402,8 +402,7 @@ fn get_github_repo(repo: &Path) -> Result<(String, String), GitError> {
     }
 
     Err(GitError::CommandFailed(format!(
-        "Could not parse GitHub repo from origin URL: {}",
-        url
+        "Could not parse GitHub repo from origin URL: {url}"
     )))
 }
 
@@ -489,9 +488,9 @@ fn convert_comment(
         })
     } else {
         let line_info = if comment.span.end > comment.span.start + 1 {
-            format!("Lines {}-{}", start_line, line)
+            format!("Lines {start_line}-{line}")
         } else {
-            format!("Line {}", line)
+            format!("Line {line}")
         };
 
         Err(OutOfDiffComment {
@@ -511,22 +510,19 @@ async fn fetch_pr_diff_lines(
     repo: &str,
     pr_number: u64,
 ) -> Result<std::collections::HashMap<String, std::collections::HashSet<u32>>, GitError> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls/{}/files",
-        owner, repo, pr_number
-    );
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/files");
 
-    log::info!("Fetching PR files from: {}", url);
+    log::info!("Fetching PR files from: {url}");
 
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "staged-app")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to fetch PR files: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to fetch PR files: {e}")))?;
 
     if !response.status().is_success() {
         return Err(GitError::CommandFailed(format!(
@@ -547,7 +543,7 @@ async fn fetch_pr_diff_lines(
     let files: Vec<PullRequestFile> = response
         .json()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to parse PR files: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse PR files: {e}")))?;
 
     let mut result = std::collections::HashMap::new();
 
@@ -589,13 +585,13 @@ async fn fetch_pr_diff_lines(
 async fn get_current_user(client: &reqwest::Client, token: &str) -> Result<String, GitError> {
     let response = client
         .get("https://api.github.com/user")
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "staged-app")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to get current user: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to get current user: {e}")))?;
 
     if !response.status().is_success() {
         return Err(GitError::CommandFailed(format!(
@@ -607,7 +603,7 @@ async fn get_current_user(client: &reqwest::Client, token: &str) -> Result<Strin
     let user: GhUser = response
         .json()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to parse user response: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse user response: {e}")))?;
 
     Ok(user.login)
 }
@@ -621,20 +617,17 @@ async fn find_pending_review(
     pr_number: u64,
     username: &str,
 ) -> Result<Option<GitHubReview>, GitError> {
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls/{}/reviews",
-        owner, repo, pr_number
-    );
+    let url = format!("https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews");
 
     let response = client
         .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "staged-app")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to list reviews: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to list reviews: {e}")))?;
 
     if !response.status().is_success() {
         return Err(GitError::CommandFailed(format!(
@@ -646,7 +639,7 @@ async fn find_pending_review(
     let reviews: Vec<GitHubReview> = response
         .json()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to parse reviews: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse reviews: {e}")))?;
 
     Ok(reviews
         .into_iter()
@@ -663,19 +656,18 @@ async fn delete_pending_review(
     review_id: u64,
 ) -> Result<(), GitError> {
     let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls/{}/reviews/{}",
-        owner, repo, pr_number, review_id
+        "https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/reviews/{review_id}"
     );
 
     let response = client
         .delete(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "staged-app")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to delete review: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to delete review: {e}")))?;
 
     if !response.status().is_success() {
         return Err(GitError::CommandFailed(format!(
@@ -756,10 +748,7 @@ pub async fn sync_review_to_github(
     };
 
     // Create new pending review
-    let url = format!(
-        "https://api.github.com/repos/{}/{}/pulls/{}/reviews",
-        owner, repo_name, pr_number
-    );
+    let url = format!("https://api.github.com/repos/{owner}/{repo_name}/pulls/{pr_number}/reviews");
 
     let request = CreateReviewRequest {
         body: review_body,
@@ -769,28 +758,27 @@ pub async fn sync_review_to_github(
 
     let response = client
         .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("Accept", "application/vnd.github+json")
         .header("User-Agent", "staged-app")
         .header("X-GitHub-Api-Version", "2022-11-28")
         .json(&request)
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to create review: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to create review: {e}")))?;
 
     let status = response.status();
     if !status.is_success() {
         let error_body = response.text().await.unwrap_or_default();
         return Err(GitError::CommandFailed(format!(
-            "Failed to create review: {} - {}",
-            status, error_body
+            "Failed to create review: {status} - {error_body}"
         )));
     }
 
     let review: CreateReviewResponse = response
         .json()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to parse review response: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse review response: {e}")))?;
 
     Ok(GitHubSyncResult {
         review_url: review.html_url,
@@ -941,7 +929,7 @@ pub fn create_pull_request(
         .next()
         .and_then(|s| s.parse::<u64>().ok())
         .ok_or_else(|| {
-            GitError::CommandFailed(format!("Could not parse PR number from URL: {}", url))
+            GitError::CommandFailed(format!("Could not parse PR number from URL: {url}"))
         })?;
 
     Ok(CreatePrResult { number, url })
@@ -977,13 +965,12 @@ pub async fn update_pull_request(
     // First, get the PR's node ID
     let pr_query = format!(
         r#"query {{
-            repository(owner: "{}", name: "{}") {{
-                pullRequest(number: {}) {{
+            repository(owner: "{owner}", name: "{repo_name}") {{
+                pullRequest(number: {pr_number}) {{
                     id
                 }}
             }}
-        }}"#,
-        owner, repo_name, pr_number
+        }}"#
     );
 
     #[derive(Deserialize)]
@@ -1009,25 +996,24 @@ pub async fn update_pull_request(
 
     let response = client
         .post("https://api.github.com/graphql")
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("User-Agent", "staged-app")
         .json(&serde_json::json!({ "query": pr_query }))
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to query PR: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to query PR: {e}")))?;
 
     if !response.status().is_success() {
         let error_body = response.text().await.unwrap_or_default();
         return Err(GitError::CommandFailed(format!(
-            "Failed to get PR node ID: {}",
-            error_body
+            "Failed to get PR node ID: {error_body}"
         )));
     }
 
     let pr_id_response: PrIdResponse = response
         .json()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to parse PR ID: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse PR ID: {e}")))?;
 
     let pr_id = pr_id_response.data.repository.pull_request.id;
 
@@ -1049,18 +1035,17 @@ pub async fn update_pull_request(
 
     let response = client
         .post("https://api.github.com/graphql")
-        .header("Authorization", format!("Bearer {}", token))
+        .header("Authorization", format!("Bearer {token}"))
         .header("User-Agent", "staged-app")
         .json(&serde_json::json!({ "query": mutation }))
         .send()
         .await
-        .map_err(|e| GitError::CommandFailed(format!("Failed to update PR: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Failed to update PR: {e}")))?;
 
     if !response.status().is_success() {
         let error_body = response.text().await.unwrap_or_default();
         return Err(GitError::CommandFailed(format!(
-            "Failed to update PR: {}",
-            error_body
+            "Failed to update PR: {error_body}"
         )));
     }
 

@@ -102,19 +102,19 @@ pub fn read_theme_file(path: &str) -> Result<String, String> {
         .map_err(|_| "Themes directory does not exist")?;
     let canonical_requested = requested
         .canonicalize()
-        .map_err(|e| format!("Cannot access theme file: {}", e))?;
+        .map_err(|e| format!("Cannot access theme file: {e}"))?;
 
     if !canonical_requested.starts_with(&canonical_themes) {
         return Err("Access denied: path outside themes directory".to_string());
     }
 
-    fs::read_to_string(&canonical_requested).map_err(|e| format!("Cannot read theme: {}", e))
+    fs::read_to_string(&canonical_requested).map_err(|e| format!("Cannot read theme: {e}"))
 }
 
 /// Ensure the themes directory exists.
 pub fn ensure_themes_dir() -> Result<PathBuf, String> {
     let dir = themes_dir().ok_or("Cannot determine config directory")?;
-    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create themes directory: {}", e))?;
+    fs::create_dir_all(&dir).map_err(|e| format!("Cannot create themes directory: {e}"))?;
     Ok(dir)
 }
 
@@ -206,13 +206,13 @@ pub fn install_theme(content: &str, filename: &str) -> Result<CustomTheme, Strin
     let final_name = if safe_name.to_lowercase().ends_with(".json") {
         safe_name
     } else {
-        format!("{}.json", safe_name)
+        format!("{safe_name}.json")
     };
 
     let dest_path = dir.join(&final_name);
 
     // Write the file
-    fs::write(&dest_path, content).map_err(|e| format!("Failed to write theme: {}", e))?;
+    fs::write(&dest_path, content).map_err(|e| format!("Failed to write theme: {e}"))?;
 
     // Load and return the metadata
     load_theme_metadata(&dest_path).ok_or_else(|| "Failed to load installed theme".to_string())

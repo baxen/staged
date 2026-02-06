@@ -91,7 +91,7 @@ const COMMON_PATHS: &[&str] = &[
 
 /// Find goose CLI using login shell (to get user's PATH)
 fn find_via_login_shell(cmd: &str) -> Option<PathBuf> {
-    let which_cmd = format!("which {}", cmd);
+    let which_cmd = format!("which {cmd}");
 
     // Try zsh first (default on macOS)
     if let Ok(output) = std::process::Command::new("/bin/zsh")
@@ -322,7 +322,7 @@ impl StreamingAcpClient {
             let mut patched = notification.clone();
             patched.session_id = SessionId::new(&*self.internal_session_id);
             if let Err(e) = app_handle.emit("session-update", &patched) {
-                log::warn!("Failed to emit session-update event: {}", e);
+                log::warn!("Failed to emit session-update event: {e}");
             }
         }
     }
@@ -373,7 +373,7 @@ impl agent_client_protocol::Client for StreamingAcpClient {
         args: RequestPermissionRequest,
     ) -> AcpResult<RequestPermissionResponse> {
         // Auto-approve permissions (Staged doesn't use tools that need approval)
-        log::debug!("Permission requested: {:?}", args);
+        log::debug!("Permission requested: {args:?}");
 
         let option_id = args
             .options
@@ -417,7 +417,7 @@ impl agent_client_protocol::Client for StreamingAcpClient {
                     let mut segments = self.segments.lock().await;
                     if let Some(ContentSegment::ToolCall(tc)) = segments.get_mut(idx) {
                         if let Some(ref status) = update.fields.status {
-                            tc.status = format!("{:?}", status).to_lowercase();
+                            tc.status = format!("{status:?}").to_lowercase();
                         }
                         if let Some(ref title) = update.fields.title {
                             tc.title = title.clone();
@@ -445,7 +445,7 @@ fn extract_content_preview(content: &[agent_client_protocol::ToolCallContent]) -
                 if let AcpContentBlock::Text(text) = &c.content {
                     let preview: String = text.text.chars().take(200).collect();
                     return Some(if text.text.len() > 200 {
-                        format!("{}...", preview)
+                        format!("{preview}...")
                     } else {
                         preview
                     });
@@ -583,7 +583,7 @@ async fn run_acp_prompt_internal(
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .map_err(|e| format!("Failed to create runtime: {}", e))?;
+            .map_err(|e| format!("Failed to create runtime: {e}"))?;
 
         // Run the ACP session on a LocalSet
         let local = tokio::task::LocalSet::new();
@@ -603,7 +603,7 @@ async fn run_acp_prompt_internal(
         })
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(|e| format!("Task join error: {e}"))?
 }
 
 /// Internal function to run the ACP session (runs on LocalSet)
@@ -630,7 +630,7 @@ async fn run_acp_session_inner(
 
     let mut child = cmd
         .spawn()
-        .map_err(|e| format!("Failed to spawn {}: {}", agent_name, e))?;
+        .map_err(|e| format!("Failed to spawn {agent_name}: {e}"))?;
 
     // Get stdin/stdout
     let stdin = child
@@ -662,7 +662,7 @@ async fn run_acp_session_inner(
     // Spawn the IO task
     tokio::task::spawn_local(async move {
         if let Err(e) = io_future.await {
-            log::error!("ACP IO error: {:?}", e);
+            log::error!("ACP IO error: {e:?}");
         }
     });
 
@@ -673,7 +673,7 @@ async fn run_acp_session_inner(
     let init_response = connection
         .initialize(init_request)
         .await
-        .map_err(|e| format!("Failed to initialize ACP connection: {:?}", e))?;
+        .map_err(|e| format!("Failed to initialize ACP connection: {e:?}"))?;
 
     if let Some(agent_info) = &init_response.agent_info {
         log::info!(
@@ -690,26 +690,22 @@ async fn run_acp_session_inner(
             // Suppress emit during load to avoid replaying history to frontend
             client.set_suppress_emit(true).await;
 
-            log::info!("Attempting to load session: {}", existing_id);
+            log::info!("Attempting to load session: {existing_id}");
             let load_request =
                 LoadSessionRequest::new(SessionId::new(existing_id), working_dir.to_path_buf());
 
             let result = match connection.load_session(load_request).await {
                 Ok(_) => {
-                    log::info!("Resumed session: {}", existing_id);
+                    log::info!("Resumed session: {existing_id}");
                     (SessionId::new(existing_id), false)
                 }
                 Err(e) => {
                     // Session not found or error - create a new one
-                    log::warn!(
-                        "Failed to load session {}: {:?}, creating new session",
-                        existing_id,
-                        e
-                    );
+                    log::warn!("Failed to load session {existing_id}: {e:?}, creating new session");
                     let session_response = connection
                         .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
                         .await
-                        .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
+                        .map_err(|e| format!("Failed to create ACP session: {e:?}"))?;
                     (session_response.session_id, true)
                 }
             };
@@ -723,7 +719,7 @@ async fn run_acp_session_inner(
             let session_response = connection
                 .new_session(NewSessionRequest::new(working_dir.to_path_buf()))
                 .await
-                .map_err(|e| format!("Failed to create ACP session: {:?}", e))?;
+                .map_err(|e| format!("Failed to create ACP session: {e:?}"))?;
             log::info!("Created new session: {}", session_response.session_id.0);
             (session_response.session_id, true)
         };
@@ -734,7 +730,7 @@ async fn run_acp_session_inner(
 
     // For new sessions, optionally prepend system context to guide the agent's behavior
     let full_prompt = if is_new_session && prepend_system_context {
-        format!("{}{}", STAGED_SYSTEM_CONTEXT, prompt)
+        format!("{STAGED_SYSTEM_CONTEXT}{prompt}")
     } else {
         prompt.to_string()
     };
@@ -764,7 +760,7 @@ async fn run_acp_session_inner(
                 segments,
             })
         }
-        Err(e) => Err(format!("Failed to send prompt: {:?}", e)),
+        Err(e) => Err(format!("Failed to send prompt: {e:?}")),
     }
 }
 
