@@ -42,6 +42,10 @@
   let textareaEl: HTMLTextAreaElement | null = $state(null);
   let fileInputEl: HTMLInputElement | null = $state(null);
 
+  const MAX_FILE_SIZE = 10 * 1024 * 1024;
+  const MAX_IMAGE_COUNT = 5;
+  const ALLOWED_MIME_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'image/gif', 'image/webp'];
+
   // Focus textarea on mount
   $effect(() => {
     if (textareaEl) {
@@ -83,11 +87,28 @@
     if (!input.files || input.files.length === 0) return;
 
     try {
+      if (images.length + input.files.length > MAX_IMAGE_COUNT) {
+        error = `Too many images. Maximum ${MAX_IMAGE_COUNT} images allowed.`;
+        if (input) input.value = '';
+        return;
+      }
+
       const newImages: ImageAttachment[] = [];
       for (let i = 0; i < input.files.length; i++) {
         const file = input.files[i];
+
         if (!file.type.startsWith('image/')) {
           error = `File ${file.name} is not an image`;
+          continue;
+        }
+
+        if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+          error = `File ${file.name} has unsupported format. Allowed: PNG, JPEG, GIF, WebP`;
+          continue;
+        }
+
+        if (file.size > MAX_FILE_SIZE) {
+          error = `File ${file.name} is too large (max 10MB)`;
           continue;
         }
 
@@ -97,8 +118,11 @@
           mime_type: file.type,
         });
       }
-      images = [...images, ...newImages];
-      error = null;
+
+      if (newImages.length > 0) {
+        images = [...images, ...newImages];
+        error = null;
+      }
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
@@ -183,9 +207,9 @@
           disabled={starting}
         ></textarea>
         <div class="prompt-actions">
-          <button class="attach-button" type="button" onclick={triggerFileInput} title="Attach images">
+          <button class="attach-button" type="button" onclick={triggerFileInput} title="Attach images" disabled={images.length >= MAX_IMAGE_COUNT}>
             <ImageIcon size={16} />
-            <span>Attach Images</span>
+            <span>Attach Images {images.length > 0 ? `(${images.length}/${MAX_IMAGE_COUNT})` : ''}</span>
           </button>
           <p class="hint">Press ⌘Enter to start</p>
         </div>

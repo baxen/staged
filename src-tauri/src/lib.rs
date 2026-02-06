@@ -841,6 +841,21 @@ async fn analyze_diff(
     ai::analysis::analyze_diff(&path, &spec, provider.as_deref()).await
 }
 
+/// Maximum size for base64-encoded image data (10MB)
+const MAX_IMAGE_SIZE: usize = 10 * 1024 * 1024;
+
+/// Maximum number of images per request
+const MAX_IMAGE_COUNT: usize = 5;
+
+/// Allowed MIME types for image attachments
+const ALLOWED_MIME_TYPES: &[&str] = &[
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/gif",
+    "image/webp",
+];
+
 /// An image attachment for AI prompts
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -849,6 +864,47 @@ pub struct ImageAttachment {
     pub data: String,
     /// MIME type (e.g., "image/png", "image/jpeg")
     pub mime_type: String,
+}
+
+impl ImageAttachment {
+    /// Validates the image attachment for size and format
+    pub fn validate(&self) -> Result<(), String> {
+        if self.data.len() > MAX_IMAGE_SIZE {
+            return Err(format!(
+                "Image too large: {} bytes (max {} bytes)",
+                self.data.len(),
+                MAX_IMAGE_SIZE
+            ));
+        }
+
+        if !ALLOWED_MIME_TYPES.contains(&self.mime_type.as_str()) {
+            return Err(format!(
+                "Unsupported image format: {}. Allowed formats: {}",
+                self.mime_type,
+                ALLOWED_MIME_TYPES.join(", ")
+            ));
+        }
+
+        Ok(())
+    }
+}
+
+/// Validates a collection of image attachments
+fn validate_images(images: &Option<Vec<ImageAttachment>>) -> Result<(), String> {
+    if let Some(imgs) = images {
+        if imgs.len() > MAX_IMAGE_COUNT {
+            return Err(format!(
+                "Too many images: {} (max {})",
+                imgs.len(),
+                MAX_IMAGE_COUNT
+            ));
+        }
+
+        for (i, img) in imgs.iter().enumerate() {
+            img.validate().map_err(|e| format!("Image {}: {}", i + 1, e))?;
+        }
+    }
+    Ok(())
 }
 
 /// Response from send_agent_prompt including session ID for continuity.
@@ -916,6 +972,8 @@ async fn send_agent_prompt_streaming(
     provider: Option<String>,
     images: Option<Vec<ImageAttachment>>,
 ) -> Result<AgentPromptResponse, String> {
+    validate_images(&images)?;
+
     let agent = if let Some(provider_id) = provider {
         ai::find_acp_agent_by_id(&provider_id).ok_or_else(|| {
             format!(
@@ -997,6 +1055,7 @@ async fn send_prompt(
     prompt: String,
     images: Option<Vec<ImageAttachment>>,
 ) -> Result<(), String> {
+    validate_images(&images)?;
     state.send_prompt(&session_id, prompt, images).await
 }
 
@@ -1944,6 +2003,8 @@ async fn start_branch_session(
     agent_id: Option<String>,
     images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchSessionResponse, String> {
+    validate_images(&images)?;
+
     // Get the branch to find the worktree path
     let branch = state
         .get_branch(&branch_id)
@@ -2339,6 +2400,8 @@ async fn restart_branch_session(
     full_prompt: String,
     images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchSessionResponse, String> {
+    validate_images(&images)?;
+
     // Get the old session to retrieve the branch ID and prompt
     let old_session = state
         .get_branch_session(&branch_session_id)
@@ -2563,6 +2626,8 @@ async fn start_branch_note(
     agent_id: Option<String>,
     images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchNoteResponse, String> {
+    validate_images(&images)?;
+
     // Get the branch to find the worktree path
     let branch = state
         .get_branch(&branch_id)
