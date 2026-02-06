@@ -344,6 +344,14 @@ export async function isSessionAlive(aiSessionId: string): Promise<boolean> {
 }
 
 /**
+ * Cancel an active AI session by killing the agent subprocess.
+ * This immediately terminates the running agent process.
+ */
+export async function cancelAiSession(aiSessionId: string): Promise<void> {
+  return invoke<void>('cancel_ai_session', { aiSessionId });
+}
+
+/**
  * Restart a stuck branch session.
  * Deletes the old session and starts a new one with the same prompt.
  * Returns the new session IDs.

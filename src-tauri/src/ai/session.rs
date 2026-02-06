@@ -10,6 +10,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -33,6 +34,8 @@ pub enum SessionStatus {
     Processing,
     /// Session encountered an error
     Error { message: String },
+    /// Session was cancelled by the user
+    Cancelled,
 }
 
 /// Event emitted when session status changes
@@ -51,6 +54,60 @@ pub struct LiveSessionInfo {
     pub status: SessionStatus,
 }
 
+/// Cancellation handle for an active session.
+/// Shared between the session manager and the running task.
+#[derive(Debug, Default)]
+pub struct CancellationHandle {
+    /// Set to true when cancellation is requested
+    cancelled: AtomicBool,
+    /// PID of the agent subprocess (0 if not yet spawned)
+    pid: AtomicU32,
+}
+
+impl CancellationHandle {
+    pub fn new() -> Self {
+        Self {
+            cancelled: AtomicBool::new(false),
+            pid: AtomicU32::new(0),
+        }
+    }
+
+    /// Request cancellation of the session
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::SeqCst);
+
+        // Kill the subprocess if we have a PID
+        let pid = self.pid.load(Ordering::SeqCst);
+        if pid != 0 {
+            log::info!("Killing agent subprocess with PID {pid}");
+            #[cfg(unix)]
+            {
+                // Send SIGTERM to the process using the kill command
+                let _ = std::process::Command::new("kill")
+                    .args(["-TERM", &pid.to_string()])
+                    .output();
+            }
+            #[cfg(windows)]
+            {
+                // On Windows, use taskkill
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/PID", &pid.to_string(), "/F"])
+                    .output();
+            }
+        }
+    }
+
+    /// Check if cancellation was requested
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::SeqCst)
+    }
+
+    /// Set the PID of the agent subprocess
+    pub fn set_pid(&self, pid: u32) {
+        self.pid.store(pid, Ordering::SeqCst);
+    }
+}
+
 /// Internal live session state
 struct LiveSession {
     /// Our session ID (matches Store)
@@ -63,6 +120,8 @@ struct LiveSession {
     working_dir: PathBuf,
     /// Current status
     status: SessionStatus,
+    /// Cancellation handle for the current operation (if any)
+    cancellation: Option<Arc<CancellationHandle>>,
 }
 
 // =============================================================================
@@ -133,6 +192,7 @@ impl SessionManager {
             agent,
             working_dir,
             status: SessionStatus::Idle,
+            cancellation: None,
         };
 
         let mut sessions = self.sessions.write().await;
@@ -172,6 +232,7 @@ impl SessionManager {
             agent,
             working_dir: PathBuf::from(&session.working_dir),
             status: SessionStatus::Idle,
+            cancellation: None,
         };
 
         let arc = Arc::new(RwLock::new(live_session));
@@ -236,6 +297,9 @@ impl SessionManager {
         // Get or create live session
         let session_arc = self.get_or_create_live_session(session_id).await?;
 
+        // Create cancellation handle for this operation
+        let cancellation = Arc::new(CancellationHandle::new());
+
         // Check status and prepare for prompt
         let (agent, working_dir, acp_session_id) = {
             let mut session = session_arc.write().await;
@@ -244,8 +308,9 @@ impl SessionManager {
                 return Err("Session is already processing a prompt".to_string());
             }
 
-            // Update status to processing
+            // Update status to processing and store cancellation handle
             session.status = SessionStatus::Processing;
+            session.cancellation = Some(cancellation.clone());
             self.emit_status(&session.session_id, &session.status);
 
             (
@@ -290,39 +355,54 @@ impl SessionManager {
                 &session_id_owned,
                 app_handle.clone(),
                 Some(buffer_callback),
+                Some(cancellation.clone()),
             )
             .await;
 
             // Update session and persist based on result
             let mut session = session_arc_clone.write().await;
 
-            match result {
-                Ok(acp_result) => {
-                    // Store the ACP session ID for future resumption
-                    session.acp_session_id = Some(acp_result.session_id.clone());
-                    session.status = SessionStatus::Idle;
+            // Clear the cancellation handle
+            session.cancellation = None;
 
-                    // Persist the assistant response
-                    if let Err(e) = persist_assistant_turn(&store, &session_id_owned, &acp_result) {
-                        log::error!("Failed to persist assistant turn: {e}");
+            // Check if we were cancelled
+            if cancellation.is_cancelled() {
+                log::info!("Session {session_id_owned} was cancelled");
+                session.status = SessionStatus::Cancelled;
+                // Clear buffer on cancellation
+                let mut buffer = streaming_buffer.write().await;
+                buffer.remove(&session_id_owned);
+            } else {
+                match result {
+                    Ok(acp_result) => {
+                        // Store the ACP session ID for future resumption
+                        session.acp_session_id = Some(acp_result.session_id.clone());
+                        session.status = SessionStatus::Idle;
+
+                        // Persist the assistant response
+                        if let Err(e) =
+                            persist_assistant_turn(&store, &session_id_owned, &acp_result)
+                        {
+                            log::error!("Failed to persist assistant turn: {e}");
+                        }
+
+                        // Clear buffer after persistence attempt (success or failure)
+                        // The callback has been updating the buffer during streaming
+                        let mut buffer = streaming_buffer.write().await;
+                        buffer.remove(&session_id_owned);
+
+                        // Auto-generate title from first user message if not set
+                        if let Err(e) = maybe_set_title(&store, &session_id_owned, &prompt) {
+                            log::warn!("Failed to set session title: {e}");
+                        }
                     }
-
-                    // Clear buffer after persistence attempt (success or failure)
-                    // The callback has been updating the buffer during streaming
-                    let mut buffer = streaming_buffer.write().await;
-                    buffer.remove(&session_id_owned);
-
-                    // Auto-generate title from first user message if not set
-                    if let Err(e) = maybe_set_title(&store, &session_id_owned, &prompt) {
-                        log::warn!("Failed to set session title: {e}");
+                    Err(e) => {
+                        log::error!("Session {session_id_owned} prompt failed: {e}");
+                        session.status = SessionStatus::Error { message: e };
+                        // Clear buffer on error too
+                        let mut buffer = streaming_buffer.write().await;
+                        buffer.remove(&session_id_owned);
                     }
-                }
-                Err(e) => {
-                    log::error!("Session {session_id_owned} prompt failed: {e}");
-                    session.status = SessionStatus::Error { message: e };
-                    // Clear buffer on error too
-                    let mut buffer = streaming_buffer.write().await;
-                    buffer.remove(&session_id_owned);
                 }
             }
 
@@ -335,6 +415,28 @@ impl SessionManager {
         });
 
         Ok(())
+    }
+
+    /// Cancel an active session by killing the agent subprocess
+    pub async fn cancel_session(&self, session_id: &str) -> Result<(), String> {
+        let sessions = self.sessions.read().await;
+        let session_arc = sessions
+            .get(session_id)
+            .ok_or_else(|| format!("Session '{session_id}' not found"))?;
+
+        let session = session_arc.read().await;
+
+        if session.status != SessionStatus::Processing {
+            return Err("Session is not currently processing".to_string());
+        }
+
+        if let Some(ref cancellation) = session.cancellation {
+            log::info!("Cancelling session {session_id}");
+            cancellation.cancel();
+            Ok(())
+        } else {
+            Err("No active operation to cancel".to_string())
+        }
     }
 
     fn emit_status(&self, session_id: &str, status: &SessionStatus) {
