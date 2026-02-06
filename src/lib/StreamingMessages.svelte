@@ -226,6 +226,7 @@
 
   :global(.spinning) {
     animation: spin 1s linear infinite;
+    transform-origin: center;
   }
 
   @keyframes spin {
