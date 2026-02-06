@@ -86,6 +86,7 @@ _ensure-deps:
 install:
     rustup default stable
     npm install
+    lefthook install
     cd src-tauri && cargo fetch
 
 # Clean build artifacts
