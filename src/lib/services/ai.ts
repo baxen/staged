@@ -187,9 +187,7 @@ export async function sendPrompt(sessionId: string, prompt: string): Promise<voi
  * Get buffered streaming segments for a session (before DB persistence).
  * Returns null if no buffered segments exist.
  */
-export async function getBufferedSegments(
-  sessionId: string,
-): Promise<ContentSegment[] | null> {
+export async function getBufferedSegments(sessionId: string): Promise<ContentSegment[] | null> {
   return invoke<ContentSegment[] | null>('get_buffered_segments', { sessionId });
 }
 

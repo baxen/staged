@@ -557,7 +557,8 @@ pub async fn run_acp_prompt(
     prompt: &str,
 ) -> Result<String, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None).await?;
+    let result =
+        run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None).await?;
     Ok(result.response)
 }
 
@@ -570,7 +571,8 @@ pub async fn run_acp_prompt_raw(
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false, None).await?;
+    let result =
+        run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false, None).await?;
     Ok(result.response)
 }
 
@@ -617,6 +619,7 @@ pub async fn run_acp_prompt_streaming(
 }
 
 /// Internal implementation that handles both streaming and non-streaming modes
+#[allow(clippy::too_many_arguments)]
 async fn run_acp_prompt_internal(
     agent: &AcpAgent,
     working_dir: &Path,

@@ -24,6 +24,7 @@
     ExternalLink,
     AlertCircle,
     GitPullRequest,
+    RefreshCw,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -195,6 +196,9 @@
   // PR state - fetched from GitHub
   let existingPr = $state<PullRequestInfo | null>(null);
   let prLoading = $state(false);
+
+  // Sync from PR state (for branches created from a PR)
+  let syncingFromPr = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -515,6 +519,24 @@
       await loadData();
     } catch (e) {
       console.error('Failed to restart session:', e);
+    }
+  }
+
+  // Handle syncing local branch from PR (pull latest PR commits)
+  async function handleSyncFromPr() {
+    if (!branch.prNumber) return;
+    syncingFromPr = true;
+    try {
+      const result = await branchService.updateBranchFromPr(branch.id);
+      console.log('Synced from PR:', result);
+      if (!result.alreadyUpToDate) {
+        // Reload data to show new commits
+        await loadData();
+      }
+    } catch (e) {
+      console.error('Failed to sync from PR:', e);
+    } finally {
+      syncingFromPr = false;
     }
   }
 </script>
@@ -842,7 +864,31 @@
 
   <div class="card-footer">
     <div class="footer-left">
-      {#if commits.length > 0}
+      {#if branch.prNumber}
+        <!-- Branch was created from a PR - show sync button -->
+        <button
+          class="pr-button pr-exists"
+          onclick={() => existingPr && openUrl(existingPr.url)}
+          title="View pull request on GitHub"
+          disabled={!existingPr}
+        >
+          <GitPullRequest size={14} />
+          #{branch.prNumber}
+        </button>
+        <button
+          class="sync-button"
+          onclick={handleSyncFromPr}
+          disabled={syncingFromPr}
+          title="Pull latest commits from PR"
+        >
+          {#if syncingFromPr}
+            <Loader2 size={14} class="spinner" />
+          {:else}
+            <RefreshCw size={14} />
+          {/if}
+          Sync
+        </button>
+      {:else if commits.length > 0}
         {#if existingPr}
           <!-- Show existing PR link -->
           <button
@@ -859,9 +905,9 @@
           <button
             class="pr-update-button"
             onclick={() => (showCreatePrModal = true)}
-            title="Update pull request"
+            title="Push local changes to PR"
           >
-            Update
+            Push
           </button>
         {:else if prLoading}
           <!-- Loading PR state -->
@@ -1536,6 +1582,31 @@
     border-color: var(--ui-accent);
     color: var(--ui-accent);
     background-color: var(--bg-hover);
+  }
+
+  .sync-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .sync-button:hover:not(:disabled) {
+    border-color: var(--ui-accent);
+    color: var(--ui-accent);
+    background-color: var(--bg-hover);
+  }
+
+  .sync-button:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
 
   .new-dropdown-container {
