@@ -675,7 +675,9 @@
               <span>From Pull Request</span>
             </button>
             <div class="actions-right">
-              <button class="cancel-button" onclick={initialRepoPath ? onClose : goBack}>Cancel</button>
+              <button class="cancel-button" onclick={initialRepoPath ? onClose : goBack}
+                >Cancel</button
+              >
               <button class="create-button" onclick={handleCreate} disabled={!branchName}>
                 Create Branch
               </button>

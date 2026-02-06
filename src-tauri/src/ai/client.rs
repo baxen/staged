@@ -572,18 +572,9 @@ pub async fn run_acp_prompt_raw(
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_internal(
-        agent,
-        working_dir,
-        prompt,
-        None,
-        None,
-        "",
-        false,
-        None,
-        None,
-    )
-    .await?;
+    let result =
+        run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false, None, None)
+            .await?;
     Ok(result.response)
 }
 
