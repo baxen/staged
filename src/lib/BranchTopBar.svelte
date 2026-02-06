@@ -66,6 +66,7 @@
   });
 </script>
 
+<!-- svelte-ignore a11y_no_static_element_interactions -->
 <div class="top-bar drag-region" onpointerdown={startDrag}>
   <div class="traffic-light-spacer drag-region" data-tauri-drag-region></div>
 

@@ -268,6 +268,8 @@
   async function handleSelectPR(pr: PullRequest) {
     if (!selectedRepo || creatingFromPR) return;
     creatingFromPR = true;
+    const createProjectId = projectId;
+    const createRepoPath = selectedRepo;
 
     try {
       const effectiveProjectId =
@@ -276,7 +278,7 @@
       const baseBranch = `origin/${pr.base_ref}`;
       const pending: PendingBranch = {
         projectId: effectiveProjectId,
-        repoPath: selectedRepo,
+        repoPath: createRepoPath,
         branchName: pr.head_ref,
         baseBranch,
       };
@@ -285,7 +287,7 @@
 
       const branch = await branchService.createBranchFromPr(
         effectiveProjectId,
-        selectedRepo,
+        createRepoPath,
         pr.number,
         pr.head_ref,
         pr.base_ref
@@ -300,10 +302,10 @@
       }, 100);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      const effectiveProjectId = projectId || '';
+      const effectiveProjectId = createProjectId || '';
       const pending: PendingBranch = {
         projectId: effectiveProjectId,
-        repoPath: selectedRepo,
+        repoPath: createRepoPath,
         branchName: pr.head_ref,
         baseBranch: `origin/${pr.base_ref}`,
       };
@@ -373,6 +375,11 @@
 
   async function handleCreate() {
     if (!selectedRepo || !branchName.trim()) return;
+    const createProjectId = projectId;
+    const createRepoPath = selectedRepo;
+    const createBranchName = branchName.trim();
+    const createBaseBranch = effectiveBaseBranch;
+    const createSelectedBaseBranch = selectedBaseBranch ?? undefined;
 
     try {
       // If no project ID was provided, get or create one for this repo
@@ -381,9 +388,9 @@
 
       const pending: PendingBranch = {
         projectId: effectiveProjectId,
-        repoPath: selectedRepo,
-        branchName: branchName.trim(),
-        baseBranch: effectiveBaseBranch,
+        repoPath: createRepoPath,
+        branchName: createBranchName,
+        baseBranch: createBaseBranch,
       };
 
       // Notify parent immediately so it can show a placeholder
@@ -392,9 +399,9 @@
       // Pass selected base branch or undefined to use detected default
       const branch = await branchService.createBranch(
         effectiveProjectId,
-        selectedRepo,
-        branchName.trim(),
-        selectedBaseBranch ?? undefined
+        createRepoPath,
+        createBranchName,
+        createSelectedBaseBranch
       );
       onCreated(branch);
 
@@ -407,12 +414,12 @@
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
       // Need to create pending for error case too
-      const effectiveProjectId = projectId || '';
+      const effectiveProjectId = createProjectId || '';
       const pending: PendingBranch = {
         projectId: effectiveProjectId,
-        repoPath: selectedRepo,
-        branchName: branchName.trim(),
-        baseBranch: effectiveBaseBranch,
+        repoPath: createRepoPath,
+        branchName: createBranchName,
+        baseBranch: createBaseBranch,
       };
       onCreateFailed(pending, errorMsg);
     }

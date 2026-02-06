@@ -9,7 +9,7 @@
   - Escape: Close modals
 -->
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { Plus, Sparkles, Folder, GitBranch, Loader2, X, Trash2, Settings } from 'lucide-svelte';
   import type { Branch, GitProject } from './services/branch';
   import * as branchService from './services/branch';
@@ -52,7 +52,8 @@
 
   // Modal state
   let showNewBranchModal = $state(false);
-  let newBranchForProject = $state<GitProject | null>(null);
+  let newBranchProjectId = $state<string | null>(null);
+  let newBranchRepoPath = $state<string | null>(null);
   let branchToDelete = $state<Branch | null>(null);
   let showNewProjectModal = $state(false);
   let showProjectSettings = $state(false);
@@ -193,8 +194,20 @@
   }
 
   function handleNewBranch(project?: GitProject) {
-    newBranchForProject = project || null;
+    newBranchProjectId = project?.id || null;
+    newBranchRepoPath = project?.repoPath || null;
     showNewBranchModal = true;
+  }
+
+  async function closeNewBranchModal() {
+    // Hide first, then clear project on next tick.
+    // This avoids transient prop evaluation on a now-null project during teardown.
+    showNewBranchModal = false;
+    await tick();
+    if (!showNewBranchModal) {
+      newBranchProjectId = null;
+      newBranchRepoPath = null;
+    }
   }
 
   async function handleBranchCreating(pending: PendingBranch) {
@@ -221,16 +234,24 @@
       newFailed.delete(key);
       failedBranches = newFailed;
     }
-    showNewBranchModal = false;
-    newBranchForProject = null;
+    await closeNewBranchModal();
   }
 
   function handleBranchCreated(branch: Branch) {
-    // Remove from pending and add to real branches
+    // Remove pending by repo+branch name so recovery paths still reconcile even if projectId differs.
     pendingBranches = pendingBranches.filter(
-      (p) => !(p.projectId === branch.projectId && p.branchName === branch.branchName)
+      (p) => !(p.repoPath === branch.repoPath && p.branchName === branch.branchName)
     );
-    branches = [...branches, branch];
+
+    // Upsert branch by id to avoid duplicate keys when recovering an existing DB row.
+    const existingIndex = branches.findIndex((b) => b.id === branch.id);
+    if (existingIndex >= 0) {
+      const next = [...branches];
+      next[existingIndex] = branch;
+      branches = next;
+    } else {
+      branches = [...branches, branch];
+    }
   }
 
   function handleBranchCreateFailed(pending: PendingBranch, errorMsg: string) {
@@ -355,8 +376,7 @@
         showNewProjectModal = false;
       } else if (showNewBranchModal) {
         e.preventDefault();
-        showNewBranchModal = false;
-        newBranchForProject = null;
+        void closeNewBranchModal();
       }
       return;
     }
@@ -563,15 +583,12 @@
 <!-- New branch modal -->
 {#if showNewBranchModal}
   <NewBranchModal
-    initialRepoPath={newBranchForProject?.repoPath}
-    projectId={newBranchForProject?.id}
+    initialRepoPath={newBranchRepoPath ?? undefined}
+    projectId={newBranchProjectId ?? undefined}
     onCreating={handleBranchCreating}
     onCreated={handleBranchCreated}
     onCreateFailed={handleBranchCreateFailed}
-    onClose={() => {
-      showNewBranchModal = false;
-      newBranchForProject = null;
-    }}
+    onClose={closeNewBranchModal}
   />
 {/if}
 

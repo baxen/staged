@@ -79,6 +79,42 @@ pub fn create_worktree(
     Ok(worktree_path)
 }
 
+/// Create a new worktree for an existing local branch.
+///
+/// Uses the standard worktree location and checks out `branch_name` there.
+/// Fails if the worktree path already exists.
+pub fn create_worktree_for_existing_branch(
+    repo: &Path,
+    branch_name: &str,
+) -> Result<PathBuf, GitError> {
+    let worktree_path = worktree_path_for(repo, branch_name)?;
+
+    // Ensure parent directory exists
+    if let Some(parent) = worktree_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            GitError::CommandFailed(format!("Failed to create worktree directory: {e}"))
+        })?;
+    }
+
+    // Check if worktree already exists
+    if worktree_path.exists() {
+        return Err(GitError::CommandFailed(format!(
+            "Worktree already exists at {}",
+            worktree_path.display()
+        )));
+    }
+
+    let worktree_str = worktree_path
+        .to_str()
+        .ok_or_else(|| GitError::InvalidPath(worktree_path.display().to_string()))?;
+
+    // Create worktree for existing branch:
+    // git worktree add <path> <branch>
+    cli::run(repo, &["worktree", "add", worktree_str, branch_name])?;
+
+    Ok(worktree_path)
+}
+
 /// Remove a worktree and its associated branch.
 ///
 /// Removes the worktree directory, git worktree reference, and the local git branch.
