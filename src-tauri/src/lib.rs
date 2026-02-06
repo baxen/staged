@@ -1657,17 +1657,15 @@ async fn create_branch(
             _ => git::detect_default_branch(repo).map_err(|e| e.to_string())?,
         };
 
-        // Create the worktree (this will fail atomically if branch already exists)
-        let worktree_path =
-            git::create_worktree(repo, &branch_name, &base_branch).map_err(|e| {
-                // Provide user-friendly error for common case
-                let msg = e.to_string();
-                if msg.contains("already exists") {
-                    format!("Branch '{branch_name}' already exists")
-                } else {
-                    msg
-                }
-            })?;
+        // If branch already exists locally, set up a worktree for it instead of failing.
+        // Otherwise create both branch and worktree from the selected base.
+        let branch_exists = git::branch_exists(repo, &branch_name).map_err(|e| e.to_string())?;
+        let worktree_path = if branch_exists {
+            git::create_worktree_for_existing_branch(repo, &branch_name)
+                .map_err(|e| e.to_string())?
+        } else {
+            git::create_worktree(repo, &branch_name, &base_branch).map_err(|e| e.to_string())?
+        };
 
         // Create the branch record
         let branch = Branch::new(
@@ -1678,7 +1676,7 @@ async fn create_branch(
             &base_branch,
         );
 
-        // If DB insert fails, clean up the worktree
+        // If DB insert fails, clean up the worktree.
         if let Err(e) = store.create_branch(&branch) {
             let _ = git::remove_worktree(repo, &worktree_path); // Best-effort cleanup
             return Err(e.to_string());
