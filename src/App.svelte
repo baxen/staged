@@ -234,6 +234,12 @@
     spec: DiffSpecType,
     label: string
   ) {
+    console.log('[App] handleViewDiffFromBranches called with:', {
+      projectId,
+      repoPath,
+      spec,
+      label,
+    });
     syncGlobalToTab();
 
     openRepo(repoPath);

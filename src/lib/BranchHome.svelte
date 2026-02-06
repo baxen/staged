@@ -281,24 +281,6 @@
     deleteErrors = newErrors;
   }
 
-  function handleViewDiff(branch: Branch) {
-    onViewDiff?.(
-      branch.projectId,
-      branch.worktreePath,
-      DiffSpec.mergeBaseDiff(branch.baseBranch, branch.branchName),
-      `${branch.baseBranch}..${branch.branchName}`
-    );
-  }
-
-  function handleViewCommitDiff(branch: Branch, commitSha: string) {
-    onViewDiff?.(
-      branch.projectId,
-      branch.worktreePath,
-      DiffSpec.fromRevs(`${commitSha}~1`, commitSha),
-      commitSha.slice(0, 7)
-    );
-  }
-
   function handleNewProjectCreated(project: GitProject) {
     projects = [...projects, project];
     showNewProjectModal = false;
@@ -443,12 +425,42 @@
                     </div>
                   </div>
                 {:else}
+                  {@const branchId = branch.id}
+                  {@const projectId = branch.projectId}
+                  {@const worktreePath = branch.worktreePath}
+                  {@const baseBranch = branch.baseBranch}
+                  {@const branchName = branch.branchName}
                   <BranchCard
                     {branch}
                     {refreshKey}
-                    onViewDiff={() => handleViewDiff(branch)}
-                    onViewCommitDiff={(sha) => handleViewCommitDiff(branch, sha)}
-                    onDelete={() => handleDeleteBranch(branch.id)}
+                    onViewDiff={() => {
+                      console.log('[BranchHome] handleViewDiff called for:', {
+                        branchId,
+                        branchName,
+                        worktreePath,
+                        projectId,
+                      });
+                      onViewDiff?.(
+                        projectId,
+                        worktreePath,
+                        DiffSpec.mergeBaseDiff(baseBranch, branchName),
+                        `${baseBranch}..${branchName}`
+                      );
+                    }}
+                    onViewCommitDiff={(sha) => {
+                      console.log('[BranchHome] handleViewCommitDiff called for:', {
+                        branchId,
+                        branchName,
+                        sha,
+                      });
+                      onViewDiff?.(
+                        projectId,
+                        worktreePath,
+                        DiffSpec.fromRevs(`${sha}~1`, sha),
+                        sha.slice(0, 7)
+                      );
+                    }}
+                    onDelete={() => handleDeleteBranch(branchId)}
                   />
                 {/if}
               {/each}
