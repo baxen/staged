@@ -27,7 +27,7 @@
   // State
   let prompt = $state('');
 
-  // Sync initialPrompt to prompt when it changes
+  // Initialize prompt from prop if provided
   $effect(() => {
     if (initialPrompt) {
       prompt = initialPrompt;

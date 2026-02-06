@@ -557,7 +557,9 @@ pub async fn run_acp_prompt(
     prompt: &str,
 ) -> Result<String, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None).await?;
+    let result =
+        run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None, None)
+            .await?;
     Ok(result.response)
 }
 
@@ -570,7 +572,18 @@ pub async fn run_acp_prompt_raw(
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false, None).await?;
+    let result = run_acp_prompt_internal(
+        agent,
+        working_dir,
+        prompt,
+        None,
+        None,
+        "",
+        false,
+        None,
+        None,
+    )
+    .await?;
     Ok(result.response)
 }
 
@@ -586,14 +599,31 @@ pub async fn run_acp_prompt_with_session(
     session_id: Option<&str>,
 ) -> Result<AcpPromptResult, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "", true, None).await
+    run_acp_prompt_internal(
+        agent,
+        working_dir,
+        prompt,
+        session_id,
+        None,
+        "",
+        true,
+        None,
+        None,
+    )
+    .await
 }
+
+use super::session::CancellationHandle;
 
 /// Run a prompt through ACP with streaming events emitted to frontend
 ///
 /// Emits "session-update" events with SessionNotification payloads during execution.
 /// The `internal_session_id` is stamped onto all emitted events so the frontend
 /// can correlate them (the ACP protocol uses its own opaque session IDs internally).
+///
+/// If `cancellation` is provided, the PID of the spawned agent process will be
+/// registered with it, allowing external cancellation via process kill.
+#[allow(clippy::too_many_arguments)]
 pub async fn run_acp_prompt_streaming(
     agent: &AcpAgent,
     working_dir: &Path,
@@ -602,6 +632,7 @@ pub async fn run_acp_prompt_streaming(
     internal_session_id: &str,
     app_handle: tauri::AppHandle,
     buffer_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
+    cancellation: Option<Arc<CancellationHandle>>,
 ) -> Result<AcpPromptResult, String> {
     run_acp_prompt_internal(
         agent,
@@ -612,11 +643,13 @@ pub async fn run_acp_prompt_streaming(
         internal_session_id,
         true,
         buffer_callback,
+        cancellation,
     )
     .await
 }
 
 /// Internal implementation that handles both streaming and non-streaming modes
+#[allow(clippy::too_many_arguments)]
 async fn run_acp_prompt_internal(
     agent: &AcpAgent,
     working_dir: &Path,
@@ -626,6 +659,7 @@ async fn run_acp_prompt_internal(
     internal_session_id: &str,
     prepend_system_context: bool,
     buffer_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
+    cancellation: Option<Arc<CancellationHandle>>,
 ) -> Result<AcpPromptResult, String> {
     let agent_path = agent.path().to_path_buf();
     let agent_name = agent.name().to_string();
@@ -658,6 +692,7 @@ async fn run_acp_prompt_internal(
                 &internal_session_id,
                 prepend_system_context,
                 buffer_callback,
+                cancellation,
             )
             .await
         })
@@ -679,6 +714,7 @@ async fn run_acp_session_inner(
     internal_session_id: &str,
     prepend_system_context: bool,
     buffer_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
+    cancellation: Option<Arc<CancellationHandle>>,
 ) -> Result<AcpPromptResult, String> {
     // Spawn the agent process with ACP mode
     let mut cmd = Command::new(agent_path);
@@ -692,6 +728,14 @@ async fn run_acp_session_inner(
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("Failed to spawn {agent_name}: {e}"))?;
+
+    // Register the PID with the cancellation handle so it can be killed externally
+    if let Some(ref cancel) = cancellation {
+        if let Some(pid) = child.id() {
+            log::debug!("Registering agent PID {pid} for cancellation");
+            cancel.set_pid(pid);
+        }
+    }
 
     // Get stdin/stdout
     let stdin = child

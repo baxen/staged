@@ -24,6 +24,7 @@
     ExternalLink,
     AlertCircle,
     GitPullRequest,
+    X,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -490,6 +491,30 @@
     return baseBranch.replace(/^origin\//, '');
   }
 
+  // Handle cancelling an active session (just stops the AI, doesn't delete the record)
+  async function handleCancelSession() {
+    if (!runningSession?.aiSessionId) return;
+    try {
+      await branchService.cancelAiSession(runningSession.aiSessionId);
+      // Don't delete the branch session record - let the status event handler
+      // in BranchHome recover it when the 'cancelled' status is emitted
+    } catch (e) {
+      console.error('Failed to cancel session:', e);
+    }
+  }
+
+  // Handle cancelling a generating note (just stops the AI, doesn't delete the record)
+  async function handleCancelNote() {
+    if (!generatingNote?.aiSessionId) return;
+    try {
+      await branchService.cancelAiSession(generatingNote.aiSessionId);
+      // Don't delete the branch note record - let the status event handler
+      // in BranchHome recover it when the 'cancelled' status is emitted
+    } catch (e) {
+      console.error('Failed to cancel note:', e);
+    }
+  }
+
   // Handle discarding a stuck session
   async function handleDiscardSession() {
     if (!runningSession) return;
@@ -588,10 +613,7 @@
         {#each timeline as item, index (item.type === 'commit' ? item.commit.sha : item.type === 'note' ? item.note.id : item.type === 'running-session' ? 'running' : 'generating')}
           {#if item.type === 'generating-note'}
             <!-- Generating note skeleton -->
-            <button
-              class="timeline-row skeleton-row"
-              onclick={() => handleViewNote(item.note, true)}
-            >
+            <div class="timeline-row skeleton-row">
               <div class="timeline-marker">
                 <div class="timeline-icon note-icon">
                   <Loader2 size={12} class="spinner" />
@@ -601,22 +623,39 @@
                 {/if}
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title skeleton-title">{item.note.title}</span>
-                  <div class="timeline-meta">
-                    <span class="skeleton-meta">generating...</span>
+                <button
+                  class="skeleton-content-btn"
+                  onclick={() => handleViewNote(item.note, true)}
+                >
+                  <div class="timeline-info">
+                    <span class="timeline-title skeleton-title">{item.note.title}</span>
+                    <div class="timeline-meta">
+                      <span class="skeleton-meta">generating...</span>
+                    </div>
                   </div>
-                </div>
+                </button>
               </div>
-              <div class="watch-button">
-                <MessageSquare size={12} />
-                Watch
+              <div class="skeleton-actions">
+                <button class="watch-button" onclick={() => handleViewNote(item.note, true)}>
+                  <MessageSquare size={12} />
+                  Watch
+                </button>
+                <button
+                  class="cancel-button"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    handleCancelNote();
+                  }}
+                  title="Stop note generation"
+                >
+                  <X size={12} />
+                </button>
               </div>
-            </button>
+            </div>
           {:else if item.type === 'running-session'}
             <!-- Running session skeleton -->
             {#if isRunningSessionAlive}
-              <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
+              <div class="timeline-row skeleton-row">
                 <div class="timeline-marker">
                   <div class="timeline-icon commit-icon">
                     <Loader2 size={12} class="spinner" />
@@ -626,18 +665,32 @@
                   {/if}
                 </div>
                 <div class="timeline-content">
-                  <div class="timeline-info">
-                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                    <div class="timeline-meta">
-                      <span class="skeleton-meta">generating...</span>
+                  <button class="skeleton-content-btn" onclick={handleWatchSession}>
+                    <div class="timeline-info">
+                      <span class="timeline-title skeleton-title">{item.session.prompt}</span>
+                      <div class="timeline-meta">
+                        <span class="skeleton-meta">generating...</span>
+                      </div>
                     </div>
-                  </div>
+                  </button>
                 </div>
-                <div class="watch-button">
-                  <MessageSquare size={12} />
-                  Watch
+                <div class="skeleton-actions">
+                  <button class="watch-button" onclick={handleWatchSession}>
+                    <MessageSquare size={12} />
+                    Watch
+                  </button>
+                  <button
+                    class="cancel-button"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      handleCancelSession();
+                    }}
+                    title="Stop session"
+                  >
+                    <X size={12} />
+                  </button>
                 </div>
-              </button>
+              </div>
             {:else}
               <!-- Stuck session - show recovery options -->
               <div class="timeline-row skeleton-row stuck-session-row">
@@ -1420,6 +1473,43 @@
   .skeleton-row:hover .watch-button {
     border-color: var(--ui-accent);
     color: var(--ui-accent);
+  }
+
+  /* Skeleton actions container */
+  .skeleton-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+  }
+
+  .skeleton-content-btn {
+    flex: 1;
+    min-width: 0;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .cancel-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 6px;
+    background-color: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+
+  .cancel-button:hover {
+    border-color: var(--ui-danger);
+    color: var(--ui-danger);
   }
 
   /* Stuck session styles */

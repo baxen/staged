@@ -7,7 +7,12 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
   import { X, Loader2, AlertCircle } from 'lucide-svelte';
-  import { getSession, getSessionStatus, getBufferedSegments, type ContentSegment } from './services/ai';
+  import {
+    getSession,
+    getSessionStatus,
+    getBufferedSegments,
+    type ContentSegment,
+  } from './services/ai';
   import { toDisplayMessage, type DisplayMessage } from './types/streaming';
   import {
     connectToSession,
@@ -117,7 +122,7 @@
         const isRecentAssistant =
           lastDbMessage?.role === 'assistant' &&
           lastDbRawMessage &&
-          (Date.now() - lastDbRawMessage.createdAt) < 5000;
+          Date.now() - lastDbRawMessage.createdAt < 5000;
 
         if (isRecentAssistant) {
           // DB has the persisted version (it's recent), use it (buffered is stale)

@@ -61,7 +61,8 @@ export function parseAssistantContent(content: string): ContentSegment[] {
 export type SessionStatus =
   | { status: 'idle' }
   | { status: 'processing' }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string }
+  | { status: 'cancelled' };
 
 /** Session status event payload */
 export interface SessionStatusEvent {
@@ -187,9 +188,7 @@ export async function sendPrompt(sessionId: string, prompt: string): Promise<voi
  * Get buffered streaming segments for a session (before DB persistence).
  * Returns null if no buffered segments exist.
  */
-export async function getBufferedSegments(
-  sessionId: string,
-): Promise<ContentSegment[] | null> {
+export async function getBufferedSegments(sessionId: string): Promise<ContentSegment[] | null> {
   return invoke<ContentSegment[] | null>('get_buffered_segments', { sessionId });
 }
 

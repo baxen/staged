@@ -113,7 +113,7 @@ function handleSessionStatus(event: SessionStatusEvent) {
   const entry = sessions[event.sessionId];
   if (!entry) return;
 
-  if (event.status.status === 'idle') {
+  if (event.status.status === 'idle' || event.status.status === 'cancelled') {
     entry.state.isActive = false;
     entry.state.error = null;
 
