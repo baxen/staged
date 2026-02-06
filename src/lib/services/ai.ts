@@ -259,6 +259,7 @@ export async function sendAgentPromptStreaming(
     repoPath?: string;
     sessionId?: string;
     provider?: string;
+    images?: ImageAttachment[];
   }
 ): Promise<AgentPromptResponse> {
   return invoke<AgentPromptResponse>('send_agent_prompt_streaming', {
@@ -266,6 +267,7 @@ export async function sendAgentPromptStreaming(
     prompt,
     sessionId: options?.sessionId ?? null,
     provider: options?.provider ?? null,
+    images: options?.images ?? null,
   });
 }
 

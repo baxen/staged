@@ -8,7 +8,14 @@
   builds the full prompt with timeline context.
 -->
 <script lang="ts">
-  import { X, GitCommitHorizontal, GitBranch, Loader2, Send, Image as ImageIcon } from 'lucide-svelte';
+  import {
+    X,
+    GitCommitHorizontal,
+    GitBranch,
+    Loader2,
+    Send,
+    Image as ImageIcon,
+  } from 'lucide-svelte';
   import type { Branch } from './services/branch';
   import type { ImageAttachment } from './types';
   import { startBranchSession } from './services/branch';
@@ -70,7 +77,12 @@
       const userPrompt = prompt.trim();
 
       // Backend handles all context gathering and prompt building
-      const result = await startBranchSession(branch.id, userPrompt, selectedProvider, images.length > 0 ? images : undefined);
+      const result = await startBranchSession(
+        branch.id,
+        userPrompt,
+        selectedProvider,
+        images.length > 0 ? images : undefined
+      );
 
       // Notify parent that session started
       onSessionStarted?.(result.branchSessionId, result.aiSessionId);
@@ -151,6 +163,60 @@
     fileInputEl?.click();
   }
 
+  async function handlePaste(e: ClipboardEvent) {
+    if (!e.clipboardData) return;
+
+    const items = e.clipboardData.items;
+    const imageFiles: File[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          imageFiles.push(file);
+        }
+      }
+    }
+
+    if (imageFiles.length === 0) return;
+
+    e.preventDefault();
+
+    try {
+      if (images.length + imageFiles.length > MAX_IMAGE_COUNT) {
+        error = `Too many images. Maximum ${MAX_IMAGE_COUNT} images allowed.`;
+        return;
+      }
+
+      const newImages: ImageAttachment[] = [];
+      for (const file of imageFiles) {
+        if (!ALLOWED_MIME_TYPES.includes(file.type)) {
+          error = `Pasted image has unsupported format. Allowed: PNG, JPEG, GIF, WebP`;
+          continue;
+        }
+
+        if (file.size > MAX_FILE_SIZE) {
+          error = `Pasted image is too large (max 10MB)`;
+          continue;
+        }
+
+        const base64 = await fileToBase64(file);
+        newImages.push({
+          data: base64,
+          mime_type: file.type,
+        });
+      }
+
+      if (newImages.length > 0) {
+        images = [...images, ...newImages];
+        error = null;
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Escape') {
       e.preventDefault();
@@ -205,11 +271,22 @@
           placeholder="Describe the task..."
           rows={4}
           disabled={starting}
+          onpaste={handlePaste}
         ></textarea>
         <div class="prompt-actions">
-          <button class="attach-button" type="button" onclick={triggerFileInput} title="Attach images" disabled={images.length >= MAX_IMAGE_COUNT}>
+          <button
+            class="attach-button"
+            type="button"
+            onclick={triggerFileInput}
+            title="Attach images"
+            disabled={images.length >= MAX_IMAGE_COUNT}
+          >
             <ImageIcon size={16} />
-            <span>Attach Images {images.length > 0 ? `(${images.length}/${MAX_IMAGE_COUNT})` : ''}</span>
+            <span
+              >Attach Images {images.length > 0
+                ? `(${images.length}/${MAX_IMAGE_COUNT})`
+                : ''}</span
+            >
           </button>
           <p class="hint">Press ⌘Enter to start</p>
         </div>

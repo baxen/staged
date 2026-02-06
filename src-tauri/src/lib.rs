@@ -901,7 +901,8 @@ fn validate_images(images: &Option<Vec<ImageAttachment>>) -> Result<(), String> 
         }
 
         for (i, img) in imgs.iter().enumerate() {
-            img.validate().map_err(|e| format!("Image {}: {}", i + 1, e))?;
+            img.validate()
+                .map_err(|e| format!("Image {}: {}", i + 1, e))?;
         }
     }
     Ok(())

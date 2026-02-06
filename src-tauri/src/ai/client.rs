@@ -557,9 +557,19 @@ pub async fn run_acp_prompt(
     prompt: &str,
 ) -> Result<String, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    let result =
-        run_acp_prompt_internal(agent, working_dir, prompt, None, None, None, "", true, None, None)
-            .await?;
+    let result = run_acp_prompt_internal(
+        agent,
+        working_dir,
+        prompt,
+        None,
+        None,
+        None,
+        "",
+        true,
+        None,
+        None,
+    )
+    .await?;
     Ok(result.response)
 }
 
