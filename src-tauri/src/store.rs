@@ -291,6 +291,53 @@ pub struct ProjectAction {
     pub updated_at: i64,
 }
 
+impl ProjectAction {
+    pub fn new(
+        project_id: impl Into<String>,
+        name: impl Into<String>,
+        command: impl Into<String>,
+        action_type: ActionType,
+        sort_order: i32,
+    ) -> Self {
+        let now = now_timestamp();
+        Self {
+            id: uuid::Uuid::new_v4().to_string(),
+            project_id: project_id.into(),
+            name: name.into(),
+            command: command.into(),
+            action_type,
+            sort_order,
+            auto_commit: false,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    pub fn with_auto_commit(mut self, auto_commit: bool) -> Self {
+        self.auto_commit = auto_commit;
+        self
+    }
+
+    /// Create a ProjectAction from a database row.
+    fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        let action_type_str: String = row.get(4)?;
+        let action_type = ActionType::from_str(&action_type_str)
+            .ok_or_else(|| rusqlite::Error::InvalidColumnType(4, "action_type".to_string(), rusqlite::types::Type::Text))?;
+
+        Ok(Self {
+            id: row.get(0)?,
+            project_id: row.get(1)?,
+            name: row.get(2)?,
+            command: row.get(3)?,
+            action_type,
+            sort_order: row.get(5)?,
+            auto_commit: row.get::<_, i32>(6)? != 0,
+            created_at: row.get(7)?,
+            updated_at: row.get(8)?,
+        })
+    }
+}
+
 /// The persistent output of AI work.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -2010,6 +2057,118 @@ impl Store {
             "UPDATE git_projects SET updated_at = ?1 WHERE id = ?2",
             params![now, id],
         )?;
+        Ok(())
+    }
+
+    // ================================================================================
+    // Project Actions
+    // ================================================================================
+
+    /// Create a new project action
+    pub fn create_project_action(&self, action: &ProjectAction) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT INTO project_actions (id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![
+                &action.id,
+                &action.project_id,
+                &action.name,
+                &action.command,
+                action.action_type.as_str(),
+                action.sort_order,
+                if action.auto_commit { 1 } else { 0 },
+                action.created_at,
+                action.updated_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Get a project action by ID
+    pub fn get_project_action(&self, id: &str) -> Result<Option<ProjectAction>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at
+             FROM project_actions WHERE id = ?1",
+            params![id],
+            ProjectAction::from_row,
+        )
+        .optional()
+        .map_err(Into::into)
+    }
+
+    /// List all actions for a project, ordered by sort_order
+    pub fn list_project_actions(&self, project_id: &str) -> Result<Vec<ProjectAction>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at
+             FROM project_actions WHERE project_id = ?1 ORDER BY sort_order ASC",
+        )?;
+        let actions = stmt
+            .query_map(params![project_id], ProjectAction::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(actions)
+    }
+
+    /// List actions for a project filtered by type
+    pub fn list_project_actions_by_type(
+        &self,
+        project_id: &str,
+        action_type: ActionType,
+    ) -> Result<Vec<ProjectAction>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, project_id, name, command, action_type, sort_order, auto_commit, created_at, updated_at
+             FROM project_actions WHERE project_id = ?1 AND action_type = ?2 ORDER BY sort_order ASC",
+        )?;
+        let actions = stmt
+            .query_map(params![project_id, action_type.as_str()], ProjectAction::from_row)?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        Ok(actions)
+    }
+
+    /// Update a project action
+    pub fn update_project_action(&self, action: &ProjectAction) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_timestamp();
+        conn.execute(
+            "UPDATE project_actions
+             SET name = ?1, command = ?2, action_type = ?3, sort_order = ?4, auto_commit = ?5, updated_at = ?6
+             WHERE id = ?7",
+            params![
+                &action.name,
+                &action.command,
+                action.action_type.as_str(),
+                action.sort_order,
+                if action.auto_commit { 1 } else { 0 },
+                now,
+                &action.id,
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Delete a project action
+    pub fn delete_project_action(&self, id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM project_actions WHERE id = ?1", params![id])?;
+        Ok(())
+    }
+
+    /// Reorder project actions by updating their sort_order values
+    pub fn reorder_project_actions(&self, action_ids: &[String]) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let tx = conn.unchecked_transaction()?;
+
+        for (index, action_id) in action_ids.iter().enumerate() {
+            tx.execute(
+                "UPDATE project_actions SET sort_order = ?1, updated_at = ?2 WHERE id = ?3",
+                params![index as i32, now_timestamp(), action_id],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 }
