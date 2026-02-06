@@ -188,6 +188,7 @@
   // Dropdown state
   let showNewDropdown = $state(false);
   let showMoreMenu = $state(false);
+  let expandedSubmenu = $state<ActionType | null>(null);
 
   // Open in... button state
   let openerApps = $state<OpenerApp[]>([]);
@@ -247,6 +248,24 @@
         return BrushCleaning;
       case 'run':
         return Play;
+    }
+  }
+
+  // Helper function to get label for action type
+  function getActionTypeLabel(actionType: ActionType): string {
+    switch (actionType) {
+      case 'prerun':
+        return 'Prerun';
+      case 'format':
+        return 'Format';
+      case 'check':
+        return 'Check';
+      case 'test':
+        return 'Test';
+      case 'cleanUp':
+        return 'Clean Up';
+      case 'run':
+        return 'Run';
     }
   }
 
@@ -759,12 +778,42 @@
             {#if projectActions.length > 0}
               {#each Object.entries(groupedActions) as [type, actions], groupIndex}
                 {#if actions.length > 0}
-                  {#each actions as action (action.id)}
-                    <button class="more-menu-item action-item" onclick={() => handleRunAction(action)}>
-                      <svelte:component this={getActionIcon(type as ActionType)} size={14} />
-                      {action.name}
-                    </button>
-                  {/each}
+                  {#if actions.length >= 3}
+                    <!-- Submenu for 3+ actions -->
+                    <div class="submenu-container">
+                      <button
+                        class="more-menu-item submenu-trigger"
+                        onmouseenter={() => (expandedSubmenu = type as ActionType)}
+                        onmouseleave={() => (expandedSubmenu = null)}
+                      >
+                        <svelte:component this={getActionIcon(type as ActionType)} size={14} />
+                        {getActionTypeLabel(type as ActionType)}
+                        <ChevronDown size={12} class="submenu-chevron" />
+                      </button>
+                      {#if expandedSubmenu === type}
+                        <div
+                          class="submenu"
+                          onmouseenter={() => (expandedSubmenu = type as ActionType)}
+                          onmouseleave={() => (expandedSubmenu = null)}
+                        >
+                          {#each actions as action (action.id)}
+                            <button class="more-menu-item" onclick={() => handleRunAction(action)}>
+                              <svelte:component this={getActionIcon(type as ActionType)} size={14} />
+                              {action.name}
+                            </button>
+                          {/each}
+                        </div>
+                      {/if}
+                    </div>
+                  {:else}
+                    <!-- Direct items for <3 actions -->
+                    {#each actions as action (action.id)}
+                      <button class="more-menu-item action-item" onclick={() => handleRunAction(action)}>
+                        <svelte:component this={getActionIcon(type as ActionType)} size={14} />
+                        {action.name}
+                      </button>
+                    {/each}
+                  {/if}
                   <div class="menu-separator"></div>
                 {/if}
               {/each}
@@ -1522,6 +1571,34 @@
     height: 1px;
     background-color: var(--border-subtle);
     margin: 4px 0;
+  }
+
+  /* Submenu styles */
+  .submenu-container {
+    position: relative;
+  }
+
+  .submenu-trigger {
+    justify-content: space-between;
+  }
+
+  .submenu-trigger :global(.submenu-chevron) {
+    margin-left: auto;
+    transform: rotate(-90deg);
+  }
+
+  .submenu {
+    position: absolute;
+    left: 100%;
+    top: 0;
+    margin-left: 4px;
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+    z-index: 101;
+    min-width: 160px;
   }
 
   /* Running actions */
