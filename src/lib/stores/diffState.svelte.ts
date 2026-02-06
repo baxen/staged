@@ -141,7 +141,6 @@ export function getCachedDiff(path: string): FileDiff | null {
  * Clears the diff cache since we're loading a new spec.
  */
 export async function loadFiles(spec: DiffSpec, repoPath?: string): Promise<void> {
-  console.log('[diffState] loadFiles called with:', { spec, repoPath });
   diffState.loading = true;
   diffState.error = null;
   diffState.currentSpec = spec;
@@ -156,12 +155,7 @@ export async function loadFiles(spec: DiffSpec, repoPath?: string): Promise<void
       await loadFileDiff(pathToLoad);
     }
   } catch (e) {
-    const errorMsg = e instanceof Error ? e.message : String(e);
-    console.error('[diffState] loadFiles failed:', { spec, repoPath, error: errorMsg });
-    // Include repo path in error message for debugging
-    diffState.error = repoPath
-      ? `${errorMsg} (repo: ${repoPath})`
-      : errorMsg;
+    diffState.error = e instanceof Error ? e.message : String(e);
     diffState.files = [];
   } finally {
     diffState.loading = false;

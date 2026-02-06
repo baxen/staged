@@ -434,12 +434,6 @@
                     {branch}
                     {refreshKey}
                     onViewDiff={() => {
-                      console.log('[BranchHome] handleViewDiff called for:', {
-                        branchId,
-                        branchName,
-                        worktreePath,
-                        projectId,
-                      });
                       onViewDiff?.(
                         projectId,
                         worktreePath,
@@ -448,11 +442,6 @@
                       );
                     }}
                     onViewCommitDiff={(sha) => {
-                      console.log('[BranchHome] handleViewCommitDiff called for:', {
-                        branchId,
-                        branchName,
-                        sha,
-                      });
                       onViewDiff?.(
                         projectId,
                         worktreePath,
