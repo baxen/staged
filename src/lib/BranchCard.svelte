@@ -29,6 +29,9 @@
     Wand,
     CheckCircle,
     StopCircle,
+    Zap,
+    FlaskConical,
+    BrushCleaning,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -38,6 +41,7 @@
     OpenerApp,
     PullRequestInfo,
     ProjectAction,
+    ActionType,
   } from './services/branch';
   import * as branchService from './services/branch';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
@@ -211,6 +215,41 @@
 
   // Actions state
   let projectActions = $state<ProjectAction[]>([]);
+
+  // Group actions by type
+  let groupedActions = $derived.by(() => {
+    const groups: Record<ActionType, ProjectAction[]> = {
+      prerun: [],
+      format: [],
+      check: [],
+      test: [],
+      cleanUp: [],
+      run: [],
+    };
+    for (const action of projectActions) {
+      groups[action.actionType].push(action);
+    }
+    return groups;
+  });
+
+  // Helper function to get icon for action type
+  function getActionIcon(actionType: ActionType) {
+    switch (actionType) {
+      case 'prerun':
+        return Zap;
+      case 'format':
+        return Wand;
+      case 'check':
+        return CheckCircle;
+      case 'test':
+        return FlaskConical;
+      case 'cleanUp':
+        return BrushCleaning;
+      case 'run':
+        return Play;
+    }
+  }
+
   type RunningAction = {
     executionId: string;
     actionId: string;
@@ -718,21 +757,17 @@
         {#if showMoreMenu}
           <div class="more-menu">
             {#if projectActions.length > 0}
-              {#each projectActions as action (action.id)}
-                <button class="more-menu-item action-item" onclick={() => handleRunAction(action)}>
-                  {#if action.actionType === 'format'}
-                    <Wand size={14} />
-                  {:else if action.actionType === 'check'}
-                    <CheckCircle size={14} />
-                  {:else if action.actionType === 'prerun'}
-                    <Play size={14} />
-                  {:else}
-                    <Play size={14} />
-                  {/if}
-                  {action.name}
-                </button>
+              {#each Object.entries(groupedActions) as [type, actions], groupIndex}
+                {#if actions.length > 0}
+                  {#each actions as action (action.id)}
+                    <button class="more-menu-item action-item" onclick={() => handleRunAction(action)}>
+                      <svelte:component this={getActionIcon(type as ActionType)} size={14} />
+                      {action.name}
+                    </button>
+                  {/each}
+                  <div class="menu-separator"></div>
+                {/if}
               {/each}
-              <div class="menu-separator"></div>
             {/if}
 
             <button class="more-menu-item" onclick={handleViewDiff}>
