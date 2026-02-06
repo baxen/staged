@@ -374,6 +374,11 @@
                   <option value="cleanUp">Clean Up - Remove build artifacts</option>
                   <option value="prerun">Prerun - Auto-run on branch creation</option>
                 </select>
+                {#if editForm.actionType === 'prerun'}
+                  <div class="type-hint">
+                    Prerun actions will run automatically when a new worktree is created
+                  </div>
+                {/if}
               </div>
 
               <div class="form-group checkbox-group">
@@ -414,8 +419,8 @@
 
             {#if loadingActions}
               <div class="loading-state">
-                <Loader2 size={24} class="spinner" />
-                <span>Loading actions...</span>
+                <Loader2 size={24} />
+                <span>Loading...</span>
               </div>
             {:else if actions.length === 0}
               <div class="empty-state">
@@ -760,11 +765,6 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    transition: all 0.15s;
-  }
-
-  .action-item:hover {
-    background: var(--bg-hover);
   }
 
   .action-info {
@@ -780,7 +780,7 @@
   }
 
   .action-command {
-    display: block;
+    display: inline-block;
     font-size: 12px;
     color: var(--text-secondary);
     font-family: var(--font-mono);
@@ -791,6 +791,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     margin-top: 4px;
+    max-width: 100%;
   }
 
   .action-badge {
@@ -883,7 +884,25 @@
     cursor: pointer;
   }
 
-  :global(.spinner) {
+  .type-hint {
+    font-size: 12px;
+    color: var(--text-tertiary);
+    margin-top: 6px;
+    padding: 8px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    border-left: 3px solid var(--color-warning);
+  }
+
+  .loading-state :global(svg) {
+    animation: spin 1s linear infinite;
+  }
+
+  .actions-header :global(.spinner) {
+    animation: spin 1s linear infinite;
+  }
+
+  .button-row :global(.spinner) {
     animation: spin 1s linear infinite;
   }
 

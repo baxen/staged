@@ -42,7 +42,7 @@ Action type guidelines:
 - "check": Commands that validate without modifying (like "eslint", "cargo clippy", "mypy")
 - "test": Commands that run tests (like "npm test", "cargo test", "pytest")
 - "cleanUp": Commands that clean up build artifacts (like "npm run clean", "cargo clean", "rm -rf dist")
-- "run": Other commands (like "npm build", "cargo build")
+- "run": Other commands (like "npm build", "cargo build", "just dev", "npm run dev")
 
 IMPORTANT: Only suggest actions suitable for development environments. Skip:
 - Deploy/production commands (like "deploy", "publish", "release")
