@@ -1942,6 +1942,7 @@ async fn start_branch_session(
     branch_id: String,
     user_prompt: String,
     agent_id: Option<String>,
+    images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchSessionResponse, String> {
     // Get the branch to find the worktree path
     let branch = state
@@ -1980,7 +1981,7 @@ async fn start_branch_session(
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt, None)
+        .send_prompt(&ai_session_id, full_prompt, images)
         .await
     {
         // Clean up on failure
@@ -2336,6 +2337,7 @@ async fn restart_branch_session(
     session_manager: State<'_, Arc<SessionManager>>,
     branch_session_id: String,
     full_prompt: String,
+    images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchSessionResponse, String> {
     // Get the old session to retrieve the branch ID and prompt
     let old_session = state
@@ -2372,7 +2374,7 @@ async fn restart_branch_session(
 
     // Send the prompt to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt, None)
+        .send_prompt(&ai_session_id, full_prompt, images)
         .await
     {
         // Clean up on failure
@@ -2559,6 +2561,7 @@ async fn start_branch_note(
     title: String,
     description: String,
     agent_id: Option<String>,
+    images: Option<Vec<ImageAttachment>>,
 ) -> Result<StartBranchNoteResponse, String> {
     // Get the branch to find the worktree path
     let branch = state
@@ -2600,7 +2603,7 @@ async fn start_branch_note(
 
     // Send the full prompt (with context) to the AI
     if let Err(e) = session_manager
-        .send_prompt(&ai_session_id, full_prompt, None)
+        .send_prompt(&ai_session_id, full_prompt, images)
         .await
     {
         // Clean up on failure

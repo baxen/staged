@@ -8,8 +8,9 @@
   builds the full prompt with timeline context.
 -->
 <script lang="ts">
-  import { X, GitCommitHorizontal, GitBranch, Loader2, Send } from 'lucide-svelte';
+  import { X, GitCommitHorizontal, GitBranch, Loader2, Send, Image as ImageIcon } from 'lucide-svelte';
   import type { Branch } from './services/branch';
+  import type { ImageAttachment } from './types';
   import { startBranchSession } from './services/branch';
   import AgentSelector from './AgentSelector.svelte';
   import type { AcpProvider } from './stores/agent.svelte';
@@ -36,8 +37,10 @@
   let starting = $state(false);
   let error = $state<string | null>(null);
   let selectedProvider = $state<AcpProvider>((preferences.aiAgent as AcpProvider) || 'goose');
+  let images = $state<ImageAttachment[]>([]);
 
   let textareaEl: HTMLTextAreaElement | null = $state(null);
+  let fileInputEl: HTMLInputElement | null = $state(null);
 
   // Focus textarea on mount
   $effect(() => {
@@ -63,7 +66,7 @@
       const userPrompt = prompt.trim();
 
       // Backend handles all context gathering and prompt building
-      const result = await startBranchSession(branch.id, userPrompt, selectedProvider);
+      const result = await startBranchSession(branch.id, userPrompt, selectedProvider, images.length > 0 ? images : undefined);
 
       // Notify parent that session started
       onSessionStarted?.(result.branchSessionId, result.aiSessionId);
@@ -73,6 +76,55 @@
     } finally {
       starting = false;
     }
+  }
+
+  async function handleFileSelect(e: Event) {
+    const input = e.target as HTMLInputElement;
+    if (!input.files || input.files.length === 0) return;
+
+    try {
+      const newImages: ImageAttachment[] = [];
+      for (let i = 0; i < input.files.length; i++) {
+        const file = input.files[i];
+        if (!file.type.startsWith('image/')) {
+          error = `File ${file.name} is not an image`;
+          continue;
+        }
+
+        const base64 = await fileToBase64(file);
+        newImages.push({
+          data: base64,
+          mime_type: file.type,
+        });
+      }
+      images = [...images, ...newImages];
+      error = null;
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    }
+
+    if (input) input.value = '';
+  }
+
+  function fileToBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = reader.result as string;
+        const base64 = result.split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function removeImage(index: number) {
+    images = images.filter((_, i) => i !== index);
+  }
+
+  function triggerFileInput() {
+    fileInputEl?.click();
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -130,8 +182,35 @@
           rows={4}
           disabled={starting}
         ></textarea>
-        <p class="hint">Press ⌘Enter to start</p>
+        <div class="prompt-actions">
+          <button class="attach-button" type="button" onclick={triggerFileInput} title="Attach images">
+            <ImageIcon size={16} />
+            <span>Attach Images</span>
+          </button>
+          <p class="hint">Press ⌘Enter to start</p>
+        </div>
+        <input
+          bind:this={fileInputEl}
+          type="file"
+          accept="image/*"
+          multiple
+          style="display: none"
+          onchange={handleFileSelect}
+        />
       </div>
+
+      {#if images.length > 0}
+        <div class="images-preview">
+          {#each images as image, i}
+            <div class="image-item">
+              <img src={`data:${image.mime_type};base64,${image.data}`} alt="Attachment {i + 1}" />
+              <button class="remove-image" onclick={() => removeImage(i)} title="Remove image">
+                <X size={14} />
+              </button>
+            </div>
+          {/each}
+        </div>
+      {/if}
 
       {#if error}
         <div class="error-message">{error}</div>
@@ -286,6 +365,76 @@
 
   .form-group textarea::placeholder {
     color: var(--text-faint);
+  }
+
+  .prompt-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 8px;
+  }
+
+  .attach-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--border-muted);
+    border-radius: 4px;
+    color: var(--text-muted);
+    font-size: var(--size-sm);
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .attach-button:hover {
+    border-color: var(--border-emphasis);
+    color: var(--text-primary);
+    background-color: var(--bg-hover);
+  }
+
+  .images-preview {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .image-item {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 6px;
+    overflow: hidden;
+    border: 1px solid var(--border-muted);
+  }
+
+  .image-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .remove-image {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: rgba(0, 0, 0, 0.6);
+    border: none;
+    border-radius: 50%;
+    color: white;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+
+  .remove-image:hover {
+    background: rgba(0, 0, 0, 0.8);
   }
 
   .hint {
