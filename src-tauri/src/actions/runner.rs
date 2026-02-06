@@ -1,13 +1,13 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter};
 use std::io::{BufRead, BufReader};
 use std::thread;
 
-use crate::store::{ProjectAction, Store};
+use crate::store::Store;
 
 /// Event emitted when action output is produced
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,7 +172,7 @@ impl ActionRunner {
         let exec_id = execution_id.clone();
         let running_clone = self.running.clone();
         let app_clone = app.clone();
-        let store_clone = store.clone();
+        let _store_clone = store.clone();
         let branch_id_clone = branch_id.clone();
         let worktree_path_clone = worktree_path.clone();
         let auto_commit = action.auto_commit;
@@ -278,7 +278,6 @@ impl ActionRunner {
                 // Kill the process
                 #[cfg(unix)]
                 {
-                    use std::process;
                     unsafe {
                         libc::kill(pid as i32, libc::SIGTERM);
                     }

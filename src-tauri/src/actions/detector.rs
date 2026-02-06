@@ -1,10 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use crate::store::{ActionType, ProjectAction};
+use crate::store::ActionType;
 
 /// A suggested action that was detected
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,7 +211,7 @@ fn detect_cargo_actions(dir: &Path) -> Option<Vec<SuggestedAction>> {
         return None;
     }
 
-    let mut actions = vec![
+    let actions = vec![
         SuggestedAction {
             name: "Build".to_string(),
             command: "cargo build".to_string(),
