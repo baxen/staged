@@ -84,6 +84,5 @@ just check-all  # Verify everything passes
 
 **Before pushing PRs**, always run:
 ```bash
-just fmt        # Format code
-just lint       # Run linter checks
+just check-all  # Format, lint, and typecheck
 ```
