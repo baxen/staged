@@ -1598,11 +1598,11 @@
   }
 
   .primary-action-button:hover {
-    opacity: 0.9;
+    filter: brightness(1.1);
   }
 
   .primary-action-button:active {
-    opacity: 0.8;
+    filter: brightness(0.95);
   }
 
   .primary-action-button.running {
