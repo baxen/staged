@@ -966,6 +966,7 @@
   .agent-send-btn :global(.spinning),
   .agent-response-header :global(.spinning) {
     animation: spin 1s linear infinite;
+    transform-origin: center;
   }
 
   @keyframes spin {
