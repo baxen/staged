@@ -1638,7 +1638,9 @@ impl From<git::CommitInfo> for CommitInfo {
 /// This runs asynchronously to avoid blocking the UI during slow git operations.
 #[tauri::command(rename_all = "camelCase")]
 async fn create_branch(
+    app: tauri::AppHandle,
     state: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<actions::ActionRunner>>,
     project_id: String,
     repo_path: String,
     branch_name: String,
@@ -1646,9 +1648,11 @@ async fn create_branch(
 ) -> Result<Branch, String> {
     // Clone Arc for move into spawn_blocking
     let store = state.inner().clone();
+    let runner = runner.inner().clone();
+    let app_clone = app.clone();
 
     // Run blocking git operations on a separate thread
-    tauri::async_runtime::spawn_blocking(move || {
+    let branch = tauri::async_runtime::spawn_blocking(move || {
         let repo = Path::new(&repo_path);
 
         // Use provided base branch or detect the default
@@ -1687,7 +1691,34 @@ async fn create_branch(
         Ok(branch)
     })
     .await
-    .map_err(|e| format!("Task failed: {e}"))?
+    .map_err(|e| format!("Task failed: {e}"))??;
+
+    // Run prerun actions in the background (don't block branch creation)
+    let store_clone = state.inner().clone();
+    let branch_clone = branch.clone();
+    tauri::async_runtime::spawn(async move {
+        // Get prerun actions for this project
+        if let Ok(prerun_actions) = store_clone.list_project_actions_by_type(
+            &branch_clone.project_id,
+            crate::store::ActionType::Prerun,
+        ) {
+            // Execute each prerun action in order
+            for action in prerun_actions {
+                if let Err(e) = runner.run_action(
+                    app_clone.clone(),
+                    store_clone.clone(),
+                    branch_clone.id.clone(),
+                    action.id.clone(),
+                    branch_clone.worktree_path.clone(),
+                ) {
+                    eprintln!("Failed to run prerun action '{}': {}", action.name, e);
+                    // Continue with other actions even if one fails
+                }
+            }
+        }
+    });
+
+    Ok(branch)
 }
 
 /// Create a new branch from an existing GitHub PR.
@@ -1695,7 +1726,9 @@ async fn create_branch(
 /// Returns the created Branch with the PR's base as the base_branch and the PR number stored.
 #[tauri::command(rename_all = "camelCase")]
 async fn create_branch_from_pr(
+    app: tauri::AppHandle,
     state: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<actions::ActionRunner>>,
     project_id: String,
     repo_path: String,
     pr_number: u64,
@@ -1704,9 +1737,11 @@ async fn create_branch_from_pr(
 ) -> Result<Branch, String> {
     // Clone Arc for move into spawn_blocking
     let store = state.inner().clone();
+    let runner = runner.inner().clone();
+    let app_clone = app.clone();
 
     // Run blocking git operations on a separate thread
-    tauri::async_runtime::spawn_blocking(move || {
+    let branch = tauri::async_runtime::spawn_blocking(move || {
         let repo = Path::new(&repo_path);
 
         // Create the worktree from the PR
@@ -1739,7 +1774,34 @@ async fn create_branch_from_pr(
         Ok(branch)
     })
     .await
-    .map_err(|e| format!("Task failed: {e}"))?
+    .map_err(|e| format!("Task failed: {e}"))??;
+
+    // Run prerun actions in the background (don't block branch creation)
+    let store_clone = state.inner().clone();
+    let branch_clone = branch.clone();
+    tauri::async_runtime::spawn(async move {
+        // Get prerun actions for this project
+        if let Ok(prerun_actions) = store_clone.list_project_actions_by_type(
+            &branch_clone.project_id,
+            crate::store::ActionType::Prerun,
+        ) {
+            // Execute each prerun action in order
+            for action in prerun_actions {
+                if let Err(e) = runner.run_action(
+                    app_clone.clone(),
+                    store_clone.clone(),
+                    branch_clone.id.clone(),
+                    action.id.clone(),
+                    branch_clone.worktree_path.clone(),
+                ) {
+                    eprintln!("Failed to run prerun action '{}': {}", action.name, e);
+                    // Continue with other actions even if one fails
+                }
+            }
+        }
+    });
+
+    Ok(branch)
 }
 
 /// List git branches (local and remote) for base branch selection.

@@ -26,6 +26,9 @@
     GitPullRequest,
     RefreshCw,
     X,
+    Wand,
+    CheckCircle,
+    StopCircle,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -34,8 +37,11 @@
     BranchNote,
     OpenerApp,
     PullRequestInfo,
+    ProjectAction,
   } from './services/branch';
   import * as branchService from './services/branch';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import ActionOutputModal from './ActionOutputModal.svelte';
   import SessionViewerModal from './SessionViewerModal.svelte';
   import NoteViewerModal from './NoteViewerModal.svelte';
   import NewSessionModal from './NewSessionModal.svelte';
@@ -203,6 +209,24 @@
   let syncingFromPr = $state(false);
   let showPullConfirm = $state(false);
 
+  // Actions state
+  let projectActions = $state<ProjectAction[]>([]);
+  type RunningAction = {
+    executionId: string;
+    actionId: string;
+    actionName: string;
+    status: 'running' | 'completed' | 'failed' | 'stopped';
+  };
+  let runningActions = $state<RunningAction[]>([]);
+
+  // Action output modal state
+  let showActionOutput = $state(false);
+  let viewingActionExecution = $state<{ executionId: string; actionName: string } | null>(null);
+
+  // Event listeners
+  let unlistenActionStatus: UnlistenFn | null = null;
+  let unlistenActionAutoCommit: UnlistenFn | null = null;
+
   // Load commits and running session on mount
   onMount(async () => {
     await loadData();
@@ -213,6 +237,72 @@
         openersLoaded = true;
       });
     }
+
+    // Load project actions
+    if (branch.projectId) {
+      try {
+        projectActions = await branchService.listProjectActions(branch.projectId);
+      } catch (e) {
+        console.error('Failed to load project actions:', e);
+      }
+    }
+
+    // Listen for action status events
+    unlistenActionStatus = await listen('action_status', (event: any) => {
+      const payload = event.payload as {
+        executionId: string;
+        branchId: string;
+        actionId: string;
+        actionName: string;
+        status: string;
+      };
+
+      if (payload.branchId === branch.id) {
+        const existingIndex = runningActions.findIndex(
+          (a) => a.executionId === payload.executionId
+        );
+
+        if (payload.status === 'running') {
+          if (existingIndex === -1) {
+            runningActions.push({
+              executionId: payload.executionId,
+              actionId: payload.actionId,
+              actionName: payload.actionName,
+              status: 'running',
+            });
+          }
+        } else {
+          // Action completed/failed/stopped - update status temporarily then remove
+          if (existingIndex !== -1) {
+            runningActions[existingIndex].status = payload.status as any;
+            // Remove after a short delay
+            setTimeout(() => {
+              runningActions = runningActions.filter(
+                (a) => a.executionId !== payload.executionId
+              );
+            }, 2000);
+          }
+        }
+      }
+    });
+
+    // Listen for auto-commit events
+    unlistenActionAutoCommit = await listen('action_auto_commit', async (event: any) => {
+      const payload = event.payload as {
+        branchId: string;
+        actionName: string;
+      };
+
+      if (payload.branchId === branch.id) {
+        // Refresh commits to show the new commit
+        await loadData();
+      }
+    });
+
+    return () => {
+      if (unlistenActionStatus) unlistenActionStatus();
+      if (unlistenActionAutoCommit) unlistenActionAutoCommit();
+    };
   });
 
   // Reload when refreshKey changes
@@ -521,6 +611,32 @@
     }
   }
 
+  // Handle running an action
+  async function handleRunAction(action: ProjectAction) {
+    showMoreMenu = false;
+    try {
+      const executionId = await branchService.runBranchAction(branch.id, action.id);
+      // The running action will be added via the event listener
+      // Optionally show the output modal immediately
+      viewingActionExecution = {
+        executionId,
+        actionName: action.name,
+      };
+      showActionOutput = true;
+    } catch (e) {
+      console.error('Failed to run action:', e);
+    }
+  }
+
+  // Handle showing action output
+  function handleShowActionOutput(execution: RunningAction) {
+    viewingActionExecution = {
+      executionId: execution.executionId,
+      actionName: execution.actionName,
+    };
+    showActionOutput = true;
+  }
+
   // Handle discarding a stuck session
   async function handleDiscardSession() {
     if (!runningSession) return;
@@ -599,6 +715,26 @@
               <FileDiff size={14} />
               View Diff
             </button>
+
+            {#if projectActions.length > 0}
+              <div class="menu-separator"></div>
+              {#each projectActions as action (action.id)}
+                <button class="more-menu-item action-item" onclick={() => handleRunAction(action)}>
+                  {#if action.actionType === 'format'}
+                    <Wand size={14} />
+                  {:else if action.actionType === 'check'}
+                    <CheckCircle size={14} />
+                  {:else if action.actionType === 'prerun'}
+                    <Play size={14} />
+                  {:else}
+                    <Play size={14} />
+                  {/if}
+                  {action.name}
+                </button>
+              {/each}
+            {/if}
+
+            <div class="menu-separator"></div>
             <button class="more-menu-item danger" onclick={handleDeleteFromMenu}>
               <Trash2 size={14} />
               Delete
@@ -606,6 +742,27 @@
           </div>
         {/if}
       </div>
+      <!-- Running actions -->
+      {#each runningActions as execution (execution.executionId)}
+        <button
+          class="running-action-button"
+          class:completed={execution.status === 'completed'}
+          class:failed={execution.status === 'failed'}
+          onclick={() => handleShowActionOutput(execution)}
+          title="View output"
+        >
+          {#if execution.status === 'running'}
+            <Loader2 size={12} class="spinner" />
+          {:else if execution.status === 'completed'}
+            <CheckCircle size={12} />
+          {:else if execution.status === 'failed'}
+            <AlertCircle size={12} />
+          {:else}
+            <StopCircle size={12} />
+          {/if}
+          {execution.actionName}
+        </button>
+      {/each}
       <!-- Open in... button -->
       {#if openerApps.length > 0}
         <div class="open-in-container">
@@ -1080,6 +1237,19 @@
   />
 {/if}
 
+<!-- Action output modal -->
+{#if showActionOutput && viewingActionExecution}
+  <ActionOutputModal
+    executionId={viewingActionExecution.executionId}
+    actionName={viewingActionExecution.actionName}
+    branchId={branch.id}
+    onClose={() => {
+      showActionOutput = false;
+      viewingActionExecution = null;
+    }}
+  />
+{/if}
+
 <!-- Note viewer modal -->
 {#if showNoteViewer && viewingNote}
   <NoteViewerModal
@@ -1304,6 +1474,48 @@
 
   .more-menu-item.danger:hover :global(svg) {
     color: var(--ui-danger);
+  }
+
+  .menu-separator {
+    height: 1px;
+    background-color: var(--border-subtle);
+    margin: 4px 0;
+  }
+
+  /* Running actions */
+  .running-action-button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-muted);
+    border-radius: 6px;
+    color: var(--text-primary);
+    font-size: var(--size-xs);
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .running-action-button:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-focus);
+  }
+
+  .running-action-button.completed {
+    border-color: var(--ui-success);
+    color: var(--ui-success);
+  }
+
+  .running-action-button.failed {
+    border-color: var(--ui-danger);
+    color: var(--ui-danger);
+  }
+
+  .running-action-button :global(svg) {
+    flex-shrink: 0;
   }
 
   /* Content */
