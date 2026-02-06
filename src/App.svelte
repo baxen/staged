@@ -518,36 +518,40 @@
     // Update repo state
     openRepo(repoPath);
 
-    // Save current tab state before creating new one
-    syncGlobalToTab();
+    // Check if a project exists for this repo
+    const project = await branchService.getGitProjectByRepo(repoPath);
 
-    // Get or create a project for this repo
-    const project = await branchService.getOrCreateGitProject(repoPath);
-    const repoName = extractRepoName(repoPath);
+    if (project) {
+      // Save current tab state before creating new one
+      syncGlobalToTab();
 
-    addTab(
-      project.id,
-      repoPath,
-      repoName,
-      project.subpath,
-      createDiffState,
-      createCommentsState,
-      createDiffSelection,
-      createAgentState,
-      createReferenceFilesState
-    );
+      const repoName = extractRepoName(repoPath);
 
-    // Start watching the new repo (idempotent - won't restart if already watching)
-    watchRepo(repoPath);
+      addTab(
+        project.id,
+        repoPath,
+        repoName,
+        project.subpath,
+        createDiffState,
+        createCommentsState,
+        createDiffSelection,
+        createAgentState,
+        createReferenceFilesState
+      );
 
-    // Sync to the new tab
-    syncTabToGlobal();
+      // Start watching the new repo (idempotent - won't restart if already watching)
+      watchRepo(repoPath);
 
-    // Initialize the new tab
-    const newTab = getActiveTab();
-    if (newTab) {
-      await initializeNewTab(newTab);
+      // Sync to the new tab
+      syncTabToGlobal();
+
+      // Initialize the new tab
+      const newTab = getActiveTab();
+      if (newTab) {
+        await initializeNewTab(newTab);
+      }
     }
+    // If no project exists, user must add it via Add Project button first
   }
 
   // Get current diff - check reference files first
@@ -721,44 +725,49 @@
       const repoPath = await initRepoState();
 
       if (repoPath) {
-        // Get or create a project for this repo
-        const project = await branchService.getOrCreateGitProject(repoPath);
+        // Check if a project exists for this repo
+        const project = await branchService.getGitProjectByRepo(repoPath);
 
-        // Check if we already have a tab for this project
-        const existingTabIndex = windowState.tabs.findIndex((t) => t.projectId === project.id);
+        if (project) {
+          // Check if we already have a tab for this project
+          const existingTabIndex = windowState.tabs.findIndex((t) => t.projectId === project.id);
 
-        if (existingTabIndex >= 0) {
-          // Switch to existing tab for this project
-          switchTab(existingTabIndex);
-        } else {
-          // Create new tab for the CLI path
-          const repoName = extractRepoName(repoPath);
-          addTab(
-            project.id,
-            repoPath,
-            repoName,
-            project.subpath,
-            createDiffState,
-            createCommentsState,
-            createDiffSelection,
-            createAgentState,
-            createReferenceFilesState
-          );
+          if (existingTabIndex >= 0) {
+            // Switch to existing tab for this project
+            switchTab(existingTabIndex);
+          } else {
+            // Create new tab for the CLI path
+            const repoName = extractRepoName(repoPath);
+            addTab(
+              project.id,
+              repoPath,
+              repoName,
+              project.subpath,
+              createDiffState,
+              createCommentsState,
+              createDiffSelection,
+              createAgentState,
+              createReferenceFilesState
+            );
+          }
+
+          // Sync the active tab to global state
+          syncTabToGlobal();
+
+          // Watch the active tab's repo
+          const tab = getActiveTab();
+          if (tab) {
+            await watchRepo(tab.repoPath);
+
+            // Initialize the active tab
+            await initializeNewTab(tab);
+          }
         }
+        // If no project exists, don't create one - user must use Add Project button
+      }
 
-        // Sync the active tab to global state
-        syncTabToGlobal();
-
-        // Watch the active tab's repo
-        const tab = getActiveTab();
-        if (tab) {
-          await watchRepo(tab.repoPath);
-
-          // Initialize the active tab
-          await initializeNewTab(tab);
-        }
-      } else if (windowState.tabs.length > 0) {
-        // No CLI path but we have restored tabs - use them
+      // Use restored tabs if available
+      if (windowState.tabs.length > 0) {
         syncTabToGlobal();
 
         const tab = getActiveTab();

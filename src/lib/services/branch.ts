@@ -668,10 +668,3 @@ export async function deleteGitProject(projectId: string): Promise<void> {
   return invoke<void>('delete_git_project', { projectId });
 }
 
-/**
- * Get or create a git project for a repo path.
- * If no project exists, creates one with the repo folder name as the project name.
- */
-export async function getOrCreateGitProject(repoPath: string): Promise<GitProject> {
-  return invoke<GitProject>('get_or_create_git_project', { repoPath });
-}

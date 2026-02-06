@@ -2872,30 +2872,6 @@ fn delete_git_project(state: State<'_, Arc<Store>>, project_id: String) -> Resul
         .map_err(|e| e.to_string())
 }
 
-/// Get or create a git project for a repo_path.
-/// If no project exists, creates one for the given repo.
-#[tauri::command(rename_all = "camelCase")]
-fn get_or_create_git_project(
-    state: State<'_, Arc<Store>>,
-    repo_path: String,
-) -> Result<GitProject, String> {
-    // Canonicalize the repo path to ensure consistent comparison
-    let canonical_repo_path = canonicalize_repo_path(&repo_path);
-
-    // Check if project already exists
-    if let Some(existing) = state
-        .get_git_project_by_repo(&canonical_repo_path)
-        .map_err(|e| e.to_string())?
-    {
-        return Ok(existing);
-    }
-
-    let project = GitProject::new(&canonical_repo_path);
-    state
-        .create_git_project(&project)
-        .map_err(|e| e.to_string())?;
-    Ok(project)
-}
 
 // =============================================================================
 // Theme Commands
@@ -3483,7 +3459,6 @@ pub fn run() {
             list_git_projects,
             update_git_project,
             delete_git_project,
-            get_or_create_git_project,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

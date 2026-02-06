@@ -188,8 +188,8 @@
     }
   }
 
-  function handleNewBranch(project?: GitProject) {
-    newBranchForProject = project || null;
+  function handleNewBranch(project: GitProject) {
+    newBranchForProject = project;
     showNewBranchModal = true;
   }
 
@@ -327,10 +327,13 @@
       return;
     }
 
-    // Cmd+N - New branch
+    // Cmd+N - New branch (requires at least one project)
     if (e.metaKey && e.key === 'n') {
       e.preventDefault();
-      handleNewBranch();
+      if (projects.length > 0) {
+        // Open new branch modal for the first project
+        handleNewBranch(projects[0]);
+      }
       return;
     }
 
@@ -375,12 +378,12 @@
       <div class="empty-state">
         <Sparkles size={48} strokeWidth={1} />
         <h2>Welcome to Staged</h2>
-        <p>Create a branch to start working</p>
-        <button class="create-button" onclick={() => handleNewBranch()}>
+        <p>Add a project to start working</p>
+        <button class="create-button" onclick={() => (showNewProjectModal = true)}>
           <Plus size={16} />
-          New Branch
+          Add Project
         </button>
-        <span class="shortcut-hint">or press ⌘N</span>
+        <span class="shortcut-hint">or press ⌘P</span>
       </div>
     {:else}
       <!-- Branches grouped by project -->
@@ -512,10 +515,10 @@
 {/if}
 
 <!-- New branch modal -->
-{#if showNewBranchModal}
+{#if showNewBranchModal && newBranchForProject}
   <NewBranchModal
-    initialRepoPath={newBranchForProject?.repoPath}
-    projectId={newBranchForProject?.id}
+    initialRepoPath={newBranchForProject.repoPath}
+    projectId={newBranchForProject.id}
     onCreating={handleBranchCreating}
     onCreated={handleBranchCreated}
     onCreateFailed={handleBranchCreateFailed}
