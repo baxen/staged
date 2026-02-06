@@ -267,6 +267,19 @@ impl SessionManager {
         let store = self.store.clone();
         let streaming_buffer = Arc::clone(&self.streaming_buffer);
 
+        // Create callback to update buffer during streaming
+        let session_id_for_callback = session_id_owned.clone();
+        let buffer_for_callback = Arc::clone(&self.streaming_buffer);
+        let buffer_callback = Arc::new(move |segments: Vec<ContentSegment>| {
+            let session_id = session_id_for_callback.clone();
+            let buffer = Arc::clone(&buffer_for_callback);
+            // Spawn a task to update the buffer asynchronously
+            tokio::spawn(async move {
+                let mut buffer = buffer.write().await;
+                buffer.insert(session_id, segments);
+            });
+        });
+
         tokio::spawn(async move {
             // Run the ACP prompt with streaming
             let result = client::run_acp_prompt_streaming(
@@ -276,6 +289,7 @@ impl SessionManager {
                 acp_session_id.as_deref(),
                 &session_id_owned,
                 app_handle.clone(),
+                Some(buffer_callback),
             )
             .await;
 

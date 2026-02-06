@@ -931,6 +931,7 @@ async fn send_agent_prompt_streaming(
         session_id.as_deref(),
         internal_id,
         app_handle,
+        None, // No buffer callback for legacy path
     )
     .await?;
 
@@ -1528,6 +1529,7 @@ async fn run_artifact_generation(
         None,
         &session_id,
         app_handle.clone(),
+        None, // No buffer callback for legacy code review sessions
     )
     .await
     {

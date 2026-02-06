@@ -293,6 +293,8 @@ struct StreamingAcpClient {
     tool_call_indices: Mutex<HashMap<String, usize>>,
     /// Whether to suppress emitting events (used during session load replay)
     suppress_emit: Mutex<bool>,
+    /// Optional callback for buffer updates (called whenever segments change)
+    buffer_update_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
 }
 
 impl StreamingAcpClient {
@@ -303,6 +305,22 @@ impl StreamingAcpClient {
             segments: Mutex::new(Vec::new()),
             tool_call_indices: Mutex::new(HashMap::new()),
             suppress_emit: Mutex::new(false),
+            buffer_update_callback: None,
+        }
+    }
+
+    fn with_buffer_callback(
+        app_handle: Option<tauri::AppHandle>,
+        internal_session_id: String,
+        callback: Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>,
+    ) -> Self {
+        Self {
+            app_handle,
+            internal_session_id,
+            segments: Mutex::new(Vec::new()),
+            tool_call_indices: Mutex::new(HashMap::new()),
+            suppress_emit: Mutex::new(false),
+            buffer_update_callback: Some(callback),
         }
     }
 
@@ -364,6 +382,14 @@ impl StreamingAcpClient {
         self.segments.lock().await.clear();
         self.tool_call_indices.lock().await.clear();
     }
+
+    /// Notify buffer callback with current segments
+    async fn notify_buffer_update(&self) {
+        if let Some(ref callback) = self.buffer_update_callback {
+            let segments = self.get_segments().await;
+            callback(segments);
+        }
+    }
 }
 
 #[async_trait(?Send)]
@@ -391,6 +417,7 @@ impl agent_client_protocol::Client for StreamingAcpClient {
         self.emit_update(&notification).await;
 
         // 2. Update internal state - track segments in order
+        let mut should_notify_buffer = false;
         match &notification.update {
             SessionUpdate::AgentMessageChunk(chunk) => {
                 if let AcpContentBlock::Text(text) = &chunk.content {
@@ -401,6 +428,7 @@ impl agent_client_protocol::Client for StreamingAcpClient {
                     } else {
                         segments.push(ContentSegment::Text(text.text.clone()));
                     }
+                    should_notify_buffer = true;
                 }
             }
             SessionUpdate::ToolCall(tool_call) => {
@@ -410,6 +438,7 @@ impl agent_client_protocol::Client for StreamingAcpClient {
                 let idx = segments.len();
                 indices.insert(state.id.clone(), idx);
                 segments.push(ContentSegment::ToolCall(state));
+                should_notify_buffer = true;
             }
             SessionUpdate::ToolCallUpdate(update) => {
                 let indices = self.tool_call_indices.lock().await;
@@ -425,12 +454,18 @@ impl agent_client_protocol::Client for StreamingAcpClient {
                         if let Some(ref content) = update.fields.content {
                             tc.result_preview = extract_content_preview(content);
                         }
+                        should_notify_buffer = true;
                     }
                 }
             }
             _ => {
                 log::debug!("Ignoring session update: {:?}", notification.update);
             }
+        }
+
+        // 3. Notify buffer callback if segments were updated
+        if should_notify_buffer {
+            self.notify_buffer_update().await;
         }
 
         Ok(())
@@ -501,7 +536,7 @@ pub async fn run_acp_prompt(
     prompt: &str,
 ) -> Result<String, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true).await?;
+    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None).await?;
     Ok(result.response)
 }
 
@@ -514,7 +549,7 @@ pub async fn run_acp_prompt_raw(
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false).await?;
+    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false, None).await?;
     Ok(result.response)
 }
 
@@ -530,7 +565,7 @@ pub async fn run_acp_prompt_with_session(
     session_id: Option<&str>,
 ) -> Result<AcpPromptResult, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "", true).await
+    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "", true, None).await
 }
 
 /// Run a prompt through ACP with streaming events emitted to frontend
@@ -545,6 +580,7 @@ pub async fn run_acp_prompt_streaming(
     acp_session_id: Option<&str>,
     internal_session_id: &str,
     app_handle: tauri::AppHandle,
+    buffer_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
 ) -> Result<AcpPromptResult, String> {
     run_acp_prompt_internal(
         agent,
@@ -554,6 +590,7 @@ pub async fn run_acp_prompt_streaming(
         Some(app_handle),
         internal_session_id,
         true,
+        buffer_callback,
     )
     .await
 }
@@ -567,6 +604,7 @@ async fn run_acp_prompt_internal(
     app_handle: Option<tauri::AppHandle>,
     internal_session_id: &str,
     prepend_system_context: bool,
+    buffer_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
 ) -> Result<AcpPromptResult, String> {
     let agent_path = agent.path().to_path_buf();
     let agent_name = agent.name().to_string();
@@ -598,6 +636,7 @@ async fn run_acp_prompt_internal(
                 app_handle,
                 &internal_session_id,
                 prepend_system_context,
+                buffer_callback,
             )
             .await
         })
@@ -618,6 +657,7 @@ async fn run_acp_session_inner(
     app_handle: Option<tauri::AppHandle>,
     internal_session_id: &str,
     prepend_system_context: bool,
+    buffer_callback: Option<Arc<dyn Fn(Vec<crate::store::ContentSegment>) + Send + Sync>>,
 ) -> Result<AcpPromptResult, String> {
     // Spawn the agent process with ACP mode
     let mut cmd = Command::new(agent_path);
@@ -647,10 +687,15 @@ async fn run_acp_session_inner(
     let stdout_compat = stdout.compat();
 
     // Create streaming client with our internal session ID for event correlation
-    let client = Arc::new(StreamingAcpClient::new(
-        app_handle.clone(),
-        internal_session_id.to_string(),
-    ));
+    let client = Arc::new(if let Some(callback) = buffer_callback {
+        StreamingAcpClient::with_buffer_callback(
+            app_handle.clone(),
+            internal_session_id.to_string(),
+            callback,
+        )
+    } else {
+        StreamingAcpClient::new(app_handle.clone(), internal_session_id.to_string())
+    });
     let client_for_connection = Arc::clone(&client);
 
     // Create the ACP connection
