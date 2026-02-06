@@ -3,6 +3,7 @@
 //! This module provides the bridge between the frontend and the git/github modules.
 //! Supports CLI arguments: `staged [path]` opens the app with the specified directory.
 
+pub mod actions;
 pub mod ai;
 pub mod git;
 pub mod project;
@@ -2869,6 +2870,152 @@ fn get_or_create_git_project(
 }
 
 // =============================================================================
+// Project Action Commands
+// =============================================================================
+
+/// List all actions for a project
+#[tauri::command(rename_all = "camelCase")]
+fn list_project_actions(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<store::ProjectAction>, String> {
+    state
+        .list_project_actions(&project_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Create a new project action
+#[tauri::command(rename_all = "camelCase")]
+fn create_project_action(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+    name: String,
+    command: String,
+    action_type: String,
+    sort_order: i32,
+    auto_commit: bool,
+) -> Result<store::ProjectAction, String> {
+    let action_type = store::ActionType::from_str(&action_type)
+        .ok_or_else(|| format!("Invalid action type: {}", action_type))?;
+
+    let action = store::ProjectAction::new(project_id, name, command, action_type, sort_order)
+        .with_auto_commit(auto_commit);
+
+    state
+        .create_project_action(&action)
+        .map_err(|e| e.to_string())?;
+
+    Ok(action)
+}
+
+/// Update a project action
+#[tauri::command(rename_all = "camelCase")]
+fn update_project_action(
+    state: State<'_, Arc<Store>>,
+    action_id: String,
+    name: String,
+    command: String,
+    action_type: String,
+    sort_order: i32,
+    auto_commit: bool,
+) -> Result<(), String> {
+    let action_type = store::ActionType::from_str(&action_type)
+        .ok_or_else(|| format!("Invalid action type: {}", action_type))?;
+
+    // Get existing action
+    let mut action = state
+        .get_project_action(&action_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Action not found: {}", action_id))?;
+
+    // Update fields
+    action.name = name;
+    action.command = command;
+    action.action_type = action_type;
+    action.sort_order = sort_order;
+    action.auto_commit = auto_commit;
+
+    state
+        .update_project_action(&action)
+        .map_err(|e| e.to_string())
+}
+
+/// Delete a project action
+#[tauri::command(rename_all = "camelCase")]
+fn delete_project_action(state: State<'_, Arc<Store>>, action_id: String) -> Result<(), String> {
+    state
+        .delete_project_action(&action_id)
+        .map_err(|e| e.to_string())
+}
+
+/// Reorder project actions
+#[tauri::command(rename_all = "camelCase")]
+fn reorder_project_actions(
+    state: State<'_, Arc<Store>>,
+    action_ids: Vec<String>,
+) -> Result<(), String> {
+    state
+        .reorder_project_actions(&action_ids)
+        .map_err(|e| e.to_string())
+}
+
+/// Detect actions for a project
+#[tauri::command(rename_all = "camelCase")]
+fn detect_project_actions(
+    state: State<'_, Arc<Store>>,
+    project_id: String,
+) -> Result<Vec<actions::SuggestedAction>, String> {
+    // Get the project
+    let project = state
+        .get_git_project(&project_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Project not found: {}", project_id))?;
+
+    // Detect actions
+    let repo_path = std::path::Path::new(&project.repo_path);
+    actions::detect_actions(repo_path, project.subpath.as_deref()).map_err(|e| e.to_string())
+}
+
+/// Run an action on a branch
+#[tauri::command(rename_all = "camelCase")]
+fn run_branch_action(
+    state: State<'_, Arc<Store>>,
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    app: tauri::AppHandle,
+    branch_id: String,
+    action_id: String,
+) -> Result<String, String> {
+    // Get the branch to find its worktree path
+    let branch = state
+        .get_branch(&branch_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| format!("Branch not found: {}", branch_id))?;
+
+    // Run the action
+    runner
+        .run_action(app, state.inner().clone(), branch_id, action_id, branch.worktree_path)
+        .map_err(|e| e.to_string())
+}
+
+/// Stop a running action
+#[tauri::command(rename_all = "camelCase")]
+fn stop_branch_action(
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    execution_id: String,
+) -> Result<(), String> {
+    runner.stop_action(&execution_id).map_err(|e| e.to_string())
+}
+
+/// Get all running actions for a branch
+#[tauri::command(rename_all = "camelCase")]
+fn get_running_branch_actions(
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    branch_id: String,
+) -> Result<Vec<actions::ActionStatusEvent>, String> {
+    Ok(runner.get_running_actions(&branch_id))
+}
+
+// =============================================================================
 // Theme Commands
 // =============================================================================
 
@@ -3314,8 +3461,12 @@ pub fn run() {
             app.manage(store.clone());
 
             // Initialize the session manager
-            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), store));
+            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), store.clone()));
             app.manage(session_manager);
+
+            // Initialize the action runner
+            let action_runner = Arc::new(actions::ActionRunner::new());
+            app.manage(action_runner);
 
             // Initialize the watcher handle (spawns background thread)
             let watcher = WatcherHandle::new(app.handle().clone());
@@ -3455,6 +3606,16 @@ pub fn run() {
             update_git_project,
             delete_git_project,
             get_or_create_git_project,
+            // Project action commands
+            list_project_actions,
+            create_project_action,
+            update_project_action,
+            delete_project_action,
+            reorder_project_actions,
+            detect_project_actions,
+            run_branch_action,
+            stop_branch_action,
+            get_running_branch_actions,
             // Theme commands
             get_custom_themes,
             read_custom_theme,
