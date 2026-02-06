@@ -57,6 +57,7 @@
   // Scroll position tracking
   let contentElement: HTMLDivElement | null = null;
   let savedScrollTop = $state(0);
+  let shouldRestoreScroll = $state(false);
 
   // Expose the add project trigger to parent (top bar "Add Project" button)
   $effect(() => {
@@ -65,27 +66,20 @@
     });
   });
 
-  // Save scroll position when refreshKey changes (before re-render)
+  // Save scroll position when refreshKey changes and set flag for restoration
   $effect(() => {
-    // Track refreshKey to trigger on changes
     refreshKey;
-
-    // Save current scroll position before re-render
     if (contentElement) {
       savedScrollTop = contentElement.scrollTop;
+      shouldRestoreScroll = true;
     }
   });
 
   // Restore scroll position after DOM updates
   $effect(() => {
-    // Track dependencies that affect rendering
-    refreshKey;
-    branches.length;
-    pendingBranches.length;
-
-    // Restore scroll position after re-render
-    if (contentElement && savedScrollTop > 0) {
+    if (shouldRestoreScroll && contentElement) {
       contentElement.scrollTop = savedScrollTop;
+      shouldRestoreScroll = false;
     }
   });
 
