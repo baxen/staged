@@ -667,4 +667,3 @@ export async function updateGitProject(projectId: string, subpath: string | null
 export async function deleteGitProject(projectId: string): Promise<void> {
   return invoke<void>('delete_git_project', { projectId });
 }
-
