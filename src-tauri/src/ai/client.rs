@@ -557,7 +557,9 @@ pub async fn run_acp_prompt(
     prompt: &str,
 ) -> Result<String, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None, None).await?;
+    let result =
+        run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", true, None, None)
+            .await?;
     Ok(result.response)
 }
 
@@ -570,7 +572,18 @@ pub async fn run_acp_prompt_raw(
     working_dir: &Path,
     prompt: &str,
 ) -> Result<String, String> {
-    let result = run_acp_prompt_internal(agent, working_dir, prompt, None, None, "", false, None, None).await?;
+    let result = run_acp_prompt_internal(
+        agent,
+        working_dir,
+        prompt,
+        None,
+        None,
+        "",
+        false,
+        None,
+        None,
+    )
+    .await?;
     Ok(result.response)
 }
 
@@ -586,7 +599,18 @@ pub async fn run_acp_prompt_with_session(
     session_id: Option<&str>,
 ) -> Result<AcpPromptResult, String> {
     // No streaming, no events emitted — internal_session_id is unused
-    run_acp_prompt_internal(agent, working_dir, prompt, session_id, None, "", true, None, None).await
+    run_acp_prompt_internal(
+        agent,
+        working_dir,
+        prompt,
+        session_id,
+        None,
+        "",
+        true,
+        None,
+        None,
+    )
+    .await
 }
 
 use super::session::CancellationHandle;
