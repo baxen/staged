@@ -905,9 +905,9 @@
           <button
             class="pr-update-button"
             onclick={() => (showCreatePrModal = true)}
-            title="Push local changes to PR"
+            title="Update pull request with local commits"
           >
-            Push
+            Update
           </button>
         {:else if prLoading}
           <!-- Loading PR state -->
