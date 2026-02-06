@@ -2458,11 +2458,14 @@ struct UpdateBranchFromPrResult {
 /// **Warning**: This will discard any local uncommitted changes and any local
 /// commits that are not in the PR.
 ///
-/// Requires the branch to have an associated PR number (created via create_branch_from_pr).
+/// The PR number can come from:
+/// 1. The `pr_number` parameter (for branches with an existing PR discovered at runtime)
+/// 2. The branch's stored `pr_number` field (for branches created from a PR)
 #[tauri::command(rename_all = "camelCase")]
 async fn update_branch_from_pr(
     state: State<'_, Arc<Store>>,
     branch_id: String,
+    pr_number: Option<u64>,
 ) -> Result<UpdateBranchFromPrResult, String> {
     // Clone Arc for move into spawn_blocking
     let store = state.inner().clone();
@@ -2475,16 +2478,15 @@ async fn update_branch_from_pr(
             .map_err(|e| e.to_string())?
             .ok_or_else(|| format!("Branch '{branch_id}' not found"))?;
 
-        // Check that this branch has an associated PR
-        let pr_number = branch
-            .pr_number
-            .ok_or_else(|| "Branch is not associated with a PR. Use 'Update from PR' only for branches created from PRs.".to_string())?;
+        // Use provided PR number or fall back to branch's stored PR number
+        let pr_num = pr_number.or(branch.pr_number).ok_or_else(|| {
+            "No PR number provided. This branch is not associated with a PR.".to_string()
+        })?;
 
         let worktree = Path::new(&branch.worktree_path);
 
         // Update the branch from the PR
-        let result = git::update_branch_from_pr(worktree, pr_number)
-            .map_err(|e| e.to_string())?;
+        let result = git::update_branch_from_pr(worktree, pr_num).map_err(|e| e.to_string())?;
 
         let already_up_to_date = result.old_sha == result.new_sha;
 

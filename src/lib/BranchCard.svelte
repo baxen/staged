@@ -42,6 +42,7 @@
   import NewReviewModal from './NewReviewModal.svelte';
   import BaseBranchPickerModal from './BaseBranchPickerModal.svelte';
   import CreatePrModal from './CreatePrModal.svelte';
+  import ConfirmDialog from './ConfirmDialog.svelte';
   import { openUrl } from './services/window';
 
   interface Props {
@@ -199,6 +200,7 @@
 
   // Sync from PR state (for branches created from a PR)
   let syncingFromPr = $state(false);
+  let showPullConfirm = $state(false);
 
   // Load commits and running session on mount
   onMount(async () => {
@@ -523,8 +525,11 @@
   }
 
   // Handle syncing local branch from PR (pull latest PR commits)
+  // Works for branches created from a PR (branch.prNumber)
   async function handleSyncFromPr() {
     if (!branch.prNumber) return;
+
+    showPullConfirm = false;
     syncingFromPr = true;
     try {
       const result = await branchService.updateBranchFromPr(branch.id);
@@ -877,7 +882,7 @@
         </button>
         <button
           class="sync-button"
-          onclick={handleSyncFromPr}
+          onclick={() => (showPullConfirm = true)}
           disabled={syncingFromPr}
           title="Pull latest commits from PR"
         >
@@ -886,7 +891,7 @@
           {:else}
             <RefreshCw size={14} />
           {/if}
-          Sync
+          Pull
         </button>
       {:else if commits.length > 0}
         {#if existingPr}
@@ -1030,6 +1035,17 @@
       showNoteViewer = false;
       viewingNote = null;
     }}
+  />
+{/if}
+
+<!-- Pull confirmation dialog -->
+{#if showPullConfirm}
+  <ConfirmDialog
+    title="Pull from PR"
+    message="This will fetch and merge the latest commits from the pull request into your local branch."
+    confirmLabel="Pull"
+    onConfirm={handleSyncFromPr}
+    onCancel={() => (showPullConfirm = false)}
   />
 {/if}
 
