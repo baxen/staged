@@ -17,7 +17,7 @@ use tauri::{AppHandle, Emitter};
 use tokio::sync::RwLock;
 
 use super::client::{self, AcpAgent, AcpPromptResult};
-use crate::store::{generate_session_id, MessageRole, Session, Store};
+use crate::store::{generate_session_id, ContentSegment, MessageRole, Session, Store};
 
 // =============================================================================
 // Types
@@ -77,6 +77,9 @@ pub struct SessionManager {
     app_handle: AppHandle,
     /// Store for persistence
     store: Arc<Store>,
+    /// In-memory buffer for streaming messages (session_id -> segments)
+    /// Stores messages as they arrive during streaming, before DB persistence
+    streaming_buffer: Arc<RwLock<HashMap<String, Vec<ContentSegment>>>>,
 }
 
 impl SessionManager {
@@ -86,6 +89,7 @@ impl SessionManager {
             sessions: RwLock::new(HashMap::new()),
             app_handle,
             store,
+            streaming_buffer: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -261,6 +265,7 @@ impl SessionManager {
         let session_id_owned = session_id.to_string();
         let session_arc_clone = session_arc.clone();
         let store = self.store.clone();
+        let streaming_buffer = Arc::clone(&self.streaming_buffer);
 
         tokio::spawn(async move {
             // Run the ACP prompt with streaming
@@ -283,9 +288,19 @@ impl SessionManager {
                     session.acp_session_id = Some(acp_result.session_id.clone());
                     session.status = SessionStatus::Idle;
 
+                    // Buffer the streaming segments before persisting
+                    {
+                        let mut buffer = streaming_buffer.write().await;
+                        buffer.insert(session_id_owned.clone(), acp_result.segments.clone());
+                    }
+
                     // Persist the assistant response
                     if let Err(e) = persist_assistant_turn(&store, &session_id_owned, &acp_result) {
                         log::error!("Failed to persist assistant turn: {}", e);
+                    } else {
+                        // Clear buffer after successful persistence
+                        let mut buffer = streaming_buffer.write().await;
+                        buffer.remove(&session_id_owned);
                     }
 
                     // Auto-generate title from first user message if not set
@@ -296,6 +311,9 @@ impl SessionManager {
                 Err(e) => {
                     log::error!("Session {} prompt failed: {}", session_id_owned, e);
                     session.status = SessionStatus::Error { message: e };
+                    // Clear buffer on error too
+                    let mut buffer = streaming_buffer.write().await;
+                    buffer.remove(&session_id_owned);
                 }
             }
 
@@ -316,6 +334,24 @@ impl SessionManager {
             status: status.clone(),
         };
         let _ = self.app_handle.emit("session-status", &event);
+    }
+
+    /// Add streaming segments to the buffer for a session
+    pub async fn buffer_streaming_segments(&self, session_id: &str, segments: &[ContentSegment]) {
+        let mut buffer = self.streaming_buffer.write().await;
+        buffer.insert(session_id.to_string(), segments.to_vec());
+    }
+
+    /// Get buffered streaming segments for a session
+    pub async fn get_buffered_segments(&self, session_id: &str) -> Option<Vec<ContentSegment>> {
+        let buffer = self.streaming_buffer.read().await;
+        buffer.get(session_id).cloned()
+    }
+
+    /// Clear buffered segments for a session (called after DB persistence)
+    pub async fn clear_buffered_segments(&self, session_id: &str) {
+        let mut buffer = self.streaming_buffer.write().await;
+        buffer.remove(session_id);
     }
 }
 

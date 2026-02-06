@@ -21,7 +21,7 @@ use git::{
 use review::{Comment, Edit, NewComment, NewEdit, Review};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use store::{now_timestamp, SessionFull, Store};
+use store::{now_timestamp, ContentSegment, SessionFull, Store};
 use tauri::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Emitter, Manager, State, Wry};
 use watcher::WatcherHandle;
@@ -998,6 +998,16 @@ fn update_session_title(
     state
         .update_session_title(&session_id, &title)
         .map_err(|e| e.to_string())
+}
+
+/// Get buffered streaming segments for a session (before DB persistence).
+/// Returns None if no buffered segments exist (either already persisted or never streamed).
+#[tauri::command(rename_all = "camelCase")]
+async fn get_buffered_segments(
+    session_manager: State<'_, Arc<SessionManager>>,
+    session_id: String,
+) -> Result<Option<Vec<ContentSegment>>, String> {
+    Ok(session_manager.get_buffered_segments(&session_id).await)
 }
 
 // =============================================================================
@@ -3355,6 +3365,7 @@ pub fn run() {
             get_session_status,
             send_prompt,
             update_session_title,
+            get_buffered_segments,
             // Review commands
             get_review,
             add_comment,
