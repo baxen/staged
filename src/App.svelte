@@ -617,13 +617,18 @@
       konamiIndex++;
       if (konamiIndex === konamiSequence.length) {
         konamiIndex = 0;
-        viewMode = viewMode === 'branches' ? 'diff' : 'branches';
-        saveViewMode(viewMode);
-        if (viewMode === 'branches') cameFromBranches = false;
+        handleToggleMode();
       }
     } else {
       konamiIndex = e.key === konamiSequence[0] ? 1 : 0;
     }
+  }
+
+  // Toggle between branches and diff view modes
+  function handleToggleMode() {
+    viewMode = viewMode === 'branches' ? 'diff' : 'branches';
+    saveViewMode(viewMode);
+    if (viewMode === 'branches') cameFromBranches = false;
   }
 
   // Lifecycle
@@ -797,7 +802,7 @@
     </div>
   {:else if viewMode === 'branches'}
     <!-- Branch-based workflow view -->
-    <BranchTopBar onAddProject={triggerAddProject} />
+    <BranchTopBar onAddProject={triggerAddProject} onToggleMode={handleToggleMode} />
     <BranchHome
       onViewDiff={handleViewDiffFromBranches}
       onAddProjectRequest={(fn) => (triggerAddProject = fn)}
@@ -808,6 +813,7 @@
       <TabBar
         onNewTab={handleNewTab}
         onSwitchTab={handleTabSwitch}
+        onToggleMode={handleToggleMode}
         onBack={cameFromBranches
           ? () => {
               viewMode = 'branches';
