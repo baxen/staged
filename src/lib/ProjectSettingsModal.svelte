@@ -416,23 +416,22 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
+    background: var(--shadow-overlay);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    backdrop-filter: blur(2px);
   }
 
   .modal {
-    background: var(--bg-primary);
-    border-radius: 8px;
+    background: var(--bg-chrome);
+    border-radius: 12px;
     width: min(700px, 90vw);
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
-    border: 1px solid var(--border-color);
+    box-shadow: var(--shadow-elevated);
+    overflow: hidden;
   }
 
   .modal-header {
@@ -440,7 +439,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .modal-header h2 {
@@ -489,24 +488,20 @@
     gap: 6px;
     padding: 8px 16px;
     border-radius: 6px;
-    font-size: 13px;
+    font-size: var(--size-xs);
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
-    border: 1px solid transparent;
   }
 
   .primary-btn {
-    background: var(--color-primary);
+    background: var(--ui-accent);
     color: var(--bg-primary);
     border: none;
-    font-weight: 600;
   }
 
   .primary-btn:hover:not(:disabled) {
-    background: var(--color-primary-hover);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    background: var(--ui-accent-hover);
   }
 
   .primary-btn:disabled {
@@ -515,14 +510,14 @@
   }
 
   .secondary-btn {
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     color: var(--text-primary);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-muted);
   }
 
   .secondary-btn:hover:not(:disabled) {
     background: var(--bg-hover);
-    border-color: var(--text-secondary);
+    border-color: var(--border-emphasis);
   }
 
   .secondary-btn:disabled {
@@ -590,8 +585,8 @@
     justify-content: space-between;
     gap: 12px;
     padding: 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    background: var(--bg-primary);
+    border: 1px solid var(--border-muted);
     border-radius: 6px;
   }
 
@@ -666,23 +661,22 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: transparent;
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1100;
-    backdrop-filter: blur(3px);
   }
 
   .edit-modal {
-    background: var(--bg-primary);
+    background: var(--bg-chrome);
     border-radius: 8px;
     width: min(500px, 90vw);
     max-height: 85vh;
     display: flex;
     flex-direction: column;
     box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
-    border: 1px solid var(--border-color);
+    border: 1px solid var(--border-subtle);
   }
 
   .edit-modal-header {
@@ -690,7 +684,7 @@
     align-items: center;
     justify-content: space-between;
     padding: 16px 20px;
-    border-bottom: 1px solid var(--border-color);
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .edit-modal-header h3 {
@@ -711,8 +705,8 @@
     gap: 8px;
     justify-content: flex-end;
     padding: 16px 20px;
-    border-top: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-primary);
   }
 
   .form-group {
@@ -732,7 +726,7 @@
     width: 100%;
     padding: 9px 12px;
     background: var(--bg-primary);
-    border: 1.5px solid var(--border-color);
+    border: 1px solid var(--border-muted);
     border-radius: 6px;
     color: var(--text-primary);
     font-size: 13px;
@@ -742,8 +736,8 @@
   .form-group input[type='text']:focus,
   .form-group select:focus {
     outline: none;
-    border-color: var(--color-primary);
-    box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
+    border-color: var(--ui-accent);
+    box-shadow: 0 0 0 2px rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
   }
 
   .form-group input[type='text']::placeholder {
