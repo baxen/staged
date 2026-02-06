@@ -9,6 +9,7 @@
     Keyboard,
     Palette,
     ChevronLeft,
+    GitBranch,
   } from 'lucide-svelte';
   import { windowState, closeTab } from './stores/tabState.svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -36,9 +37,10 @@
     onNewTab: () => void;
     onSwitchTab: (index: number) => void;
     onBack?: () => void;
+    onToggleMode?: () => void;
   }
 
-  let { onNewTab, onSwitchTab, onBack }: Props = $props();
+  let { onNewTab, onSwitchTab, onBack, onToggleMode }: Props = $props();
 
   // Modal state
   let showThemeModal = $state(false);
@@ -170,6 +172,12 @@
 
   <!-- Action buttons (right side) -->
   <div class="tab-bar-actions">
+    {#if onToggleMode}
+      <button class="icon-btn" onclick={onToggleMode} title="Switch to Branches view">
+        <GitBranch size={14} />
+      </button>
+    {/if}
+
     <button class="icon-btn" onclick={() => (showSettingsModal = true)} title="Settings (⌘,)">
       <Settings2 size={14} />
     </button>

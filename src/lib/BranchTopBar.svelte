@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Settings2, Keyboard, Palette, FolderPlus } from 'lucide-svelte';
+  import { Settings2, Keyboard, Palette, FolderPlus, FileDiff } from 'lucide-svelte';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import ThemeSelectorModal from './ThemeSelectorModal.svelte';
   import KeyboardShortcutsModal from './KeyboardShortcutsModal.svelte';
@@ -14,9 +14,10 @@
 
   interface Props {
     onAddProject?: () => void;
+    onToggleMode?: () => void;
   }
 
-  let { onAddProject }: Props = $props();
+  let { onAddProject, onToggleMode }: Props = $props();
 
   function startDrag(e: PointerEvent) {
     if (e.button !== 0) return;
@@ -79,6 +80,12 @@
       <button class="add-project-btn" onclick={onAddProject} title="Add Project">
         <FolderPlus size={14} />
         Add Project
+      </button>
+    {/if}
+
+    {#if onToggleMode}
+      <button class="icon-btn" onclick={onToggleMode} title="Switch to Diff view">
+        <FileDiff size={14} />
       </button>
     {/if}
 
