@@ -2758,6 +2758,25 @@ fn extract_text_from_assistant_content(content: &str) -> String {
 
 use store::GitProject;
 
+/// Canonicalize a repo path to ensure consistent path comparison.
+/// This resolves symlinks and normalizes the path (including case on case-insensitive filesystems).
+/// Returns the original path if canonicalization fails.
+fn canonicalize_repo_path(repo_path: &str) -> String {
+    std::path::Path::new(repo_path)
+        .canonicalize()
+        .ok()
+        .and_then(|p| p.to_str().map(|s| s.to_string()))
+        .unwrap_or_else(|| repo_path.to_string())
+}
+
+/// Clean and normalize a subpath by trimming whitespace and removing leading/trailing slashes.
+/// Returns None for empty strings after cleaning.
+fn clean_subpath(subpath: Option<String>) -> Option<String> {
+    subpath
+        .map(|s| s.trim().trim_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+}
+
 /// Create a new git project.
 /// If a project already exists for the repo_path, returns an error.
 #[tauri::command(rename_all = "camelCase")]
@@ -2766,28 +2785,31 @@ fn create_git_project(
     repo_path: String,
     subpath: Option<String>,
 ) -> Result<GitProject, String> {
-    // Normalize subpath: empty string becomes None
-    let subpath = subpath.filter(|s| !s.is_empty());
+    // Canonicalize the repo path to ensure consistent comparison
+    let canonical_repo_path = canonicalize_repo_path(&repo_path);
+
+    // Clean and normalize the subpath
+    let cleaned_subpath = clean_subpath(subpath);
 
     // Check if project already exists for this repo+subpath
     if state
-        .get_git_project_by_repo_and_subpath(&repo_path, subpath.as_deref())
+        .get_git_project_by_repo_and_subpath(&canonical_repo_path, cleaned_subpath.as_deref())
         .map_err(|e| e.to_string())?
         .is_some()
     {
-        let repo_name = std::path::Path::new(&repo_path)
+        let repo_name = std::path::Path::new(&canonical_repo_path)
             .file_name()
             .and_then(|n| n.to_str())
-            .unwrap_or(&repo_path);
+            .unwrap_or(&canonical_repo_path);
 
-        return Err(match &subpath {
+        return Err(match &cleaned_subpath {
             Some(sp) => format!("A project already exists for {repo_name} with subpath '{sp}'"),
             None => format!("A project already exists for {repo_name} with no subpath"),
         });
     }
 
-    let mut project = GitProject::new(&repo_path);
-    if let Some(sp) = subpath {
+    let mut project = GitProject::new(&canonical_repo_path);
+    if let Some(sp) = cleaned_subpath {
         project = project.with_subpath(sp);
     }
 
@@ -2814,8 +2836,10 @@ fn get_git_project_by_repo(
     state: State<'_, Arc<Store>>,
     repo_path: String,
 ) -> Result<Option<GitProject>, String> {
+    // Canonicalize the repo path to ensure consistent lookup
+    let canonical_repo_path = canonicalize_repo_path(&repo_path);
     state
-        .get_git_project_by_repo(&repo_path)
+        .get_git_project_by_repo(&canonical_repo_path)
         .map_err(|e| e.to_string())
 }
 
@@ -2832,8 +2856,10 @@ fn update_git_project(
     project_id: String,
     subpath: Option<String>,
 ) -> Result<(), String> {
+    // Clean and normalize the subpath
+    let cleaned_subpath = clean_subpath(subpath);
     state
-        .update_git_project(&project_id, subpath.as_deref())
+        .update_git_project(&project_id, cleaned_subpath.as_deref())
         .map_err(|e| e.to_string())
 }
 
@@ -2844,28 +2870,6 @@ fn delete_git_project(state: State<'_, Arc<Store>>, project_id: String) -> Resul
     state
         .delete_git_project(&project_id)
         .map_err(|e| e.to_string())
-}
-
-/// Get or create a git project for a repo_path.
-/// If no project exists, creates one for the given repo.
-#[tauri::command(rename_all = "camelCase")]
-fn get_or_create_git_project(
-    state: State<'_, Arc<Store>>,
-    repo_path: String,
-) -> Result<GitProject, String> {
-    // Check if project already exists
-    if let Some(existing) = state
-        .get_git_project_by_repo(&repo_path)
-        .map_err(|e| e.to_string())?
-    {
-        return Ok(existing);
-    }
-
-    let project = GitProject::new(&repo_path);
-    state
-        .create_git_project(&project)
-        .map_err(|e| e.to_string())?;
-    Ok(project)
 }
 
 // =============================================================================
@@ -3454,7 +3458,6 @@ pub fn run() {
             list_git_projects,
             update_git_project,
             delete_git_project,
-            get_or_create_git_project,
             // Theme commands
             get_custom_themes,
             read_custom_theme,
