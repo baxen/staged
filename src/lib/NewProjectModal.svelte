@@ -15,9 +15,10 @@
   interface Props {
     onCreated: (project: GitProject) => void;
     onClose: () => void;
+    onDetecting?: (projectId: string, isDetecting: boolean) => void;
   }
 
-  let { onCreated, onClose }: Props = $props();
+  let { onCreated, onClose, onDetecting }: Props = $props();
 
   // State
   type Step = 'repo' | 'config';
@@ -276,6 +277,13 @@
     try {
       const normalizedSubpath = subpath.trim().replace(/^\/+|\/+$/g, '') || undefined;
       const project = await branchService.createGitProject(selectedRepo, normalizedSubpath);
+
+      // Detect and save actions in the background (don't block on success)
+      detectAndSaveActions(project.id).catch((e) => {
+        console.warn('Failed to auto-detect actions for new project:', e);
+        // Silent failure - user can still detect actions manually later
+      });
+
       onCreated(project);
     } catch (e) {
       // Extract error message from various error formats
@@ -292,6 +300,32 @@
 
       error = errorMessage;
       saving = false;
+    }
+  }
+
+  async function detectAndSaveActions(projectId: string) {
+    try {
+      // Notify that detection is starting
+      onDetecting?.(projectId, true);
+
+      // Detect actions using AI
+      const suggested = await branchService.detectProjectActions(projectId);
+
+      // Save each suggested action
+      let sortOrder = 1;
+      for (const suggestion of suggested) {
+        await branchService.createProjectAction(
+          projectId,
+          suggestion.name,
+          suggestion.command,
+          suggestion.actionType,
+          sortOrder++,
+          suggestion.autoCommit
+        );
+      }
+    } finally {
+      // Notify that detection is complete (success or failure)
+      onDetecting?.(projectId, false);
     }
   }
 

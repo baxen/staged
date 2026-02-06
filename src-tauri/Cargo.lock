@@ -4757,12 +4757,14 @@ name = "staged"
 version = "0.1.0"
 dependencies = [
  "agent-client-protocol",
+ "anyhow",
  "async-trait",
  "chrono",
  "dirs 5.0.1",
  "futures",
  "git2",
  "ignore",
+ "libc",
  "log",
  "notify",
  "notify-debouncer-full",
