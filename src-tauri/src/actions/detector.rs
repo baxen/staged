@@ -1,26 +1,14 @@
-//! Action detection using heuristic file parsing
+//! AI-powered action detection
 //!
-//! This module detects available actions in a project by parsing common build files
-//! (justfile, Makefile, package.json, etc.) and extracting executable commands.
-//!
-//! Design Decision: Heuristic Parsing vs AI Detection
-//! ---------------------------------------------------
-//! The original plan called for AI-based detection, but we opted for heuristic parsing because:
-//! - **Performance**: Instant detection vs. API call latency
-//! - **Reliability**: Deterministic results, no API failures or rate limits
-//! - **Cost**: Zero runtime cost vs. per-detection API charges
-//! - **Privacy**: No code sent to external services
-//! - **Offline**: Works without internet connection
-//!
-//! The heuristic approach effectively covers the most common cases (npm/yarn/pnpm scripts,
-//! just recipes, make targets, cargo commands) which represent 95%+ of real-world usage.
-//! AI detection could be added later as an optional enhancement for edge cases.
+//! This module uses an AI model to analyze project structure and suggest
+//! relevant actions (linting, testing, formatting, etc.) based on common
+//! patterns in build files (justfile, Makefile, package.json, etc.).
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::Path;
 
+use crate::ai::{find_acp_agent, run_acp_prompt_raw};
 use crate::store::ActionType;
 
 /// A suggested action that was detected
@@ -34,313 +22,228 @@ pub struct SuggestedAction {
     pub source: String, // e.g., "justfile", "Makefile", "package.json"
 }
 
-/// Detect actions from a project repository
-/// Prioritizes build scripts (just, make, etc.) over package managers
-pub fn detect_actions(repo_path: &Path, subpath: Option<&str>) -> Result<Vec<SuggestedAction>> {
+/// System prompt for AI action detection
+const DETECTION_PROMPT_TEMPLATE: &str = r#"You are analyzing a project directory to detect available actions (build, test, lint, format commands).
+
+Analyze the project structure and suggest actions based on the files present.
+
+IMPORTANT: Return your response as valid JSON ONLY. Do not include any explanatory text before or after the JSON.
+
+The response must be a JSON array of action objects. Each action object must have these fields:
+- name: string (concise action name, e.g., "Test", "Lint", "Format")
+- command: string (exact shell command to run, e.g., "npm test", "just build")
+- actionType: string (one of: "prerun", "run", "format", "check")
+- autoCommit: boolean (true if action modifies files and should auto-commit)
+- source: string (which file this was detected from, e.g., "package.json", "justfile")
+
+Action type guidelines:
+- "prerun": Commands that should run automatically on worktree creation (like "npm install", "yarn", "pnpm install")
+- "format": Commands that auto-fix code (like "prettier --write", "cargo fmt", "ruff format")
+- "check": Commands that validate without modifying (like "npm test", "cargo test", "eslint")
+- "run": Other commands (like "npm build", "cargo build")
+
+Project directory contents:
+{file_list}
+
+Relevant file contents:
+{file_contents}
+
+Return ONLY a JSON array with detected actions. Example:
+[
+  {
+    "name": "Install Dependencies",
+    "command": "npm install",
+    "actionType": "prerun",
+    "autoCommit": false,
+    "source": "package.json"
+  },
+  {
+    "name": "Test",
+    "command": "npm test",
+    "actionType": "check",
+    "autoCommit": false,
+    "source": "package.json"
+  },
+  {
+    "name": "Format",
+    "command": "prettier --write .",
+    "actionType": "format",
+    "autoCommit": true,
+    "source": "package.json"
+  }
+]"#;
+
+/// Detect actions from a project repository using AI
+pub async fn detect_actions(
+    repo_path: &Path,
+    subpath: Option<&str>,
+) -> Result<Vec<SuggestedAction>> {
     let working_dir = if let Some(sp) = subpath {
         repo_path.join(sp)
     } else {
         repo_path.to_path_buf()
     };
 
-    let mut actions = Vec::new();
+    // Find an available ACP agent
+    let agent = find_acp_agent()
+        .ok_or_else(|| anyhow::anyhow!("No AI agent available (goose or claude-code-acp). Please install an ACP-compatible agent to use action detection."))?;
 
-    // Priority 1: Check for justfile (highest priority)
-    if let Some(just_actions) = detect_just_actions(&working_dir) {
-        actions.extend(just_actions);
-    }
+    // Collect information about the project
+    let file_list = collect_file_list(&working_dir)?;
+    let file_contents = collect_relevant_files(&working_dir)?;
 
-    // Priority 2: Check for Makefile
-    if let Some(make_actions) = detect_make_actions(&working_dir) {
-        actions.extend(make_actions);
-    }
+    // Build the prompt
+    let prompt = DETECTION_PROMPT_TEMPLATE
+        .replace("{file_list}", &file_list)
+        .replace("{file_contents}", &file_contents);
 
-    // Priority 3: Check for package.json scripts (only if no build scripts found)
-    if actions.is_empty() {
-        if let Some(npm_actions) = detect_npm_actions(&working_dir) {
-            actions.extend(npm_actions);
+    // Call AI to analyze and suggest actions
+    let response = run_acp_prompt_raw(&agent, &working_dir, &prompt)
+        .await
+        .map_err(|e| anyhow::anyhow!("AI detection failed: {}", e))?;
+
+    // Parse the JSON response
+    parse_ai_response(&response)
+}
+
+/// Collect a list of files in the directory
+fn collect_file_list(dir: &Path) -> Result<String> {
+    let mut files = Vec::new();
+
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            if let Ok(file_type) = entry.file_type() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+
+                // Skip hidden files and common directories
+                if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target"
+                {
+                    continue;
+                }
+
+                if file_type.is_file() {
+                    files.push(name_str.to_string());
+                } else if file_type.is_dir() {
+                    files.push(format!("{}/", name_str));
+                }
+            }
         }
     }
 
-    // Priority 4: Check for Cargo.toml (Rust projects)
-    if actions.is_empty() {
-        if let Some(cargo_actions) = detect_cargo_actions(&working_dir) {
-            actions.extend(cargo_actions);
+    files.sort();
+    Ok(files.join("\n"))
+}
+
+/// Collect contents of relevant build/config files
+fn collect_relevant_files(dir: &Path) -> Result<String> {
+    let relevant_files = [
+        "package.json",
+        "justfile",
+        "Justfile",
+        "Makefile",
+        "makefile",
+        "Cargo.toml",
+        "pyproject.toml",
+        "setup.py",
+        "tsconfig.json",
+        ".eslintrc.json",
+        ".eslintrc.js",
+        "eslint.config.js",
+        ".prettierrc",
+        ".prettierrc.json",
+    ];
+
+    let mut contents = Vec::new();
+
+    for file_name in &relevant_files {
+        let file_path = dir.join(file_name);
+        if file_path.exists() {
+            if let Ok(content) = std::fs::read_to_string(&file_path) {
+                // Limit file size to avoid token overflow
+                let truncated = if content.len() > 4000 {
+                    format!("{}... (truncated)", &content[..4000])
+                } else {
+                    content
+                };
+                contents.push(format!("=== {} ===\n{}\n", file_name, truncated));
+            }
         }
     }
 
-    // Priority 5: Check for pyproject.toml or setup.py (Python projects)
-    if actions.is_empty() {
-        if let Some(python_actions) = detect_python_actions(&working_dir) {
-            actions.extend(python_actions);
-        }
+    if contents.is_empty() {
+        Ok("No relevant build files found.".to_string())
+    } else {
+        Ok(contents.join("\n"))
     }
+}
 
-    // Deduplicate by command
-    let mut seen_commands = std::collections::HashSet::new();
-    actions.retain(|action| seen_commands.insert(action.command.clone()));
+/// Parse the AI response and extract suggested actions
+fn parse_ai_response(response: &str) -> Result<Vec<SuggestedAction>> {
+    // Try to extract JSON from the response
+    // AI might include explanatory text, so we need to find the JSON array
+    let json_str = extract_json_array(response)?;
+
+    let actions: Vec<SuggestedAction> = serde_json::from_str(&json_str).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to parse AI response as JSON: {}. Response was: {}",
+            e,
+            json_str
+        )
+    })?;
 
     Ok(actions)
 }
 
-/// Detect actions from justfile
-fn detect_just_actions(dir: &Path) -> Option<Vec<SuggestedAction>> {
-    let justfile_path = dir.join("justfile");
-    if !justfile_path.exists() {
-        let justfile_path = dir.join("Justfile");
-        if !justfile_path.exists() {
-            return None;
+/// Extract JSON array from AI response that might contain extra text
+fn extract_json_array(text: &str) -> Result<String> {
+    // First try to parse the entire response as JSON
+    if text.trim().starts_with('[') {
+        if let Ok(_) = serde_json::from_str::<serde_json::Value>(text) {
+            return Ok(text.to_string());
         }
     }
 
-    let content = fs::read_to_string(&justfile_path).ok()?;
-    let mut actions = Vec::new();
-
-    // Parse justfile recipes
-    for line in content.lines() {
-        let line = line.trim();
-
-        // Skip comments and empty lines
-        if line.starts_with('#') || line.is_empty() {
-            continue;
-        }
-
-        // Recipe definition: name:
-        if let Some(recipe_name) = line.strip_suffix(':') {
-            let recipe_name = recipe_name.trim();
-
-            // Skip recipes with parameters or special prefixes
-            if recipe_name.contains(' ') || recipe_name.starts_with('_') {
-                continue;
+    // Look for JSON array in the text
+    if let Some(start) = text.find('[') {
+        if let Some(end) = text.rfind(']') {
+            if end > start {
+                let json_str = &text[start..=end];
+                // Validate it's valid JSON
+                if serde_json::from_str::<serde_json::Value>(json_str).is_ok() {
+                    return Ok(json_str.to_string());
+                }
             }
-
-            let (action_type, auto_commit) = classify_action(recipe_name);
-
-            actions.push(SuggestedAction {
-                name: format!("just {}", recipe_name),
-                command: format!("just {}", recipe_name),
-                action_type,
-                auto_commit,
-                source: "justfile".to_string(),
-            });
         }
     }
 
-    Some(actions)
+    Err(anyhow::anyhow!(
+        "Could not find valid JSON array in AI response. Response was: {}",
+        text
+    ))
 }
 
-/// Detect actions from Makefile
-fn detect_make_actions(dir: &Path) -> Option<Vec<SuggestedAction>> {
-    let makefile_path = dir.join("Makefile");
-    if !makefile_path.exists() {
-        let makefile_path = dir.join("makefile");
-        if !makefile_path.exists() {
-            return None;
-        }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extract_json_array() {
+        let text = r#"Here are some actions:
+[
+  {"name": "Test", "command": "npm test", "actionType": "check", "autoCommit": false, "source": "package.json"}
+]
+That's all!"#;
+
+        let result = extract_json_array(text);
+        assert!(result.is_ok());
     }
 
-    let content = fs::read_to_string(&makefile_path).ok()?;
-    let mut actions = Vec::new();
+    #[test]
+    fn test_extract_json_array_clean() {
+        let text = r#"[{"name": "Test", "command": "npm test", "actionType": "check", "autoCommit": false, "source": "package.json"}]"#;
 
-    // Parse Makefile targets
-    for line in content.lines() {
-        let line = line.trim();
-
-        // Skip comments, empty lines, and variable assignments
-        if line.starts_with('#') || line.is_empty() || line.contains('=') {
-            continue;
-        }
-
-        // Target definition: name:
-        if let Some(target_pos) = line.find(':') {
-            let target_name = line[..target_pos].trim();
-
-            // Skip special targets and targets with % (pattern rules)
-            if target_name.starts_with('.') || target_name.contains('%') || target_name.contains('$') {
-                continue;
-            }
-
-            let (action_type, auto_commit) = classify_action(target_name);
-
-            actions.push(SuggestedAction {
-                name: format!("make {}", target_name),
-                command: format!("make {}", target_name),
-                action_type,
-                auto_commit,
-                source: "Makefile".to_string(),
-            });
-        }
+        let result = extract_json_array(text);
+        assert!(result.is_ok());
     }
-
-    Some(actions)
-}
-
-/// Detect actions from package.json scripts
-fn detect_npm_actions(dir: &Path) -> Option<Vec<SuggestedAction>> {
-    let package_json_path = dir.join("package.json");
-    if !package_json_path.exists() {
-        return None;
-    }
-
-    let content = fs::read_to_string(&package_json_path).ok()?;
-    let package_json: serde_json::Value = serde_json::from_str(&content).ok()?;
-
-    let scripts = package_json.get("scripts")?.as_object()?;
-    let mut actions = Vec::new();
-
-    // Detect package manager (pnpm, npm, yarn)
-    let pm = detect_package_manager(dir);
-
-    for (script_name, _script_value) in scripts {
-        // Skip internal scripts that start with pre/post
-        if script_name.starts_with("pre") || script_name.starts_with("post") {
-            continue;
-        }
-
-        let (action_type, auto_commit) = classify_action(script_name);
-
-        actions.push(SuggestedAction {
-            name: script_name.clone(),
-            command: format!("{} run {}", pm, script_name),
-            action_type,
-            auto_commit,
-            source: "package.json".to_string(),
-        });
-    }
-
-    Some(actions)
-}
-
-/// Detect the package manager being used
-fn detect_package_manager(dir: &Path) -> &'static str {
-    if dir.join("pnpm-lock.yaml").exists() {
-        "pnpm"
-    } else if dir.join("yarn.lock").exists() {
-        "yarn"
-    } else {
-        "npm"
-    }
-}
-
-/// Detect actions from Cargo.toml (Rust projects)
-fn detect_cargo_actions(dir: &Path) -> Option<Vec<SuggestedAction>> {
-    let cargo_toml_path = dir.join("Cargo.toml");
-    if !cargo_toml_path.exists() {
-        return None;
-    }
-
-    let actions = vec![
-        SuggestedAction {
-            name: "Build".to_string(),
-            command: "cargo build".to_string(),
-            action_type: ActionType::Check,
-            auto_commit: false,
-            source: "Cargo.toml".to_string(),
-        },
-        SuggestedAction {
-            name: "Test".to_string(),
-            command: "cargo test".to_string(),
-            action_type: ActionType::Check,
-            auto_commit: false,
-            source: "Cargo.toml".to_string(),
-        },
-        SuggestedAction {
-            name: "Format".to_string(),
-            command: "cargo fmt".to_string(),
-            action_type: ActionType::Format,
-            auto_commit: true,
-            source: "Cargo.toml".to_string(),
-        },
-        SuggestedAction {
-            name: "Clippy".to_string(),
-            command: "cargo clippy --fix --allow-dirty --allow-staged".to_string(),
-            action_type: ActionType::Format,
-            auto_commit: true,
-            source: "Cargo.toml".to_string(),
-        },
-    ];
-
-    Some(actions)
-}
-
-/// Detect actions from Python projects
-fn detect_python_actions(dir: &Path) -> Option<Vec<SuggestedAction>> {
-    let has_pyproject = dir.join("pyproject.toml").exists();
-    let has_setup_py = dir.join("setup.py").exists();
-
-    if !has_pyproject && !has_setup_py {
-        return None;
-    }
-
-    let mut actions = Vec::new();
-
-    // Check for common Python tools
-    if has_pyproject {
-        let content = fs::read_to_string(dir.join("pyproject.toml")).ok()?;
-
-        if content.contains("[tool.ruff]") {
-            actions.push(SuggestedAction {
-                name: "Ruff Format".to_string(),
-                command: "ruff format .".to_string(),
-                action_type: ActionType::Format,
-                auto_commit: true,
-                source: "pyproject.toml".to_string(),
-            });
-        }
-
-        if content.contains("[tool.pytest]") || dir.join("pytest.ini").exists() {
-            actions.push(SuggestedAction {
-                name: "Test".to_string(),
-                command: "pytest".to_string(),
-                action_type: ActionType::Check,
-                auto_commit: false,
-                source: "pyproject.toml".to_string(),
-            });
-        }
-    }
-
-    if actions.is_empty() {
-        // Default Python actions
-        actions.push(SuggestedAction {
-            name: "Test".to_string(),
-            command: "python -m pytest".to_string(),
-            action_type: ActionType::Check,
-            auto_commit: false,
-            source: "Python project".to_string(),
-        });
-    }
-
-    Some(actions)
-}
-
-/// Classify an action based on its name
-fn classify_action(name: &str) -> (ActionType, bool) {
-    let name_lower = name.to_lowercase();
-
-    // Check actions - no auto-commit
-    if name_lower.contains("test")
-        || name_lower.contains("check")
-        || name_lower.contains("lint") && !name_lower.contains("fix")
-        || name_lower.contains("verify")
-        || name_lower.contains("validate") {
-        return (ActionType::Check, false);
-    }
-
-    // Format actions - with auto-commit
-    if name_lower.contains("format")
-        || name_lower.contains("fmt")
-        || name_lower.contains("fix")
-        || name_lower.contains("prettier") {
-        return (ActionType::Format, true);
-    }
-
-    // Prerun actions
-    if name_lower == "install"
-        || name_lower == "setup"
-        || name_lower == "init" {
-        return (ActionType::Prerun, false);
-    }
-
-    // Default to run type
-    (ActionType::Run, false)
 }

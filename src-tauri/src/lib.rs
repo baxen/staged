@@ -3021,9 +3021,9 @@ fn reorder_project_actions(
         .map_err(|e| e.to_string())
 }
 
-/// Detect actions for a project
+/// Detect actions for a project using AI
 #[tauri::command(rename_all = "camelCase")]
-fn detect_project_actions(
+async fn detect_project_actions(
     state: State<'_, Arc<Store>>,
     project_id: String,
 ) -> Result<Vec<actions::SuggestedAction>, String> {
@@ -3033,9 +3033,11 @@ fn detect_project_actions(
         .map_err(|e| e.to_string())?
         .ok_or_else(|| format!("Project not found: {}", project_id))?;
 
-    // Detect actions
+    // Detect actions using AI
     let repo_path = std::path::Path::new(&project.repo_path);
-    actions::detect_actions(repo_path, project.subpath.as_deref()).map_err(|e| e.to_string())
+    actions::detect_actions(repo_path, project.subpath.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Run an action on a branch
@@ -3055,7 +3057,13 @@ fn run_branch_action(
 
     // Run the action
     runner
-        .run_action(app, state.inner().clone(), branch_id, action_id, branch.worktree_path)
+        .run_action(
+            app,
+            state.inner().clone(),
+            branch_id,
+            action_id,
+            branch.worktree_path,
+        )
         .map_err(|e| e.to_string())
 }
 
@@ -3523,7 +3531,8 @@ pub fn run() {
             app.manage(store.clone());
 
             // Initialize the session manager
-            let session_manager = Arc::new(SessionManager::new(app.handle().clone(), store.clone()));
+            let session_manager =
+                Arc::new(SessionManager::new(app.handle().clone(), store.clone()));
             app.manage(session_manager);
 
             // Initialize the action runner
