@@ -525,6 +525,74 @@ async fn sync_review_to_github(
         .map_err(|e| e.to_string())
 }
 
+/// Fetch review comments from a GitHub PR.
+///
+/// Returns all review comments on the PR (not general issue comments).
+#[tauri::command(rename_all = "camelCase")]
+async fn fetch_pr_comments(
+    repo_path: Option<String>,
+    pr_number: u64,
+) -> Result<Vec<git::PrReviewComment>, String> {
+    let path = repo_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    git::fetch_pr_comments(&path, pr_number)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Import comments from a GitHub PR into the local review.
+///
+/// This converts PR review comments to local comments and adds them to the review.
+/// Only imports comments that are on lines that exist in the current diff.
+#[tauri::command(rename_all = "camelCase")]
+async fn import_pr_comments(
+    repo_path: Option<String>,
+    pr_number: u64,
+    spec: DiffSpec,
+) -> Result<usize, String> {
+    let path = repo_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
+
+    let pr_comments = git::fetch_pr_comments(&path, pr_number)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let store = review::get_store().map_err(|e| e.0)?;
+    let id = make_diff_id(&path, &spec)?;
+
+    let mut imported_count = 0;
+
+    for pr_comment in pr_comments {
+        if let Some(line) = pr_comment.line {
+            let start_line = pr_comment.start_line.unwrap_or(line);
+
+            let comment = review::Comment {
+                id: uuid::Uuid::new_v4().to_string(),
+                path: pr_comment.path,
+                span: git::Span {
+                    start: start_line - 1,
+                    end: line,
+                },
+                content: format!(
+                    "{} ({})\n\n{}",
+                    pr_comment.user, pr_comment.created_at, pr_comment.body
+                ),
+                author: review::CommentAuthor::User,
+                category: Some("pr".to_string()),
+                created_at: Some(pr_comment.created_at),
+            };
+
+            store.add_comment(&id, &comment).map_err(|e| e.0)?;
+            imported_count += 1;
+        }
+    }
+
+    Ok(imported_count)
+}
+
 /// Get the PR associated with a branch (if one exists).
 /// Returns None if no PR exists for this branch.
 #[tauri::command(rename_all = "camelCase")]
@@ -3366,6 +3434,8 @@ pub fn run() {
             search_pull_requests,
             fetch_pr,
             sync_review_to_github,
+            fetch_pr_comments,
+            import_pr_comments,
             invalidate_pr_cache,
             get_pr_for_branch,
             push_branch,

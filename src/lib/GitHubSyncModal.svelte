@@ -1,6 +1,15 @@
 <script lang="ts">
-  import { X, AlertCircle, Check, Upload, ExternalLink, RefreshCw, Copy } from 'lucide-svelte';
-  import { syncReviewToGitHub } from './services/git';
+  import {
+    X,
+    AlertCircle,
+    Check,
+    Upload,
+    Download,
+    ExternalLink,
+    RefreshCw,
+    Copy,
+  } from 'lucide-svelte';
+  import { syncReviewToGitHub, importPrComments } from './services/git';
   import { writeText } from '@tauri-apps/plugin-clipboard-manager';
   import type { Comment, DiffSpec } from './types';
 
@@ -10,14 +19,17 @@
     repoPath: string | null;
     comments: Comment[];
     onClose: () => void;
+    onCommentsImported?: () => void;
   }
 
-  let { prNumber, spec, repoPath, comments, onClose }: Props = $props();
+  let { prNumber, spec, repoPath, comments, onClose, onCommentsImported }: Props = $props();
 
   // State
   let syncing = $state(false);
+  let importing = $state(false);
   let error = $state<string | null>(null);
   let syncedUrl = $state<string | null>(null);
+  let importedCount = $state<number | null>(null);
   let copied = $state(false);
 
   let commentCount = $derived(comments.length);
@@ -38,6 +50,24 @@
     }
   }
 
+  async function handleImport() {
+    importing = true;
+    error = null;
+    importedCount = null;
+
+    try {
+      const count = await importPrComments(prNumber, spec, repoPath ?? undefined);
+      importedCount = count;
+      if (onCommentsImported) {
+        onCommentsImported();
+      }
+    } catch (e) {
+      error = e instanceof Error ? e.message : String(e);
+    } finally {
+      importing = false;
+    }
+  }
+
   async function copyUrl() {
     if (syncedUrl) {
       await writeText(syncedUrl);
@@ -50,7 +80,7 @@
     if (event.key === 'Escape') {
       onClose();
       event.preventDefault();
-    } else if (event.key === 'Enter' && event.metaKey && !syncing && !syncedUrl) {
+    } else if (event.key === 'Enter' && event.metaKey && !syncing && !syncedUrl && !importing && !importedCount) {
       handleSync();
       event.preventDefault();
     }
@@ -76,14 +106,24 @@
 >
   <div class="modal">
     <header class="modal-header">
-      <h2>Sync to GitHub</h2>
+      <h2>Sync Comments with GitHub</h2>
       <button class="icon-btn" onclick={onClose}>
         <X size={16} />
       </button>
     </header>
 
     <div class="modal-body">
-      {#if syncedUrl}
+      {#if importedCount !== null}
+        <!-- Import success state -->
+        <div class="success-state">
+          <Check size={32} />
+          <h3>Comments Imported</h3>
+          <p>
+            {importedCount} comment{importedCount === 1 ? '' : 's'} from PR #{prNumber} {importedCount === 1 ? 'has' : 'have'} been imported to your local review.
+          </p>
+          <p class="hint">You can now view and respond to these comments locally.</p>
+        </div>
+      {:else if syncedUrl}
         <!-- Success state -->
         <div class="success-state">
           <Check size={32} />
@@ -121,15 +161,28 @@
             <span class="pr-label">PR #{prNumber}</span>
           </div>
 
-          <div class="summary">
-            <div class="comment-count">
-              <Upload size={16} />
-              <span>{commentCount} comment{commentCount === 1 ? '' : 's'} to sync</span>
+          <div class="sync-actions">
+            <div class="sync-action">
+              <div class="action-header">
+                <Download size={18} />
+                <h3>Import from PR</h3>
+              </div>
+              <p class="action-description">
+                Pull review comments from the GitHub PR into your local review.
+              </p>
             </div>
-            <p class="note">
-              This will create a pending review on GitHub. Any existing pending review will be
-              replaced.
-            </p>
+
+            {#if commentCount > 0}
+              <div class="sync-action">
+                <div class="action-header">
+                  <Upload size={18} />
+                  <h3>Push to PR</h3>
+                </div>
+                <p class="action-description">
+                  {commentCount} local comment{commentCount === 1 ? '' : 's'} will be synced to a pending review on GitHub.
+                </p>
+              </div>
+            {/if}
           </div>
 
           {#if error}
@@ -144,18 +197,29 @@
 
     <footer class="modal-footer">
       <button class="btn btn-secondary" onclick={onClose}>
-        {syncedUrl ? 'Done' : 'Cancel'}
+        {syncedUrl || importedCount !== null ? 'Done' : 'Cancel'}
       </button>
-      {#if !syncedUrl && commentCount > 0}
-        <button class="btn btn-primary" onclick={handleSync} disabled={syncing}>
-          {#if syncing}
+      {#if !syncedUrl && importedCount === null}
+        <button class="btn btn-primary" onclick={handleImport} disabled={importing}>
+          {#if importing}
             <RefreshCw size={14} class="spinner" />
-            <span>Syncing...</span>
+            <span>Importing...</span>
           {:else}
-            <Upload size={14} />
-            <span>Create Pending Review</span>
+            <Download size={14} />
+            <span>Import Comments</span>
           {/if}
         </button>
+        {#if commentCount > 0}
+          <button class="btn btn-primary" onclick={handleSync} disabled={syncing}>
+            {#if syncing}
+              <RefreshCw size={14} class="spinner" />
+              <span>Pushing...</span>
+            {:else}
+              <Upload size={14} />
+              <span>Push Comments</span>
+            {/if}
+          </button>
+        {/if}
       {/if}
     </footer>
   </div>
@@ -365,21 +429,38 @@
     font-size: var(--size-sm);
   }
 
-  .summary {
+  .sync-actions {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
   }
 
-  .comment-count {
+  .sync-action {
+    padding: 12px;
+    background: var(--bg-primary);
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+  }
+
+  .action-header {
     display: flex;
     align-items: center;
     gap: 8px;
-    font-weight: 500;
+    margin-bottom: 6px;
+  }
+
+  .action-header h3 {
+    margin: 0;
+    font-size: var(--size-sm);
+    font-weight: 600;
     color: var(--text-primary);
   }
 
-  .note {
+  .action-header :global(svg) {
+    color: var(--ui-accent);
+  }
+
+  .action-description {
     margin: 0;
     font-size: var(--size-xs);
     color: var(--text-muted);

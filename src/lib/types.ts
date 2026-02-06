@@ -189,6 +189,18 @@ export interface GitHubSyncResult {
   comment_count: number;
 }
 
+/** A review comment from a GitHub PR */
+export interface PrReviewComment {
+  id: number;
+  path: string;
+  body: string;
+  line: number | null;
+  start_line: number | null;
+  side: string;
+  user: string;
+  created_at: string;
+}
+
 // =============================================================================
 // Review types
 // =============================================================================

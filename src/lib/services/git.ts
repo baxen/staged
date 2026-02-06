@@ -6,6 +6,7 @@ import type {
   PullRequest,
   GitHubAuthStatus,
   GitHubSyncResult,
+  PrReviewComment,
 } from '../types';
 
 // =============================================================================
@@ -156,6 +157,37 @@ export async function syncReviewToGitHub(
   repoPath?: string
 ): Promise<GitHubSyncResult> {
   return invoke<GitHubSyncResult>('sync_review_to_github', {
+    repoPath: repoPath ?? null,
+    prNumber,
+    spec,
+  });
+}
+
+/**
+ * Fetch review comments from a GitHub PR.
+ * Returns all review comments on the PR (not general issue comments).
+ */
+export async function fetchPrComments(
+  prNumber: number,
+  repoPath?: string
+): Promise<PrReviewComment[]> {
+  return invoke<PrReviewComment[]>('fetch_pr_comments', {
+    repoPath: repoPath ?? null,
+    prNumber,
+  });
+}
+
+/**
+ * Import comments from a GitHub PR into the local review.
+ * Converts PR review comments to local comments and adds them to the review.
+ * Returns the number of comments imported.
+ */
+export async function importPrComments(
+  prNumber: number,
+  spec: DiffSpec,
+  repoPath?: string
+): Promise<number> {
+  return invoke<number>('import_pr_comments', {
     repoPath: repoPath ?? null,
     prNumber,
     spec,

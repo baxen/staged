@@ -786,6 +786,89 @@ pub async fn sync_review_to_github(
     })
 }
 
+/// A review comment from GitHub.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PrReviewComment {
+    pub id: u64,
+    pub path: String,
+    pub body: String,
+    pub line: Option<u32>,
+    pub start_line: Option<u32>,
+    pub side: String,
+    pub user: String,
+    pub created_at: String,
+}
+
+/// Fetch all review comments for a PR from GitHub.
+pub async fn fetch_pr_comments(
+    repo: &Path,
+    pr_number: u64,
+) -> Result<Vec<PrReviewComment>, GitError> {
+    let token = get_github_token()?;
+    let (owner, repo_name) = get_github_repo(repo)?;
+
+    log::info!(
+        "Fetching comments for PR #{} in {}/{}",
+        pr_number,
+        owner,
+        repo_name
+    );
+
+    let client = reqwest::Client::new();
+    let url = format!(
+        "https://api.github.com/repos/{}/{}/pulls/{}/comments",
+        owner, repo_name, pr_number
+    );
+
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .header("Accept", "application/vnd.github+json")
+        .header("User-Agent", "staged-app")
+        .header("X-GitHub-Api-Version", "2022-11-28")
+        .send()
+        .await
+        .map_err(|e| GitError::CommandFailed(format!("Failed to fetch PR comments: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err(GitError::CommandFailed(format!(
+            "Failed to fetch PR comments: {}",
+            response.status()
+        )));
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct GhComment {
+        id: u64,
+        path: String,
+        body: String,
+        line: Option<u32>,
+        start_line: Option<u32>,
+        side: String,
+        user: GhUser,
+        created_at: String,
+    }
+
+    let comments: Vec<GhComment> = response
+        .json()
+        .await
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse comments: {}", e)))?;
+
+    Ok(comments
+        .into_iter()
+        .map(|c| PrReviewComment {
+            id: c.id,
+            path: c.path,
+            body: c.body,
+            line: c.line,
+            start_line: c.start_line,
+            side: c.side,
+            user: c.user.login,
+            created_at: c.created_at,
+        })
+        .collect())
+}
+
 // =============================================================================
 // Pull Request Creation
 // =============================================================================
