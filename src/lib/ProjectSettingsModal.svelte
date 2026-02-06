@@ -283,6 +283,11 @@
                     <svelte:component this={getActionIcon(type as ActionType)} size={14} />
                     {type.charAt(0).toUpperCase() + type.slice(1)}
                   </div>
+                  {#if type === 'prerun'}
+                    <div class="group-subtitle">
+                      These actions will run automatically when a new worktree is created
+                    </div>
+                  {/if}
                   {#each typeActions as action (action.id)}
                     <div class="action-item">
                       <div class="action-info">
@@ -564,6 +569,13 @@
     text-transform: uppercase;
     letter-spacing: 0.5px;
     margin-bottom: 4px;
+  }
+
+  .group-subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    font-weight: 400;
   }
 
   .action-item {
