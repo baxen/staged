@@ -248,7 +248,9 @@ export async function loadTabsFromStorage(
             // For worktree paths, verify they exist before restoring the tab
             const exists = await pathExists(t.repoPath);
             if (!exists) {
-              console.warn(`[TabState] Skipping tab "${t.repoName}" with non-existent worktree path: ${t.repoPath}`);
+              console.warn(
+                `[TabState] Skipping tab "${t.repoName}" with non-existent worktree path: ${t.repoPath}`
+              );
               return null;
             }
           }
@@ -289,7 +291,9 @@ export async function loadTabsFromStorage(
 
     // Save the cleaned-up tabs back to storage to prevent stale tabs from persisting
     if (validTabs.filter((t) => t !== null).length !== data.tabs.length) {
-      console.log(`[TabState] Removed ${data.tabs.length - windowState.tabs.length} stale tab(s) from storage`);
+      console.log(
+        `[TabState] Removed ${data.tabs.length - windowState.tabs.length} stale tab(s) from storage`
+      );
       saveTabsToStorage();
     }
   }

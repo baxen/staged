@@ -20,6 +20,7 @@
   import NewProjectModal from './NewProjectModal.svelte';
   import ConfirmDialog from './ConfirmDialog.svelte';
   import { DiffSpec } from './types';
+  import { windowState, closeTab } from './stores/tabState.svelte';
 
   interface Props {
     onViewDiff?: (projectId: string, repoPath: string, spec: DiffSpec, label: string) => void;
@@ -255,6 +256,7 @@
     if (!branchToDelete) return;
 
     const id = branchToDelete.id;
+    const worktreePath = branchToDelete.worktreePath;
     // Close dialog and show spinner immediately
     branchToDelete = null;
     deletingBranchIds = new Set(deletingBranchIds).add(id);
@@ -266,6 +268,12 @@
       const newDeleting = new Set(deletingBranchIds);
       newDeleting.delete(id);
       deletingBranchIds = newDeleting;
+
+      // Close any tabs that were viewing this branch's worktree
+      const tabsToClose = windowState.tabs.filter((tab) => tab.repoPath === worktreePath);
+      for (const tab of tabsToClose) {
+        closeTab(tab.id);
+      }
     } catch (e) {
       // Failure: remove spinner, show error card
       const newDeleting = new Set(deletingBranchIds);
