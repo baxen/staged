@@ -251,6 +251,7 @@ impl ArtifactData {
 pub enum ActionType {
     Prerun,
     Run,
+    Build,
     Format,
     Check,
     #[serde(rename = "cleanUp")]
@@ -263,6 +264,7 @@ impl ActionType {
         match self {
             ActionType::Prerun => "prerun",
             ActionType::Run => "run",
+            ActionType::Build => "build",
             ActionType::Format => "format",
             ActionType::Check => "check",
             ActionType::CleanUp => "cleanUp",

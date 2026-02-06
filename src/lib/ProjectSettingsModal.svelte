@@ -17,6 +17,7 @@
     Pencil,
     FlaskConical,
     BrushCleaning,
+    Hammer,
   } from 'lucide-svelte';
   import type { GitProject, ProjectAction, ActionType, SuggestedAction } from './services/branch';
   import * as branchService from './services/branch';
@@ -168,6 +169,10 @@
     switch (actionType) {
       case 'prerun':
         return Zap;
+      case 'run':
+        return Play;
+      case 'build':
+        return Hammer;
       case 'format':
         return Wand;
       case 'check':
@@ -176,8 +181,6 @@
         return FlaskConical;
       case 'cleanUp':
         return BrushCleaning;
-      case 'run':
-        return Play;
     }
   }
 
@@ -185,6 +188,10 @@
     switch (actionType) {
       case 'prerun':
         return 'var(--color-warning)';
+      case 'run':
+        return 'var(--color-primary)';
+      case 'build':
+        return 'var(--status-modified)';
       case 'format':
         return 'var(--color-info)';
       case 'check':
@@ -193,8 +200,6 @@
         return 'var(--status-added)';
       case 'cleanUp':
         return 'var(--text-muted)';
-      case 'run':
-        return 'var(--color-primary)';
     }
   }
 
@@ -202,11 +207,12 @@
   let groupedActions = $derived.by(() => {
     const groups: Record<ActionType, ProjectAction[]> = {
       prerun: [],
+      run: [],
+      build: [],
       format: [],
       check: [],
       test: [],
       cleanUp: [],
-      run: [],
     };
     for (const action of actions) {
       groups[action.actionType].push(action);

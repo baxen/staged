@@ -32,6 +32,7 @@
     Zap,
     FlaskConical,
     BrushCleaning,
+    Hammer,
   } from 'lucide-svelte';
   import type {
     Branch,
@@ -222,11 +223,12 @@
   let groupedActions = $derived.by(() => {
     const groups: Record<ActionType, ProjectAction[]> = {
       prerun: [],
+      run: [],
+      build: [],
       format: [],
       check: [],
       test: [],
       cleanUp: [],
-      run: [],
     };
     for (const action of projectActions) {
       groups[action.actionType].push(action);
@@ -239,6 +241,10 @@
     switch (actionType) {
       case 'prerun':
         return Zap;
+      case 'run':
+        return Play;
+      case 'build':
+        return Hammer;
       case 'format':
         return Wand;
       case 'check':
@@ -247,8 +253,6 @@
         return FlaskConical;
       case 'cleanUp':
         return BrushCleaning;
-      case 'run':
-        return Play;
     }
   }
 
@@ -257,6 +261,10 @@
     switch (actionType) {
       case 'prerun':
         return 'Prerun';
+      case 'run':
+        return 'Run';
+      case 'build':
+        return 'Build';
       case 'format':
         return 'Format';
       case 'check':
@@ -265,8 +273,6 @@
         return 'Test';
       case 'cleanUp':
         return 'Clean Up';
-      case 'run':
-        return 'Run';
     }
   }
 
