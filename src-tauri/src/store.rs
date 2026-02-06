@@ -253,6 +253,7 @@ pub enum ActionType {
     Run,
     Format,
     Check,
+    #[serde(rename = "cleanUp")]
     CleanUp,
     Test,
 }
