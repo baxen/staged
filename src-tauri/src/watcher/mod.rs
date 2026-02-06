@@ -169,7 +169,7 @@ fn create_watcher(
             }
             Err(errors) => {
                 for e in errors {
-                    log::warn!("Watcher error: {}", e);
+                    log::warn!("Watcher error: {e}");
                 }
             }
         },

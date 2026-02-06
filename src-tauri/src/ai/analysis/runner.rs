@@ -55,9 +55,9 @@ fn parse_response(response: &str) -> Result<ChangesetAnalysis, String> {
     let json_str = extract_json(response);
 
     serde_json::from_str(json_str).map_err(|e| {
-        log::error!("Failed to parse response as JSON: {}", e);
-        log::error!("Response was:\n{}", response);
-        format!("Failed to parse AI response: {}", e)
+        log::error!("Failed to parse response as JSON: {e}");
+        log::error!("Response was:\n{response}");
+        format!("Failed to parse AI response: {e}")
     })
 }
 
@@ -69,7 +69,7 @@ fn load_after_content_if_small(
     file_path: &Path,
 ) -> Result<(Option<String>, usize), String> {
     let diff = git::get_file_diff(repo_path, spec, file_path)
-        .map_err(|e| format!("Failed to get file diff: {}", e))?;
+        .map_err(|e| format!("Failed to get file diff: {e}"))?;
 
     let (content, line_count) = match &diff.after {
         Some(f) => match &f.content {
@@ -108,15 +108,14 @@ pub async fn analyze_diff(
     // Find AI agent first (fail fast)
     let agent = find_ai_tool(provider).ok_or_else(|| match provider {
         Some(id) => format!(
-            "Provider '{}' not found. Run discover_acp_providers to see available providers.",
-            id
+            "Provider '{id}' not found. Run discover_acp_providers to see available providers."
         ),
         None => "No AI agent found. Install Goose: https://github.com/block/goose".to_string(),
     })?;
 
     // List files in the diff
     let files = git::list_diff_files(repo_path, spec)
-        .map_err(|e| format!("Failed to list diff files: {}", e))?;
+        .map_err(|e| format!("Failed to list diff files: {e}"))?;
 
     if files.is_empty() {
         return Err("No files in diff to analyze".to_string());
@@ -131,7 +130,7 @@ pub async fn analyze_diff(
 
         // Get unified diff
         let diff = git::get_unified_diff(repo_path, spec, file_path)
-            .map_err(|e| format!("Failed to get diff for {}: {}", path_str, e))?;
+            .map_err(|e| format!("Failed to get diff for {path_str}: {e}"))?;
 
         // Load after content if small enough
         let (after_content, after_line_count) =
@@ -178,18 +177,16 @@ pub async fn analyze_diff(
 
     log::info!("=== DIFF ANALYSIS (ACP) ===");
     log::info!("Files: {}", inputs.len());
-    log::info!("Strategy: {:?}", strategy);
+    log::info!("Strategy: {strategy:?}");
     log::info!("Using: {}", agent.name());
-    log::debug!("Prompt:\n{}", prompt);
+    log::debug!("Prompt:\n{prompt}");
 
     // Codex has strict input size limits (10MB). Fail early if exceeded.
     if provider == Some("codex") && prompt.len() > CODEX_MAX_BYTES {
         let size_mb = (prompt.len() as f64) / (1024.0 * 1024.0);
         let limit_mb = CODEX_MAX_BYTES / (1024 * 1024);
         return Err(format!(
-            "Changeset too large for Codex ({:.2}MB, {}MB input limit). Try fewer files or a smaller diff range.",
-            size_mb,
-            limit_mb
+            "Changeset too large for Codex ({size_mb:.2}MB, {limit_mb}MB input limit). Try fewer files or a smaller diff range."
         ));
     }
 
@@ -201,7 +198,7 @@ pub async fn analyze_diff(
         return Err(error_msg);
     }
 
-    log::debug!("Raw response:\n{}", response);
+    log::debug!("Raw response:\n{response}");
 
     parse_response(&response)
 }

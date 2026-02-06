@@ -363,9 +363,9 @@ fn resolve_to_tree<'a>(
         GitRef::Rev(rev) => {
             let obj = repo
                 .revparse_single(rev)
-                .map_err(|e| GitError::CommandFailed(format!("Cannot resolve '{}': {}", rev, e)))?;
+                .map_err(|e| GitError::CommandFailed(format!("Cannot resolve '{rev}': {e}")))?;
             let tree = obj.peel_to_tree().map_err(|e| {
-                GitError::CommandFailed(format!("Cannot get tree for '{}': {}", rev, e))
+                GitError::CommandFailed(format!("Cannot get tree for '{rev}': {e}"))
             })?;
             Ok(Some(tree))
         }
@@ -395,7 +395,7 @@ fn load_file_from_tree(
 
     let obj = entry
         .to_object(repo)
-        .map_err(|e| GitError::CommandFailed(format!("Cannot load object: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Cannot load object: {e}")))?;
 
     let blob = match obj.as_blob() {
         Some(b) => b,
@@ -427,7 +427,7 @@ fn load_file_from_workdir(repo: &Repository, path: &Path) -> Result<Option<File>
     }
 
     let bytes = std::fs::read(&full_path)
-        .map_err(|e| GitError::CommandFailed(format!("Cannot read file: {}", e)))?;
+        .map_err(|e| GitError::CommandFailed(format!("Cannot read file: {e}")))?;
 
     Ok(Some(File {
         path: path.to_string_lossy().to_string(),
@@ -466,7 +466,7 @@ fn get_hunks_libgit2(
     } else {
         repo.diff_tree_to_tree(base_tree, head_tree, Some(&mut opts))
     }
-    .map_err(|e| GitError::CommandFailed(format!("Failed to compute diff: {}", e)))?;
+    .map_err(|e| GitError::CommandFailed(format!("Failed to compute diff: {e}")))?;
 
     // Collect hunks
     let hunks: RefCell<Vec<Hunk>> = RefCell::new(Vec::new());
@@ -497,7 +497,7 @@ fn get_hunks_libgit2(
         }),
         None, // line callback
     )
-    .map_err(|e| GitError::CommandFailed(format!("Failed to iterate diff: {}", e)))?;
+    .map_err(|e| GitError::CommandFailed(format!("Failed to iterate diff: {e}")))?;
 
     Ok(hunks.into_inner())
 }

@@ -136,8 +136,7 @@ fn find_recent_files_mdfind(scan_dirs: &[PathBuf], hours_ago: u32) -> Option<Vec
 
     // Add the query for recently modified files
     args.push(format!(
-        "kMDItemFSContentChangeDate >= $time.now(-{})",
-        seconds
+        "kMDItemFSContentChangeDate >= $time.now(-{seconds})"
     ));
 
     let output = Command::new("mdfind").args(&args).output().ok()?;
@@ -199,7 +198,7 @@ mod tests {
 
         for path in test_paths {
             let excluded = EXCLUDE_PATTERNS.iter().any(|p| path.contains(p));
-            assert!(excluded, "Path should be excluded: {}", path);
+            assert!(excluded, "Path should be excluded: {path}");
         }
     }
 }
