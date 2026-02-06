@@ -81,3 +81,9 @@ just check-all  # Verify everything passes
 ## Git Workflow
 
 **Do not** create branches, commit, or push unless explicitly asked.
+
+**Before pushing PRs**, always run:
+```bash
+just fmt        # Format code
+just lint       # Run linter checks
+```
