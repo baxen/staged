@@ -593,20 +593,16 @@
               onclick={() => handleViewNote(item.note, true)}
             >
               <div class="timeline-marker">
+                <div class="timeline-line" class:invisible={index === 0}></div>
                 <div class="timeline-icon note-icon">
                   <Loader2 size={12} class="spinner" />
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title skeleton-title">{item.note.title}</span>
-                  <div class="timeline-meta">
-                    <span class="skeleton-meta">generating...</span>
-                  </div>
-                </div>
+                <span class="timeline-title skeleton-title">{item.note.title}</span>
+                <span class="note-spacer"></span>
+                <span class="skeleton-meta">generating...</span>
               </div>
               <div class="watch-button">
                 <MessageSquare size={12} />
@@ -618,20 +614,16 @@
             {#if isRunningSessionAlive}
               <button class="timeline-row skeleton-row" onclick={handleWatchSession}>
                 <div class="timeline-marker">
+                  <div class="timeline-line" class:invisible={index === 0}></div>
                   <div class="timeline-icon commit-icon">
                     <Loader2 size={12} class="spinner" />
                   </div>
-                  {#if index < timeline.length - 1}
-                    <div class="timeline-line"></div>
-                  {/if}
+                  <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
                 </div>
                 <div class="timeline-content">
-                  <div class="timeline-info">
-                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                    <div class="timeline-meta">
-                      <span class="skeleton-meta">generating...</span>
-                    </div>
-                  </div>
+                  <span class="timeline-title skeleton-title">{item.session.prompt}</span>
+                  <span class="note-spacer"></span>
+                  <span class="skeleton-meta">Generating...</span>
                 </div>
                 <div class="watch-button">
                   <MessageSquare size={12} />
@@ -642,20 +634,17 @@
               <!-- Stuck session - show recovery options -->
               <div class="timeline-row skeleton-row stuck-session-row">
                 <div class="timeline-marker">
+                  <div class="timeline-line" class:invisible={index === 0}></div>
                   <div
                     class="timeline-icon stuck-icon"
                     title="Session was interrupted before completing"
                   >
                     <AlertCircle size={12} />
                   </div>
-                  {#if index < timeline.length - 1}
-                    <div class="timeline-line"></div>
-                  {/if}
+                  <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
                 </div>
                 <div class="timeline-content">
-                  <div class="timeline-info">
-                    <span class="timeline-title skeleton-title">{item.session.prompt}</span>
-                  </div>
+                  <span class="timeline-title skeleton-title">{item.session.prompt}</span>
                 </div>
                 <div class="stuck-actions">
                   <button
@@ -684,23 +673,18 @@
           {:else if item.type === 'commit'}
             <div class="timeline-row commit-row" class:is-head={item.isHead}>
               <div class="timeline-marker">
+                <div class="timeline-line" class:invisible={index === 0}></div>
                 <div class="timeline-icon commit-icon">
                   <GitCommit size={12} />
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title">{item.commit.subject}</span>
-                  <div class="timeline-meta">
-                    <span class="commit-sha">{item.commit.shortSha}</span>
-                    <span class="timeline-time">{formatRelativeTime(item.commit.timestamp)}</span>
-                  </div>
-                </div>
+                <span class="timeline-title">{item.commit.subject}</span>
               </div>
-              <div class="timeline-actions">
+              <div class="timeline-actions-wrapper">
+                <span class="timeline-time fade-on-hover">{formatRelativeTime(item.commit.timestamp)}</span>
+                <div class="timeline-actions">
                 {#if confirmingDeleteCommitSha === item.commit.sha}
                   <div class="delete-confirm">
                     {#if commitsToDeleteCount > 1}
@@ -754,12 +738,14 @@
                     </button>
                   {/if}
                 {/if}
+                </div>
               </div>
             </div>
           {:else if item.type === 'note'}
             <!-- Note row - similar to commit row with separate action buttons -->
             <div class="timeline-row note-row">
               <div class="timeline-marker">
+                <div class="timeline-line" class:invisible={index === 0}></div>
                 <div class="timeline-icon note-icon">
                   {#if item.note.title.startsWith('Code Review')}
                     <FileSearch size={12} />
@@ -767,19 +753,14 @@
                     <FileText size={12} />
                   {/if}
                 </div>
-                {#if index < timeline.length - 1}
-                  <div class="timeline-line"></div>
-                {/if}
+                <div class="timeline-line" class:invisible={index === timeline.length - 1}></div>
               </div>
               <div class="timeline-content">
-                <div class="timeline-info">
-                  <span class="timeline-title">{item.note.title}</span>
-                  <div class="timeline-meta">
-                    <span class="timeline-time">{formatRelativeTimeMs(item.note.createdAt)}</span>
-                  </div>
-                </div>
+                <span class="timeline-title">{item.note.title}</span>
               </div>
-              <div class="timeline-actions">
+              <div class="timeline-actions-wrapper">
+                <span class="timeline-time fade-on-hover">{formatRelativeTimeMs(item.note.createdAt)}</span>
+                <div class="timeline-actions">
                 {#if confirmingDeleteNoteId === item.note.id}
                   <div class="delete-confirm">
                     <button
@@ -832,6 +813,7 @@
                     <Trash2 size={12} />
                   </button>
                 {/if}
+                </div>
               </div>
             </div>
           {/if}
@@ -1220,9 +1202,9 @@
 
   .timeline-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 10px;
-    padding: 6px 8px;
+    padding: 10px 8px;
     margin: 0 -8px;
     background: transparent;
     border: none;
@@ -1247,24 +1229,32 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     width: 20px;
     flex-shrink: 0;
-  }
-
-  .timeline-line {
-    flex: 1;
-    width: 2px;
-    min-height: 16px;
-    background-color: var(--border-subtle);
-    margin-top: 4px;
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 8px;
   }
 
   .timeline-content {
     flex: 1;
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
+    align-items: center;
     min-width: 0;
+    margin-left: 30px;
+  }
+
+  .timeline-line {
+    flex: 1;
+    width: 2px;
+    min-height: 8px;
+    background-color: var(--border-subtle);
+  }
+
+  .timeline-line.invisible {
+    opacity: 0;
   }
 
   .timeline-icon {
@@ -1286,18 +1276,14 @@
     color: var(--text-accent);
   }
 
-  .timeline-info {
-    flex: 1;
-    min-width: 0;
-  }
-
   .timeline-title {
-    display: block;
+    flex: 1;
     font-size: var(--size-sm);
     color: var(--text-primary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    min-width: 0;
   }
 
   .skeleton-title {
@@ -1305,28 +1291,47 @@
     font-style: italic;
   }
 
-  .timeline-meta {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-top: 2px;
+  .note-spacer {
+    /* Empty spacer for notes to align with commit hash column */
   }
 
-  .commit-sha {
-    font-size: var(--size-xs);
-    font-family: 'SF Mono', 'Menlo', 'Monaco', 'Courier New', monospace;
-    color: var(--text-faint);
+  .timeline-actions-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: relative;
+    flex-shrink: 0;
   }
 
   .timeline-time {
     font-size: var(--size-xs);
     color: var(--text-faint);
+    white-space: nowrap;
+    text-align: right;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    position: absolute;
+    right: 0;
+    transition: opacity 0.15s ease;
+    pointer-events: none;
+  }
+
+  .fade-on-hover {
+    opacity: 1;
+  }
+
+  .commit-row:hover .fade-on-hover,
+  .note-row:hover .fade-on-hover {
+    opacity: 0;
   }
 
   .skeleton-meta {
     font-size: var(--size-xs);
     color: var(--text-faint);
     animation: pulse 2s ease-in-out infinite;
+    white-space: nowrap;
+    text-align: right;
   }
 
   .timeline-actions {
