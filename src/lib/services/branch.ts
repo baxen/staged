@@ -16,6 +16,53 @@ export interface GitProject {
   updatedAt: number;
 }
 
+/** Type of a project action */
+export type ActionType = 'prerun' | 'run' | 'format' | 'check';
+
+/** A configurable action that can be run on a project */
+export interface ProjectAction {
+  id: string;
+  projectId: string;
+  name: string;
+  command: string;
+  actionType: ActionType;
+  sortOrder: number;
+  autoCommit: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** A suggested action detected from the project */
+export interface SuggestedAction {
+  name: string;
+  command: string;
+  actionType: ActionType;
+  autoCommit: boolean;
+  source: string;
+}
+
+/** Status of an action execution */
+export type ActionStatus = 'running' | 'completed' | 'failed' | 'stopped';
+
+/** Event for action status changes */
+export interface ActionStatusEvent {
+  executionId: string;
+  branchId: string;
+  actionId: string;
+  actionName: string;
+  status: ActionStatus;
+  exitCode: number | null;
+  startedAt: number;
+  completedAt: number | null;
+}
+
+/** Event for action output */
+export interface ActionOutputEvent {
+  executionId: string;
+  chunk: string;
+  stream: 'stdout' | 'stderr';
+}
+
 /** A tracked branch with an associated worktree */
 export interface Branch {
   id: string;
@@ -674,4 +721,81 @@ export async function deleteGitProject(projectId: string): Promise<void> {
  */
 export async function getOrCreateGitProject(repoPath: string): Promise<GitProject> {
   return invoke<GitProject>('get_or_create_git_project', { repoPath });
+}
+
+// =============================================================================
+// Project Actions
+// =============================================================================
+
+/** List all actions for a project */
+export async function listProjectActions(projectId: string): Promise<ProjectAction[]> {
+  return invoke<ProjectAction[]>('list_project_actions', { projectId });
+}
+
+/** Create a new project action */
+export async function createProjectAction(
+  projectId: string,
+  name: string,
+  command: string,
+  actionType: ActionType,
+  sortOrder: number,
+  autoCommit: boolean
+): Promise<ProjectAction> {
+  return invoke<ProjectAction>('create_project_action', {
+    projectId,
+    name,
+    command,
+    actionType,
+    sortOrder,
+    autoCommit,
+  });
+}
+
+/** Update a project action */
+export async function updateProjectAction(
+  actionId: string,
+  name: string,
+  command: string,
+  actionType: ActionType,
+  sortOrder: number,
+  autoCommit: boolean
+): Promise<void> {
+  return invoke<void>('update_project_action', {
+    actionId,
+    name,
+    command,
+    actionType,
+    sortOrder,
+    autoCommit,
+  });
+}
+
+/** Delete a project action */
+export async function deleteProjectAction(actionId: string): Promise<void> {
+  return invoke<void>('delete_project_action', { actionId });
+}
+
+/** Reorder project actions */
+export async function reorderProjectActions(actionIds: string[]): Promise<void> {
+  return invoke<void>('reorder_project_actions', { actionIds });
+}
+
+/** Detect actions for a project */
+export async function detectProjectActions(projectId: string): Promise<SuggestedAction[]> {
+  return invoke<SuggestedAction[]>('detect_project_actions', { projectId });
+}
+
+/** Run an action on a branch */
+export async function runBranchAction(branchId: string, actionId: string): Promise<string> {
+  return invoke<string>('run_branch_action', { branchId, actionId });
+}
+
+/** Stop a running action */
+export async function stopBranchAction(executionId: string): Promise<void> {
+  return invoke<void>('stop_branch_action', { executionId });
+}
+
+/** Get all running actions for a branch */
+export async function getRunningBranchActions(branchId: string): Promise<ActionStatusEvent[]> {
+  return invoke<ActionStatusEvent[]>('get_running_branch_actions', { branchId });
 }
