@@ -302,7 +302,7 @@
       }, 100);
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
-      const effectiveProjectId = projectId || '';
+      const effectiveProjectId = createProjectId || '';
       const pending: PendingBranch = {
         projectId: effectiveProjectId,
         repoPath: createRepoPath,
@@ -414,7 +414,7 @@
     } catch (e) {
       const errorMsg = e instanceof Error ? e.message : String(e);
       // Need to create pending for error case too
-      const effectiveProjectId = projectId || '';
+      const effectiveProjectId = createProjectId || '';
       const pending: PendingBranch = {
         projectId: effectiveProjectId,
         repoPath: createRepoPath,
