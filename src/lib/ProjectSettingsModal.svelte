@@ -185,22 +185,7 @@
   }
 
   function getActionTypeColor(actionType: ActionType): string {
-    switch (actionType) {
-      case 'prerun':
-        return 'var(--color-warning)';
-      case 'run':
-        return 'var(--color-primary)';
-      case 'build':
-        return 'var(--status-modified)';
-      case 'format':
-        return 'var(--color-info)';
-      case 'check':
-        return 'var(--color-success)';
-      case 'test':
-        return 'var(--status-added)';
-      case 'cleanUp':
-        return 'var(--text-muted)';
-    }
+    return 'var(--ui-accent)';
   }
 
   // Group actions by type
@@ -301,11 +286,13 @@
                   {#each typeActions as action (action.id)}
                     <div class="action-item">
                       <div class="action-info">
-                        <div class="action-name">{action.name}</div>
+                        <div class="action-name">
+                          {action.name}
+                          {#if action.autoCommit}
+                            <span class="action-badge">Commits to git</span>
+                          {/if}
+                        </div>
                         <code class="action-command">{action.command}</code>
-                        {#if action.autoCommit}
-                          <div class="action-badge">Commits to git</div>
-                        {/if}
                       </div>
                       <div class="action-controls">
                         <button
@@ -596,6 +583,9 @@
   }
 
   .action-name {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 14px;
     font-weight: 500;
     color: var(--text-primary);
@@ -618,13 +608,15 @@
   }
 
   .action-badge {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
     font-size: 10px;
-    padding: 2px 6px;
-    background: var(--color-info);
-    color: white;
-    border-radius: 3px;
-    margin-top: 4px;
+    padding: 3px 8px;
+    background: var(--ui-accent);
+    color: var(--bg-primary);
+    border-radius: 4px;
+    font-weight: 500;
+    white-space: nowrap;
   }
 
   .action-controls {
