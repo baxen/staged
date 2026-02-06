@@ -276,6 +276,7 @@ impl ActionType {
         match s {
             "prerun" => Some(ActionType::Prerun),
             "run" => Some(ActionType::Run),
+            "build" => Some(ActionType::Build),
             "format" => Some(ActionType::Format),
             "check" => Some(ActionType::Check),
             "cleanUp" => Some(ActionType::CleanUp),
