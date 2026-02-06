@@ -243,19 +243,12 @@
     }
 
     // Load project actions
-    console.log('[BranchCard] Branch:', { id: branch.id, name: branch.branchName, projectId: branch.projectId });
     if (branch.projectId) {
       try {
         projectActions = await branchService.listProjectActions(branch.projectId);
-        console.log('[BranchCard] Loaded', projectActions.length, 'actions for project', branch.projectId);
-        if (projectActions.length === 0) {
-          console.warn('[BranchCard] No actions found for project:', branch.projectId);
-        }
       } catch (e) {
-        console.error('[BranchCard] Failed to load project actions:', e);
+        console.error('Failed to load project actions:', e);
       }
-    } else {
-      console.error('[BranchCard] Branch has no projectId!', branch);
     }
 
     // Listen for action status events

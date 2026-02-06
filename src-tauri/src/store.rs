@@ -998,9 +998,10 @@ impl Store {
 
             for (branch_id, repo_path) in branch_repos {
                 // Check if a project exists for this repo_path
+                // Prefer projects with subpath IS NULL, but accept any project for this repo
                 let project_id: Option<String> = conn
                     .query_row(
-                        "SELECT id FROM git_projects WHERE repo_path = ?1 AND subpath IS NULL LIMIT 1",
+                        "SELECT id FROM git_projects WHERE repo_path = ?1 ORDER BY subpath IS NULL DESC LIMIT 1",
                         params![&repo_path],
                         |row| row.get(0),
                     )
@@ -1025,6 +1026,54 @@ impl Store {
                     "UPDATE branches SET project_id = ?1 WHERE id = ?2",
                     params![&project_id, &branch_id],
                 )?;
+            }
+        }
+
+        // Fix branches that might be pointing to auto-created empty projects
+        // when a user-created project with actions exists for the same repo.
+        // This handles the case where the previous migration created projects with empty names
+        // while the user had already created a project with a name/subpath for that repo.
+        {
+            // Find all projects with no name that were auto-created
+            let mut stmt = conn.prepare(
+                "SELECT id, repo_path FROM git_projects WHERE name = '' AND subpath IS NULL"
+            )?;
+            let empty_projects: Vec<(String, String)> = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<rusqlite::Result<_>>()?;
+            drop(stmt);
+
+            for (empty_project_id, repo_path) in empty_projects {
+                // Check if there's a better project for this repo (one with a name or subpath)
+                let better_project_id: Option<String> = conn
+                    .query_row(
+                        "SELECT id FROM git_projects WHERE repo_path = ?1 AND (name != '' OR subpath IS NOT NULL) LIMIT 1",
+                        params![&repo_path],
+                        |row| row.get(0),
+                    )
+                    .optional()?;
+
+                if let Some(better_id) = better_project_id {
+                    // Update branches to use the better project
+                    conn.execute(
+                        "UPDATE branches SET project_id = ?1 WHERE project_id = ?2",
+                        params![&better_id, &empty_project_id],
+                    )?;
+
+                    // Delete the empty project if it has no branches
+                    let branch_count: i64 = conn.query_row(
+                        "SELECT COUNT(*) FROM branches WHERE project_id = ?1",
+                        params![&empty_project_id],
+                        |row| row.get(0),
+                    )?;
+
+                    if branch_count == 0 {
+                        conn.execute(
+                            "DELETE FROM git_projects WHERE id = ?1",
+                            params![&empty_project_id],
+                        )?;
+                    }
+                }
             }
         }
 
