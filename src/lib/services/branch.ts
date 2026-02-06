@@ -63,6 +63,13 @@ export interface ActionOutputEvent {
   stream: 'stdout' | 'stderr';
 }
 
+/** Buffered output chunk */
+export interface OutputChunk {
+  chunk: string;
+  stream: 'stdout' | 'stderr';
+  timestamp: number;
+}
+
 /** A tracked branch with an associated worktree */
 export interface Branch {
   id: string;
@@ -798,4 +805,9 @@ export async function stopBranchAction(executionId: string): Promise<void> {
 /** Get all running actions for a branch */
 export async function getRunningBranchActions(branchId: string): Promise<ActionStatusEvent[]> {
   return invoke<ActionStatusEvent[]>('get_running_branch_actions', { branchId });
+}
+
+/** Get buffered output for an execution */
+export async function getActionOutputBuffer(executionId: string): Promise<OutputChunk[]> {
+  return invoke<OutputChunk[]>('get_action_output_buffer', { executionId });
 }

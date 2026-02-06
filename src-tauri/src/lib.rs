@@ -3085,6 +3085,17 @@ fn get_running_branch_actions(
     Ok(runner.get_running_actions(&branch_id))
 }
 
+/// Get buffered output for an execution
+#[tauri::command(rename_all = "camelCase")]
+fn get_action_output_buffer(
+    runner: State<'_, Arc<actions::ActionRunner>>,
+    execution_id: String,
+) -> Result<Vec<actions::OutputChunk>, String> {
+    runner
+        .get_buffered_output(&execution_id)
+        .ok_or_else(|| format!("No output buffer found for execution: {}", execution_id))
+}
+
 // =============================================================================
 // Theme Commands
 // =============================================================================
@@ -3687,6 +3698,7 @@ pub fn run() {
             run_branch_action,
             stop_branch_action,
             get_running_branch_actions,
+            get_action_output_buffer,
             // Theme commands
             get_custom_themes,
             read_custom_theme,

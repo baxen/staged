@@ -313,8 +313,8 @@
   let unlistenActionAutoCommit: UnlistenFn | null = null;
 
   // Load commits and running session on mount
-  onMount(async () => {
-    await loadData();
+  onMount(() => {
+    loadData();
     // Load available openers (shared across all cards via cache)
     if (!openersLoaded) {
       branchService.getAvailableOpeners().then((apps) => {
@@ -325,15 +325,15 @@
 
     // Load project actions
     if (branch.projectId) {
-      try {
-        projectActions = await branchService.listProjectActions(branch.projectId);
-      } catch (e) {
+      branchService.listProjectActions(branch.projectId).then((actions) => {
+        projectActions = actions;
+      }).catch((e) => {
         console.error('Failed to load project actions:', e);
-      }
+      });
     }
 
     // Listen for action status events
-    unlistenActionStatus = await listen('action_status', (event: any) => {
+    listen('action_status', (event: any) => {
       const payload = event.payload as {
         executionId: string;
         branchId: string;
@@ -367,10 +367,12 @@
           }
         }
       }
+    }).then((unlisten) => {
+      unlistenActionStatus = unlisten;
     });
 
     // Listen for auto-commit events
-    unlistenActionAutoCommit = await listen('action_auto_commit', async (event: any) => {
+    listen('action_auto_commit', async (event: any) => {
       const payload = event.payload as {
         branchId: string;
         actionName: string;
@@ -380,6 +382,8 @@
         // Refresh commits to show the new commit
         await loadData();
       }
+    }).then((unlisten) => {
+      unlistenActionAutoCommit = unlisten;
     });
 
     return () => {

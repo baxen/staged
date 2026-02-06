@@ -9,6 +9,7 @@
   import { X, Loader2, AlertCircle, StopCircle, RotateCcw, CheckCircle2 } from 'lucide-svelte';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
   import { invoke } from '@tauri-apps/api/core';
+  import AnsiToHtml from 'ansi-to-html';
 
   interface Props {
     /** The action execution ID */
@@ -28,7 +29,7 @@
   // State
   // ==========================================================================
 
-  let outputLines = $state<Array<{ text: string; stream: 'stdout' | 'stderr' }>>([]);
+  let outputLines = $state<Array<{ html: string; stream: 'stdout' | 'stderr' }>>([]);
   let isRunning = $state(true);
   let exitCode = $state<number | null>(null);
   let error = $state<string | null>(null);
@@ -40,11 +41,36 @@
   let unlistenOutput: UnlistenFn | null = null;
   let unlistenStatus: UnlistenFn | null = null;
 
+  // ANSI to HTML converter
+  const ansiConverter = new AnsiToHtml({
+    fg: 'var(--text-primary)',
+    bg: 'var(--bg-deepest)',
+    newline: false,
+    escapeXML: true,
+    stream: true,
+  });
+
   // ==========================================================================
   // Lifecycle
   // ==========================================================================
 
   onMount(async () => {
+    // Fetch buffered output from before modal opened
+    try {
+      const bufferedOutput = await invoke<
+        Array<{ chunk: string; stream: string; timestamp: number }>
+      >('get_action_output_buffer', { executionId });
+
+      outputLines = bufferedOutput.map((item) => ({
+        html: ansiConverter.toHtml(item.chunk),
+        stream: item.stream as 'stdout' | 'stderr',
+      }));
+      scrollToBottom();
+    } catch (e) {
+      // If no buffer exists yet, that's okay - might be a brand new execution
+      console.log('No buffered output yet:', e);
+    }
+
     // Listen for output events
     unlistenOutput = await listen('action_output', (event: any) => {
       const payload = event.payload as {
@@ -55,7 +81,7 @@
 
       if (payload.executionId === executionId) {
         outputLines.push({
-          text: payload.chunk,
+          html: ansiConverter.toHtml(payload.chunk),
           stream: payload.stream as 'stdout' | 'stderr',
         });
         scrollToBottom();
@@ -237,7 +263,7 @@
         <div class="output">
           {#each outputLines as line}
             <div class="output-line" class:stderr={line.stream === 'stderr'}>
-              {line.text}
+              {@html line.html}
             </div>
           {/each}
         </div>

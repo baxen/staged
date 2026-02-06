@@ -41,6 +41,14 @@ pub enum ActionStatus {
     Stopped,
 }
 
+/// Represents a single output chunk with its metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutputChunk {
+    pub chunk: String,
+    pub stream: String, // "stdout" or "stderr"
+    pub timestamp: i64,
+}
+
 /// Tracks a running action
 struct RunningActionState {
     execution_id: String,
@@ -50,6 +58,7 @@ struct RunningActionState {
     started_at: i64,
     #[allow(dead_code)]
     child_pid: Option<u32>,
+    output_buffer: Arc<Mutex<Vec<OutputChunk>>>,
 }
 
 /// Manages action execution
@@ -96,6 +105,9 @@ impl ActionRunner {
 
         let child_pid = child.id();
 
+        // Create output buffer
+        let output_buffer = Arc::new(Mutex::new(Vec::new()));
+
         // Record the running action
         {
             let mut running = self.running.lock().unwrap();
@@ -108,6 +120,7 @@ impl ActionRunner {
                     branch_id: branch_id.clone(),
                     started_at: crate::store::now_timestamp(),
                     child_pid: Some(child_pid),
+                    output_buffer: output_buffer.clone(),
                 },
             );
         }
@@ -130,16 +143,31 @@ impl ActionRunner {
         // Spawn threads to read stdout and stderr
         let exec_id = execution_id.clone();
         let app_clone = app.clone();
+        let buffer_clone = output_buffer.clone();
         if let Some(stdout) = child.stdout.take() {
             thread::spawn(move || {
                 let reader = BufReader::new(stdout);
                 for line in reader.lines() {
                     if let Ok(line) = line {
+                        let chunk = format!("{}\n", line);
+                        let timestamp = crate::store::now_timestamp();
+
+                        // Store in buffer
+                        {
+                            let mut buffer = buffer_clone.lock().unwrap();
+                            buffer.push(OutputChunk {
+                                chunk: chunk.clone(),
+                                stream: "stdout".to_string(),
+                                timestamp,
+                            });
+                        }
+
+                        // Emit event
                         let _ = app_clone.emit(
                             "action_output",
                             ActionOutputEvent {
                                 execution_id: exec_id.clone(),
-                                chunk: format!("{}\n", line),
+                                chunk,
                                 stream: "stdout".to_string(),
                             },
                         );
@@ -150,16 +178,31 @@ impl ActionRunner {
 
         let exec_id = execution_id.clone();
         let app_clone = app.clone();
+        let buffer_clone = output_buffer.clone();
         if let Some(stderr) = child.stderr.take() {
             thread::spawn(move || {
                 let reader = BufReader::new(stderr);
                 for line in reader.lines() {
                     if let Ok(line) = line {
+                        let chunk = format!("{}\n", line);
+                        let timestamp = crate::store::now_timestamp();
+
+                        // Store in buffer
+                        {
+                            let mut buffer = buffer_clone.lock().unwrap();
+                            buffer.push(OutputChunk {
+                                chunk: chunk.clone(),
+                                stream: "stderr".to_string(),
+                                timestamp,
+                            });
+                        }
+
+                        // Emit event
                         let _ = app_clone.emit(
                             "action_output",
                             ActionOutputEvent {
                                 execution_id: exec_id.clone(),
-                                chunk: format!("{}\n", line),
+                                chunk,
                                 stream: "stderr".to_string(),
                             },
                         );
@@ -309,5 +352,16 @@ impl ActionRunner {
                 completed_at: None,
             })
             .collect()
+    }
+
+    /// Get buffered output for an execution
+    pub fn get_buffered_output(&self, execution_id: &str) -> Option<Vec<OutputChunk>> {
+        let running = self.running.lock().unwrap();
+        if let Some(state) = running.get(execution_id) {
+            let buffer = state.output_buffer.lock().unwrap();
+            Some(buffer.clone())
+        } else {
+            None
+        }
     }
 }
