@@ -355,6 +355,9 @@
   onDestroy(() => {
     window.removeEventListener('keydown', handleKeydown);
     unlistenStatus?.();
+    // Reset scroll state
+    savedScrollTop = 0;
+    shouldRestoreScroll = false;
   });
 </script>
 
