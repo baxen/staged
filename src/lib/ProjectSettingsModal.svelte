@@ -20,7 +20,7 @@
     Save,
     Pencil,
     FlaskConical,
-    Broom,
+    BrushCleaning,
   } from 'lucide-svelte';
   import type { GitProject, ProjectAction, ActionType, SuggestedAction } from './services/branch';
   import * as branchService from './services/branch';
@@ -202,7 +202,7 @@
       case 'test':
         return FlaskConical;
       case 'cleanUp':
-        return Broom;
+        return BrushCleaning;
       case 'run':
         return Play;
     }
