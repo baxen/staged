@@ -1,9 +1,5 @@
 <!--
-  ProjectSettingsModal.svelte - Manage project settings and actions
-
-  Tabs:
-  1. General - Project path and subpath
-  2. Actions - Configurable actions for the project
+  ProjectSettingsModal.svelte - Manage project actions
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
@@ -33,15 +29,7 @@
 
   let { project, onClose, onUpdated }: Props = $props();
 
-  // Active tab
-  type Tab = 'general' | 'actions';
-  let activeTab = $state<Tab>('general');
-
-  // General tab state
-  let subpath = $state(project.subpath || '');
-  let saving = $state(false);
-
-  // Actions tab state
+  // Actions state
   let actions = $state<ProjectAction[]>([]);
   let loadingActions = $state(false);
   let detecting = $state(false);
@@ -53,11 +41,9 @@
     autoCommit: false,
   });
 
-  // Load actions when switching to actions tab
-  $effect(() => {
-    if (activeTab === 'actions' && actions.length === 0 && !loadingActions) {
-      loadActions();
-    }
+  // Load actions on mount
+  onMount(() => {
+    loadActions();
   });
 
   async function loadActions() {
@@ -140,10 +126,11 @@
           editForm.autoCommit
         );
         actions = [...actions, newAction];
-      } else {
+      } else if (editingAction) {
         // Updating existing action
+        const actionId = editingAction.id;
         await branchService.updateProjectAction(
-          editingAction.id,
+          actionId,
           editForm.name,
           editForm.command,
           editForm.actionType,
@@ -151,7 +138,7 @@
           editForm.autoCommit
         );
         actions = actions.map((a) =>
-          a.id === editingAction.id
+          a.id === actionId
             ? {
                 ...a,
                 name: editForm.name,
@@ -174,20 +161,6 @@
       actions = actions.filter((a) => a.id !== actionId);
     } catch (e) {
       console.error('Failed to delete action:', e);
-    }
-  }
-
-  async function saveGeneral() {
-    saving = true;
-    try {
-      await branchService.updateGitProject(project.id, subpath || null);
-      if (onUpdated) {
-        onUpdated({ ...project, subpath: subpath || null });
-      }
-    } catch (e) {
-      console.error('Failed to save project:', e);
-    } finally {
-      saving = false;
     }
   }
 
@@ -269,8 +242,8 @@
   <div class="modal">
     <header class="modal-header">
       <h2>
-        <Settings size={16} />
-        Project Settings
+        <Play size={16} />
+        Actions
       </h2>
       <button class="close-btn" onclick={onClose}>
         <X size={16} />
@@ -278,207 +251,156 @@
     </header>
 
     <div class="modal-body">
-      <!-- Tabs -->
-      <div class="tabs">
-        <button
-          class="tab"
-          class:active={activeTab === 'general'}
-          onclick={() => (activeTab = 'general')}
-        >
-          <Settings size={14} />
-          General
-        </button>
-        <button
-          class="tab"
-          class:active={activeTab === 'actions'}
-          onclick={() => (activeTab = 'actions')}
-        >
-          <Play size={14} />
-          Actions
-        </button>
-      </div>
+      <div class="content-wrapper">
+        <div class="actions-header">
+          <button class="secondary-btn" onclick={detectActions} disabled={detecting}>
+            {#if detecting}
+              <Loader2 size={14} class="spinner" />
+            {:else}
+              <Zap size={14} />
+            {/if}
+            Detect Actions
+          </button>
+          <button class="primary-btn" onclick={startAddAction}>
+            <Plus size={14} />
+            Add Action
+          </button>
+        </div>
 
-      <!-- General Tab -->
-      {#if activeTab === 'general'}
-        <div class="tab-content">
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Repository Path</div>
-              <div class="setting-value">{project.repoPath}</div>
-            </div>
+        {#if loadingActions}
+          <div class="loading-state">
+            <Loader2 size={24} />
+            <span>Loading...</span>
           </div>
+        {:else if actions.length === 0}
+          <div class="empty-state">
+            <Play size={32} />
+            <p>No actions configured</p>
+            <p class="empty-hint">
+              Click "Detect Actions" to find common scripts, or add one manually
+            </p>
+          </div>
+        {:else}
+          <div class="actions-list">
+            {#each Object.entries(groupedActions) as [type, typeActions]}
+              {#if typeActions.length > 0}
+                <div class="action-group">
+                  <div
+                    class="group-header"
+                    style="color: {getActionTypeColor(type as ActionType)}"
+                  >
+                    <svelte:component this={getActionIcon(type as ActionType)} size={14} />
+                    {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </div>
+                  {#each typeActions as action (action.id)}
+                    <div class="action-item">
+                      <div class="action-info">
+                        <div class="action-name">{action.name}</div>
+                        <code class="action-command">{action.command}</code>
+                        {#if action.autoCommit}
+                          <div class="action-badge">Commits to git</div>
+                        {/if}
+                      </div>
+                      <div class="action-controls">
+                        <button
+                          class="icon-btn"
+                          onclick={() => startEditAction(action)}
+                          title="Edit"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          class="icon-btn danger"
+                          onclick={() => deleteAction(action.id)}
+                          title="Delete"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {/each}
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
 
-          <div class="setting-row">
-            <div class="setting-info">
-              <div class="setting-label">Subpath</div>
-              <div class="setting-description">
-                Optional path within the repository (for monorepos)
-              </div>
-            </div>
+  <!-- Edit Action Modal (separate overlay) -->
+  {#if editingAction}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="edit-modal-backdrop" onclick={cancelEdit}>
+      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+      <div class="edit-modal" onclick={(e) => e.stopPropagation()}>
+        <header class="edit-modal-header">
+          <h3>{editingAction.id ? 'Edit Action' : 'New Action'}</h3>
+          <button class="close-btn" onclick={cancelEdit}>
+            <X size={16} />
+          </button>
+        </header>
+
+        <div class="edit-modal-body">
+          <div class="form-group">
+            <label for="action-name">Name</label>
             <input
+              id="action-name"
               type="text"
-              class="subpath-input"
-              bind:value={subpath}
-              placeholder="e.g., packages/frontend"
+              bind:value={editForm.name}
+              placeholder="e.g., Lint"
             />
           </div>
 
-          <div class="button-row">
-            <button class="primary-btn" onclick={saveGeneral} disabled={saving}>
-              {#if saving}
-                <Loader2 size={14} class="spinner" />
-              {:else}
-                <Save size={14} />
-              {/if}
-              Save
-            </button>
+          <div class="form-group">
+            <label for="action-command">Command</label>
+            <input
+              id="action-command"
+              type="text"
+              bind:value={editForm.command}
+              placeholder="e.g., npm run lint"
+            />
           </div>
-        </div>
-      {/if}
 
-      <!-- Actions Tab -->
-      {#if activeTab === 'actions'}
-        <div class="tab-content actions-tab">
-          {#if editingAction}
-            <!-- Edit Form -->
-            <div class="edit-form">
-              <h3>{editingAction.id ? 'Edit Action' : 'New Action'}</h3>
-
-              <div class="form-group">
-                <label for="action-name">Name</label>
-                <input
-                  id="action-name"
-                  type="text"
-                  bind:value={editForm.name}
-                  placeholder="e.g., Lint"
-                />
-              </div>
-
-              <div class="form-group">
-                <label for="action-command">Command</label>
-                <input
-                  id="action-command"
-                  type="text"
-                  bind:value={editForm.command}
-                  placeholder="e.g., npm run lint"
-                />
-              </div>
-
-              <div class="form-group">
-                <label for="action-type">Type</label>
-                <select id="action-type" bind:value={editForm.actionType}>
-                  <option value="run">Run - Manual execution</option>
-                  <option value="format">Format - Auto-fix issues</option>
-                  <option value="check">Check - Validation only</option>
-                  <option value="test">Test - Run tests</option>
-                  <option value="cleanUp">Clean Up - Remove build artifacts</option>
-                  <option value="prerun">Prerun - Auto-run on branch creation</option>
-                </select>
-                {#if editForm.actionType === 'prerun'}
-                  <div class="type-hint">
-                    Prerun actions will run automatically when a new worktree is created
-                  </div>
-                {/if}
-              </div>
-
-              <div class="form-group checkbox-group">
-                <label>
-                  <input type="checkbox" bind:checked={editForm.autoCommit} />
-                  Auto-commit changes after successful execution
-                </label>
-              </div>
-
-              <div class="button-row">
-                <button class="secondary-btn" onclick={cancelEdit}> Cancel </button>
-                <button
-                  class="primary-btn"
-                  onclick={saveAction}
-                  disabled={!editForm.name || !editForm.command}
-                >
-                  <Save size={14} />
-                  Save
-                </button>
-              </div>
-            </div>
-          {:else}
-            <!-- Actions List -->
-            <div class="actions-header">
-              <button class="secondary-btn" onclick={detectActions} disabled={detecting}>
-                {#if detecting}
-                  <Loader2 size={14} class="spinner" />
-                {:else}
-                  <Zap size={14} />
-                {/if}
-                Detect Actions
-              </button>
-              <button class="primary-btn" onclick={startAddAction}>
-                <Plus size={14} />
-                Add Action
-              </button>
-            </div>
-
-            {#if loadingActions}
-              <div class="loading-state">
-                <Loader2 size={24} />
-                <span>Loading...</span>
-              </div>
-            {:else if actions.length === 0}
-              <div class="empty-state">
-                <Play size={32} />
-                <p>No actions configured</p>
-                <p class="empty-hint">
-                  Click "Detect Actions" to find common scripts, or add one manually
-                </p>
-              </div>
-            {:else}
-              <div class="actions-list">
-                {#each Object.entries(groupedActions) as [type, typeActions]}
-                  {#if typeActions.length > 0}
-                    <div class="action-group">
-                      <div
-                        class="group-header"
-                        style="color: {getActionTypeColor(type as ActionType)}"
-                      >
-                        <svelte:component this={getActionIcon(type as ActionType)} size={14} />
-                        {type.charAt(0).toUpperCase() + type.slice(1)}
-                      </div>
-                      {#each typeActions as action (action.id)}
-                        <div class="action-item">
-                          <div class="action-info">
-                            <div class="action-name">{action.name}</div>
-                            <code class="action-command">{action.command}</code>
-                            {#if action.autoCommit}
-                              <div class="action-badge">Commits to git</div>
-                            {/if}
-                          </div>
-                          <div class="action-controls">
-                            <button
-                              class="icon-btn"
-                              onclick={() => startEditAction(action)}
-                              title="Edit"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              class="icon-btn danger"
-                              onclick={() => deleteAction(action.id)}
-                              title="Delete"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      {/each}
-                    </div>
-                  {/if}
-                {/each}
+          <div class="form-group">
+            <label for="action-type">Type</label>
+            <select id="action-type" bind:value={editForm.actionType}>
+              <option value="run">Run - Manual execution</option>
+              <option value="format">Format - Auto-fix issues</option>
+              <option value="check">Check - Validation only</option>
+              <option value="test">Test - Run tests</option>
+              <option value="cleanUp">Clean Up - Remove build artifacts</option>
+              <option value="prerun">Prerun - Auto-run on branch creation</option>
+            </select>
+            {#if editForm.actionType === 'prerun'}
+              <div class="type-hint">
+                Prerun actions will run automatically when a new worktree is created
               </div>
             {/if}
-          {/if}
+          </div>
+
+          <div class="form-group checkbox-group">
+            <label>
+              <input type="checkbox" bind:checked={editForm.autoCommit} />
+              Auto-commit changes after successful execution
+            </label>
+          </div>
         </div>
-      {/if}
+
+        <footer class="edit-modal-footer">
+          <button class="secondary-btn" onclick={cancelEdit}> Cancel </button>
+          <button
+            class="primary-btn"
+            onclick={saveAction}
+            disabled={!editForm.name || !editForm.command}
+          >
+            <Save size={14} />
+            Save
+          </button>
+        </footer>
+      </div>
     </div>
-  </div>
+  {/if}
 </div>
 
 <style>
@@ -545,112 +467,13 @@
   .modal-body {
     flex: 1;
     overflow-y: auto;
-    padding: 0;
-  }
-
-  .tabs {
-    display: flex;
-    gap: 4px;
-    padding: 12px 16px 0;
-    border-bottom: 1px solid var(--border-color);
-  }
-
-  .tab {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 16px;
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-    font-size: 13px;
-    border-radius: 6px 6px 0 0;
-    transition: all 0.15s;
-    position: relative;
-  }
-
-  .tab:hover {
-    background: var(--bg-hover);
-    color: var(--text-primary);
-  }
-
-  .tab.active {
-    color: var(--text-primary);
-    background: var(--bg-secondary);
-  }
-
-  .tab.active::after {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--color-primary);
-  }
-
-  .tab-content {
     padding: 20px;
   }
 
-  .setting-row {
+  .content-wrapper {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 20px;
-    padding: 16px 0;
-  }
-
-  .setting-row + .setting-row {
-    border-top: 1px solid var(--border-color);
-  }
-
-  .setting-info {
-    flex: 1;
-  }
-
-  .setting-label {
-    font-size: 14px;
-    font-weight: 500;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-  }
-
-  .setting-value {
-    font-size: 13px;
-    color: var(--text-secondary);
-    font-family: var(--font-mono);
-  }
-
-  .setting-description {
-    font-size: 12px;
-    color: var(--text-tertiary);
-    margin-top: 4px;
-  }
-
-  .subpath-input {
-    flex: 1;
-    max-width: 300px;
-    padding: 8px 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    color: var(--text-primary);
-    font-size: 13px;
-    font-family: var(--font-mono);
-  }
-
-  .subpath-input:focus {
-    outline: none;
-    border-color: var(--color-primary);
-  }
-
-  .button-row {
-    display: flex;
-    gap: 8px;
-    justify-content: flex-end;
-    margin-top: 16px;
+    flex-direction: column;
+    gap: 16px;
   }
 
   .primary-btn,
@@ -661,6 +484,7 @@
     padding: 8px 16px;
     border-radius: 6px;
     font-size: 13px;
+    font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
     border: 1px solid transparent;
@@ -668,12 +492,15 @@
 
   .primary-btn {
     background: var(--color-primary);
-    color: white;
+    color: var(--bg-primary);
     border: none;
+    font-weight: 600;
   }
 
   .primary-btn:hover:not(:disabled) {
     background: var(--color-primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   }
 
   .primary-btn:disabled {
@@ -684,11 +511,12 @@
   .secondary-btn {
     background: var(--bg-secondary);
     color: var(--text-primary);
-    border-color: var(--border-color);
+    border: 1px solid var(--border-color);
   }
 
   .secondary-btn:hover:not(:disabled) {
     background: var(--bg-hover);
+    border-color: var(--text-secondary);
   }
 
   .secondary-btn:disabled {
@@ -696,16 +524,10 @@
     cursor: not-allowed;
   }
 
-  /* Actions Tab */
-  .actions-tab {
-    min-height: 400px;
-  }
-
   .actions-header {
     display: flex;
     gap: 8px;
     justify-content: flex-end;
-    margin-bottom: 16px;
   }
 
   .loading-state,
@@ -831,17 +653,60 @@
     color: white;
   }
 
-  /* Edit Form */
-  .edit-form {
-    max-width: 500px;
-    margin: 0 auto;
+  /* Edit Modal */
+  .edit-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1100;
+    backdrop-filter: blur(3px);
   }
 
-  .edit-form h3 {
-    margin: 0 0 20px;
+  .edit-modal {
+    background: var(--bg-primary);
+    border-radius: 8px;
+    width: min(500px, 90vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border-color);
+  }
+
+  .edit-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+  }
+
+  .edit-modal-header h3 {
+    margin: 0;
     font-size: 16px;
     font-weight: 600;
     color: var(--text-primary);
+  }
+
+  .edit-modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+  }
+
+  .edit-modal-footer {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+    padding: 16px 20px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
   }
 
   .form-group {
@@ -859,18 +724,24 @@
   .form-group input[type='text'],
   .form-group select {
     width: 100%;
-    padding: 8px 12px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
+    padding: 9px 12px;
+    background: var(--bg-primary);
+    border: 1.5px solid var(--border-color);
     border-radius: 6px;
     color: var(--text-primary);
     font-size: 13px;
+    transition: all 0.15s;
   }
 
   .form-group input[type='text']:focus,
   .form-group select:focus {
     outline: none;
     border-color: var(--color-primary);
+    box-shadow: 0 0 0 3px rgba(var(--color-primary-rgb, 59, 130, 246), 0.1);
+  }
+
+  .form-group input[type='text']::placeholder {
+    color: var(--text-tertiary);
   }
 
   .checkbox-group label {
@@ -878,31 +749,28 @@
     align-items: center;
     gap: 8px;
     cursor: pointer;
+    font-weight: 400;
   }
 
   .checkbox-group input[type='checkbox'] {
     cursor: pointer;
+    width: 16px;
+    height: 16px;
   }
 
   .type-hint {
     font-size: 12px;
-    color: var(--text-tertiary);
-    margin-top: 6px;
-    padding: 8px;
+    color: var(--text-secondary);
+    margin-top: 8px;
+    padding: 10px 12px;
     background: var(--bg-secondary);
-    border-radius: 4px;
+    border-radius: 6px;
     border-left: 3px solid var(--color-warning);
   }
 
-  .loading-state :global(svg) {
-    animation: spin 1s linear infinite;
-  }
-
-  .actions-header :global(.spinner) {
-    animation: spin 1s linear infinite;
-  }
-
-  .button-row :global(.spinner) {
+  .loading-state :global(svg),
+  .actions-header :global(.spinner),
+  .primary-btn :global(.spinner) {
     animation: spin 1s linear infinite;
   }
 
