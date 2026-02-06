@@ -189,6 +189,7 @@
   let showNewDropdown = $state(false);
   let showMoreMenu = $state(false);
   let expandedSubmenu = $state<ActionType | null>(null);
+  let submenuCloseTimeout = $state<ReturnType<typeof setTimeout> | null>(null);
 
   // Open in... button state
   let openerApps = $state<OpenerApp[]>([]);
@@ -267,6 +268,22 @@
       case 'run':
         return 'Run';
     }
+  }
+
+  // Submenu handlers with delay to prevent flashing
+  function handleSubmenuEnter(type: ActionType) {
+    if (submenuCloseTimeout) {
+      clearTimeout(submenuCloseTimeout);
+      submenuCloseTimeout = null;
+    }
+    expandedSubmenu = type;
+  }
+
+  function handleSubmenuLeave() {
+    submenuCloseTimeout = setTimeout(() => {
+      expandedSubmenu = null;
+      submenuCloseTimeout = null;
+    }, 100);
   }
 
   type RunningAction = {
@@ -783,8 +800,8 @@
                     <div class="submenu-container">
                       <button
                         class="more-menu-item submenu-trigger"
-                        onmouseenter={() => (expandedSubmenu = type as ActionType)}
-                        onmouseleave={() => (expandedSubmenu = null)}
+                        onmouseenter={() => handleSubmenuEnter(type as ActionType)}
+                        onmouseleave={handleSubmenuLeave}
                       >
                         <svelte:component this={getActionIcon(type as ActionType)} size={14} />
                         {getActionTypeLabel(type as ActionType)}
@@ -793,8 +810,8 @@
                       {#if expandedSubmenu === type}
                         <div
                           class="submenu"
-                          onmouseenter={() => (expandedSubmenu = type as ActionType)}
-                          onmouseleave={() => (expandedSubmenu = null)}
+                          onmouseenter={() => handleSubmenuEnter(type as ActionType)}
+                          onmouseleave={handleSubmenuLeave}
                         >
                           {#each actions as action (action.id)}
                             <button class="more-menu-item" onclick={() => handleRunAction(action)}>
@@ -1591,7 +1608,7 @@
     position: absolute;
     left: 100%;
     top: 0;
-    margin-left: 4px;
+    margin-left: 2px;
     background-color: var(--bg-elevated);
     border: 1px solid var(--border-muted);
     border-radius: 8px;
