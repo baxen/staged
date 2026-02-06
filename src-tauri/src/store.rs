@@ -1039,7 +1039,7 @@ impl Store {
         {
             // Find all projects with no name that were auto-created
             let mut stmt = conn.prepare(
-                "SELECT id, repo_path FROM git_projects WHERE name = '' AND subpath IS NULL"
+                "SELECT id, repo_path FROM git_projects WHERE name = '' AND subpath IS NULL",
             )?;
             let empty_projects: Vec<(String, String)> = stmt
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?

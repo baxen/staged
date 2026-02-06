@@ -131,8 +131,7 @@ fn collect_file_list(dir: &Path) -> Result<String> {
                 let name_str = name.to_string_lossy();
 
                 // Skip hidden files and common directories
-                if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target"
-                {
+                if name_str.starts_with('.') || name_str == "node_modules" || name_str == "target" {
                     continue;
                 }
 
