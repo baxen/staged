@@ -581,12 +581,9 @@ async fn update_pull_request(
     body: Option<String>,
 ) -> Result<(), String> {
     let path = PathBuf::from(repo_path);
-    tokio::task::spawn_blocking(move || {
-        git::update_pull_request(&path, pr_number, title.as_deref(), body.as_deref())
-            .map_err(|e| e.to_string())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    git::update_pull_request(&path, pr_number, title.as_deref(), body.as_deref())
+        .await
+        .map_err(|e| e.to_string())
 }
 
 /// Generated PR description from AI.

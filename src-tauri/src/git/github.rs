@@ -948,31 +948,122 @@ pub fn create_pull_request(
 }
 
 /// Update an existing pull request's title and/or body.
-pub fn update_pull_request(
+pub async fn update_pull_request(
     repo: &Path,
     pr_number: u64,
     title: Option<&str>,
     body: Option<&str>,
 ) -> Result<(), GitError> {
-    let pr_num_str = pr_number.to_string();
-    let mut args = vec!["pr", "edit", &pr_num_str];
-
-    if let Some(t) = title {
-        args.push("--title");
-        args.push(t);
-    }
-
-    if let Some(b) = body {
-        args.push("--body");
-        args.push(b);
-    }
-
-    if args.len() == 3 {
-        // No updates specified
+    if title.is_none() && body.is_none() {
         return Ok(());
     }
 
-    run_gh(repo, &args)?;
+    let token = get_github_token()?;
+    let (owner, repo_name) = get_github_repo(repo)?;
+
+    // Use GraphQL API directly to avoid the deprecated projectCards field
+    // that gh pr edit queries by default
+    let client = reqwest::Client::new();
+
+    // Build the mutation
+    let mut updates = Vec::new();
+    if let Some(t) = title {
+        updates.push(format!("title: \"{}\"", t.replace('"', "\\\"")));
+    }
+    if let Some(b) = body {
+        updates.push(format!("body: \"{}\"", b.replace('"', "\\\"")));
+    }
+
+    // First, get the PR's node ID
+    let pr_query = format!(
+        r#"query {{
+            repository(owner: "{}", name: "{}") {{
+                pullRequest(number: {}) {{
+                    id
+                }}
+            }}
+        }}"#,
+        owner, repo_name, pr_number
+    );
+
+    #[derive(Deserialize)]
+    struct PrIdResponse {
+        data: PrIdData,
+    }
+
+    #[derive(Deserialize)]
+    struct PrIdData {
+        repository: PrIdRepo,
+    }
+
+    #[derive(Deserialize)]
+    struct PrIdRepo {
+        #[serde(rename = "pullRequest")]
+        pull_request: PrIdNode,
+    }
+
+    #[derive(Deserialize)]
+    struct PrIdNode {
+        id: String,
+    }
+
+    let response = client
+        .post("https://api.github.com/graphql")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("User-Agent", "staged-app")
+        .json(&serde_json::json!({ "query": pr_query }))
+        .send()
+        .await
+        .map_err(|e| GitError::CommandFailed(format!("Failed to query PR: {}", e)))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(GitError::CommandFailed(format!(
+            "Failed to get PR node ID: {}",
+            error_body
+        )));
+    }
+
+    let pr_id_response: PrIdResponse = response
+        .json()
+        .await
+        .map_err(|e| GitError::CommandFailed(format!("Failed to parse PR ID: {}", e)))?;
+
+    let pr_id = pr_id_response.data.repository.pull_request.id;
+
+    // Now update the PR
+    let mutation = format!(
+        r#"mutation {{
+            updatePullRequest(input: {{
+                pullRequestId: "{}"
+                {}
+            }}) {{
+                pullRequest {{
+                    id
+                }}
+            }}
+        }}"#,
+        pr_id,
+        updates.join("\n")
+    );
+
+    let response = client
+        .post("https://api.github.com/graphql")
+        .header("Authorization", format!("Bearer {}", token))
+        .header("User-Agent", "staged-app")
+        .json(&serde_json::json!({ "query": mutation }))
+        .send()
+        .await
+        .map_err(|e| GitError::CommandFailed(format!("Failed to update PR: {}", e)))?;
+
+    if !response.status().is_success() {
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(GitError::CommandFailed(format!(
+            "Failed to update PR: {}",
+            error_body
+        )));
+    }
+
     Ok(())
 }
 
